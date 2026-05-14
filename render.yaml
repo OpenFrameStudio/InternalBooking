@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: internal-booking
+    runtime: node
+    plan: starter
+    region: singapore
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/status
+    domains:
+      - internalbooking.openframe.studio
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: LARK_TIMEZONE
+        value: Australia/Sydney
+      - key: LARK_API_BASE
+        value: https://open.larksuite.com/open-apis
+      - key: LARK_APP_ID
+        sync: false
+      - key: LARK_APP_SECRET
+        sync: false
+      - key: LARK_CALENDAR_ID
+        sync: false
+    disk:
+      name: internal-booking-data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1
