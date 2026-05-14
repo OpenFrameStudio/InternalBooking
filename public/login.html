@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Log in · Lark Booking Desk</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="login-body">
+    <main class="login-shell">
+      <section class="login-panel" aria-label="Admin login">
+        <p class="eyebrow">OpenFrame Studio</p>
+        <h1>Internal booking login</h1>
+
+        <form class="booking-form" id="loginForm">
+          <label>
+            <span>Login</span>
+            <input name="username" autocomplete="username" autofocus required />
+          </label>
+          <label>
+            <span>Password</span>
+            <input name="password" type="password" autocomplete="current-password" required />
+          </label>
+
+          <div class="actions">
+            <button class="primary-button" type="submit">Log in</button>
+            <p id="loginMessage" role="status"></p>
+          </div>
+        </form>
+      </section>
+    </main>
+
+    <script>
+      const loginForm = document.querySelector("#loginForm");
+      const loginMessage = document.querySelector("#loginMessage");
+
+      loginForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+
+        const submitButton = loginForm.querySelector("button[type='submit']");
+        const data = Object.fromEntries(new FormData(loginForm).entries());
+
+        submitButton.disabled = true;
+        submitButton.textContent = "Logging in";
+        loginMessage.textContent = "";
+        loginMessage.className = "";
+
+        try {
+          const response = await fetch("/api/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(data)
+          });
+          const result = await response.json();
+
+          if (!response.ok) {
+            loginMessage.textContent = (result.errors || ["Could not log in."]).join(" ");
+            loginMessage.className = "error";
+            return;
+          }
+
+          window.location.href = "/";
+        } catch {
+          loginMessage.textContent = "Could not reach the booking app.";
+          loginMessage.className = "error";
+        } finally {
+          submitButton.disabled = false;
+          submitButton.textContent = "Log in";
+        }
+      });
+    </script>
+  </body>
+</html>
