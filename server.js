@@ -22,8 +22,15 @@ const larkConfig = {
   timezone: process.env.LARK_TIMEZONE || "Australia/Sydney",
   apiBase: (process.env.LARK_API_BASE || "https://open.larksuite.com/open-apis").replace(/\/$/, "")
 };
+const authConfig = {
+  username: process.env.ADMIN_USERNAME || "OpenFrame",
+  password: process.env.ADMIN_PASSWORD || "Studio"
+};
 
 let tenantTokenCache = null;
+const sessions = new Map();
+const sessionCookieName = "internalbooking_session";
+const sessionMaxAgeSeconds = 7 * 24 * 60 * 60;
 
 const contentTypes = {
   ".html": "text/html; charset=utf-8",
@@ -68,11 +75,12 @@ function loadLocalEnv() {
   }
 }
 
-function sendJson(res, status, payload) {
+function sendJson(res, status, payload, headers = {}) {
   const body = JSON.stringify(payload);
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
-    "Content-Length": Buffer.byteLength(body)
+    "Content-Length": Buffer.byteLength(body),
+    ...headers
   });
   res.end(body);
 }
@@ -80,6 +88,102 @@ function sendJson(res, status, payload) {
 function sendNoContent(res) {
   res.writeHead(204);
   res.end();
+}
+
+function redirect(res, location) {
+  res.writeHead(302, {
+    Location: location,
+    "Cache-Control": "no-store"
+  });
+  res.end();
+}
+
+function parseCookies(header = "") {
+  const cookies = {};
+
+  for (const part of header.split(";")) {
+    const [rawKey, ...rawValue] = part.trim().split("=");
+    if (!rawKey) {
+      continue;
+    }
+
+    try {
+      cookies[rawKey] = decodeURIComponent(rawValue.join("="));
+    } catch {
+      cookies[rawKey] = rawValue.join("=");
+    }
+  }
+
+  return cookies;
+}
+
+function isSecureRequest(req) {
+  return req.headers["x-forwarded-proto"] === "https" || Boolean(req.socket.encrypted);
+}
+
+function buildSessionCookie(req, token, maxAgeSeconds = sessionMaxAgeSeconds) {
+  const parts = [
+    `${sessionCookieName}=${encodeURIComponent(token)}`,
+    "HttpOnly",
+    "Path=/",
+    "SameSite=Lax",
+    `Max-Age=${maxAgeSeconds}`
+  ];
+
+  if (isSecureRequest(req)) {
+    parts.push("Secure");
+  }
+
+  return parts.join("; ");
+}
+
+function clearSessionCookie(req) {
+  return buildSessionCookie(req, "", 0);
+}
+
+function getSessionToken(req) {
+  return parseCookies(req.headers.cookie || "")[sessionCookieName] || "";
+}
+
+function cleanupExpiredSessions() {
+  const now = Date.now();
+  for (const [token, session] of sessions.entries()) {
+    if (session.expiresAt <= now) {
+      sessions.delete(token);
+    }
+  }
+}
+
+function createSession() {
+  cleanupExpiredSessions();
+  const token = crypto.randomBytes(32).toString("base64url");
+  sessions.set(token, { expiresAt: Date.now() + sessionMaxAgeSeconds * 1000 });
+  return token;
+}
+
+function isAuthenticated(req) {
+  const token = getSessionToken(req);
+  const session = sessions.get(token);
+  if (!session) {
+    return false;
+  }
+
+  if (session.expiresAt <= Date.now()) {
+    sessions.delete(token);
+    return false;
+  }
+
+  return true;
+}
+
+function safeEquals(left, right) {
+  const leftBuffer = Buffer.from(String(left || ""));
+  const rightBuffer = Buffer.from(String(right || ""));
+  return leftBuffer.length === rightBuffer.length && crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function credentialsAreValid(input) {
+  return safeEquals(input.username, authConfig.username) && safeEquals(input.password, authConfig.password);
 }
 
 function readBody(req) {
@@ -470,12 +574,44 @@ async function createLarkAttendees(booking) {
 }
 
 async function handleApi(req, res, url) {
+  if (req.method === "GET" && url.pathname === "/api/session") {
+    sendJson(res, 200, { authenticated: isAuthenticated(req) });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/login") {
+    const input = await readBody(req);
+    if (!credentialsAreValid(input)) {
+      sendJson(res, 401, { errors: ["Login details did not match."] });
+      return;
+    }
+
+    const token = createSession();
+    sendJson(res, 200, { ok: true }, { "Set-Cookie": buildSessionCookie(req, token) });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/logout") {
+    const token = getSessionToken(req);
+    if (token) {
+      sessions.delete(token);
+    }
+
+    sendJson(res, 200, { ok: true }, { "Set-Cookie": clearSessionCookie(req) });
+    return;
+  }
+
   if (req.method === "GET" && url.pathname === "/api/status") {
     sendJson(res, 200, {
       larkConfigured: isLarkConfigured(),
       calendarId: larkConfig.calendarId,
       timezone: larkConfig.timezone
     });
+    return;
+  }
+
+  if (!isAuthenticated(req)) {
+    sendJson(res, 401, { errors: ["Log in first."] });
     return;
   }
 
@@ -649,7 +785,8 @@ async function handleApi(req, res, url) {
 }
 
 async function serveStatic(req, res, url) {
-  const requestedPath = decodeURIComponent(url.pathname === "/" ? "/index.html" : url.pathname);
+  const routePath = url.pathname === "/login" ? "/login.html" : url.pathname;
+  const requestedPath = decodeURIComponent(routePath === "/" ? "/index.html" : routePath);
   let filePath = path.normalize(path.join(publicDir, requestedPath));
 
   if (!filePath.startsWith(publicDir)) {
@@ -691,6 +828,19 @@ const server = http.createServer(async (req, res) => {
 
     if (url.pathname.startsWith("/api/")) {
       await handleApi(req, res, url);
+      return;
+    }
+
+    const isLoginPage = url.pathname === "/login" || url.pathname === "/login.html";
+    const isPublicAsset = isLoginPage || url.pathname === "/styles.css" || url.pathname === "/favicon.ico";
+
+    if (!isAuthenticated(req) && !isPublicAsset) {
+      redirect(res, "/login");
+      return;
+    }
+
+    if (isAuthenticated(req) && isLoginPage) {
+      redirect(res, "/");
       return;
     }
 
