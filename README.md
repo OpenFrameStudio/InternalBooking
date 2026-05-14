@@ -20,6 +20,13 @@ node server.js
 
 Open `http://127.0.0.1:4180`.
 
+Default login:
+
+- Login: `OpenFrame`
+- Password: `Studio`
+
+You can override these with `ADMIN_USERNAME` and `ADMIN_PASSWORD`.
+
 ## Deploy to internalbooking.openframe.studio
 
 This repo includes `render.yaml` for deploying the app as a Render web service.
@@ -33,6 +40,8 @@ restarts or redeploys the service.
    - `LARK_APP_ID`
    - `LARK_APP_SECRET`
    - `LARK_CALENDAR_ID`
+   - optional: `ADMIN_USERNAME`
+   - optional: `ADMIN_PASSWORD`
 4. After the service is live, open its Custom Domains settings and verify
    `internalbooking.openframe.studio`.
 5. In your DNS provider, add the DNS record Render gives you for the
