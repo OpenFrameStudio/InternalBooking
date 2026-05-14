@@ -14,7 +14,7 @@ const clientsFile = path.join(__dirname, "data", "clients.json");
 loadLocalEnv();
 
 const port = Number(process.env.PORT || 4180);
-const host = process.env.HOST || "127.0.0.1";
+const host = process.env.HOST || (process.env.PORT ? "0.0.0.0" : "127.0.0.1");
 const larkConfig = {
   appId: process.env.LARK_APP_ID || "",
   appSecret: process.env.LARK_APP_SECRET || "",
