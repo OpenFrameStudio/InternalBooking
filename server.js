@@ -678,7 +678,10 @@ async function serveStatic(req, res, url) {
     }
   });
 
-  res.writeHead(200, { "Content-Type": contentTypes[extension] || "application/octet-stream" });
+  res.writeHead(200, {
+    "Content-Type": contentTypes[extension] || "application/octet-stream",
+    "Cache-Control": "no-store"
+  });
   stream.pipe(res);
 }
 
