@@ -61,6 +61,7 @@ let syncedClientEmail = "";
 let isRestoringBookingDraft = false;
 
 const bookingDraftKey = "openframe.bookingDraft.v2";
+const clientsCacheKey = "openframe.clients.v1";
 
 function readStoredJson(key) {
   try {
@@ -143,6 +144,46 @@ function getRecommendedDurationMinutes(services = getSelectedServices()) {
 
 function updateDurationForServices() {
   durationInput.value = String(getRecommendedDurationMinutes());
+}
+
+function getCachedClients() {
+  const cachedClients = readStoredJson(clientsCacheKey);
+  return Array.isArray(cachedClients) ? cachedClients.filter((client) => client?.name) : [];
+}
+
+function mergeClientLists(...clientLists) {
+  const merged = new Map();
+
+  for (const list of clientLists) {
+    for (const client of list || []) {
+      const name = String(client?.name || "").trim();
+      if (!name) {
+        continue;
+      }
+
+      const key = name.toLowerCase();
+      const current = merged.get(key);
+      const next = {
+        id: String(client.id || current?.id || ""),
+        name,
+        email: String(client.email || ""),
+        agentName: String(client.agentName || ""),
+        agentPhone: String(client.agentPhone || ""),
+        createdAt: client.createdAt || current?.createdAt || new Date().toISOString(),
+        updatedAt: client.updatedAt || current?.updatedAt || new Date().toISOString()
+      };
+
+      if (!current || new Date(next.updatedAt).getTime() >= new Date(current.updatedAt).getTime()) {
+        merged.set(key, next);
+      }
+    }
+  }
+
+  return [...merged.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function storeClientCache(nextClients) {
+  writeStoredJson(clientsCacheKey, nextClients);
 }
 
 function getBookingDraft() {
@@ -350,6 +391,7 @@ function applySelectedClient() {
   agentNameInput.value = client.agentName || "";
   agentPhoneInput.value = client.agentPhone || "";
   syncClientEmailToGuests();
+  saveBookingDraft();
 }
 
 function resetClientForm() {
@@ -509,9 +551,17 @@ async function loadBookings() {
 }
 
 async function loadClients() {
-  const response = await fetch("/api/clients");
-  const data = await response.json();
-  clients = data.clients || [];
+  const cachedClients = getCachedClients();
+
+  try {
+    const response = await fetch("/api/clients");
+    const data = await response.json();
+    clients = mergeClientLists(cachedClients, data.clients || []);
+  } catch {
+    clients = cachedClients;
+  }
+
+  storeClientCache(clients);
   renderClientOptions();
   renderClientList();
 }
@@ -550,7 +600,8 @@ async function saveDirectoryClient(event) {
       return;
     }
 
-    clients = result.clients || clients;
+    clients = mergeClientLists(getCachedClients(), result.clients || clients, [result.client]);
+    storeClientCache(clients);
     renderClientOptions(result.client.id);
     renderClientList();
     directoryClientId.value = result.client.id;
