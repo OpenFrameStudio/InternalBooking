@@ -67,7 +67,9 @@ button {
   align-items: center;
   justify-content: center;
   min-height: 36px;
+  border: 0;
   border-radius: 6px;
+  background: transparent;
   color: var(--muted);
   font-weight: 900;
   padding: 0 14px;
@@ -77,6 +79,38 @@ button {
 .nav-link.active {
   background: var(--ink);
   color: #fff;
+}
+
+.nav-action {
+  color: var(--red);
+}
+
+.login-body {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+}
+
+.login-shell {
+  width: min(100% - 32px, 460px);
+}
+
+.login-panel {
+  border: 1px solid rgba(219, 227, 234, 0.94);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: var(--shadow);
+  padding: 34px;
+}
+
+.login-panel .eyebrow {
+  color: var(--mint-dark);
+}
+
+.login-panel h1 {
+  margin: 0 0 24px;
+  font-size: clamp(2rem, 7vw, 3rem);
+  line-height: 1.02;
 }
 
 .workspace {
@@ -456,13 +490,22 @@ textarea:focus {
   font-weight: 700;
 }
 
+#loginMessage {
+  min-height: 22px;
+  margin: 0;
+  color: var(--muted);
+  font-weight: 700;
+}
+
 #formMessage.error,
-#clientMessage.error {
+#clientMessage.error,
+#loginMessage.error {
   color: var(--red);
 }
 
 #formMessage.success,
-#clientMessage.success {
+#clientMessage.success,
+#loginMessage.success {
   color: var(--mint-dark);
 }
 
@@ -689,7 +732,7 @@ textarea:focus {
 
   .top-nav {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     width: 100%;
   }
 
