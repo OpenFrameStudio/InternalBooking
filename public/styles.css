@@ -177,7 +177,8 @@ button {
 .surface-header,
 .section-header,
 .actions,
-.booking-title-row {
+.booking-title-row,
+.booking-actions {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -595,7 +596,7 @@ textarea:focus {
 
 .booking-item {
   display: grid;
-  grid-template-columns: 74px minmax(0, 1fr) 40px;
+  grid-template-columns: 74px minmax(0, 1fr) auto;
   gap: 16px;
   align-items: center;
   padding: 14px;
@@ -641,6 +642,14 @@ textarea:focus {
 
 .booking-main {
   min-width: 0;
+}
+
+.booking-actions {
+  justify-content: flex-end;
+}
+
+.booking-actions .ghost-button {
+  min-height: 36px;
 }
 
 .client-main {
@@ -764,6 +773,7 @@ textarea:focus {
   .surface-header,
   .section-header,
   .actions,
+  .booking-actions,
   .client-panel-header,
   .client-save-row,
   .invitation-summary {
@@ -792,6 +802,10 @@ textarea:focus {
 
   .booking-item {
     grid-template-columns: 58px minmax(0, 1fr);
+  }
+
+  .booking-actions {
+    grid-column: 1 / -1;
   }
 
   .client-item {
