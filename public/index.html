@@ -45,8 +45,8 @@
           <section class="booking-surface">
             <div class="surface-header">
               <div>
-                <p class="eyebrow">New booking</p>
-                <h2>Create a property booking</h2>
+                <p class="eyebrow" id="bookingModeEyebrow">New booking</p>
+                <h2 id="bookingModeTitle">Create a property booking</h2>
               </div>
               <button class="ghost-button" id="refreshButton" type="button" title="Refresh bookings">
                 Refresh
@@ -166,8 +166,9 @@
               </label>
 
               <div class="actions">
-                <button class="primary-button" type="submit">Create booking</button>
+                <button class="primary-button" id="bookingSubmitButton" type="submit">Create booking</button>
                 <button class="ghost-button" id="previewLarkButton" type="button">Preview Lark event</button>
+                <button class="ghost-button" id="cancelEditButton" type="button" hidden>Cancel edit</button>
                 <p id="formMessage" role="status"></p>
               </div>
             </form>
@@ -284,7 +285,10 @@
           <p class="booking-contact"></p>
           <p class="booking-notes"></p>
         </div>
-        <button class="icon-button cancel-button" type="button" title="Cancel booking" aria-label="Cancel booking">×</button>
+        <div class="booking-actions">
+          <button class="ghost-button edit-booking-button" type="button">Edit</button>
+          <button class="icon-button cancel-button" type="button" title="Cancel booking" aria-label="Cancel booking">×</button>
+        </div>
       </article>
     </template>
 
@@ -299,6 +303,6 @@
       </article>
     </template>
 
-    <script src="/app.js?v=random-client-examples" type="module"></script>
+    <script src="/app.js?v=edit-bookings" type="module"></script>
   </body>
 </html>
