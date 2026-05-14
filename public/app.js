@@ -58,6 +58,33 @@ const dayFormatter = new Intl.DateTimeFormat(undefined, { day: "2-digit" });
 let bookings = [];
 let clients = [];
 let syncedClientEmail = "";
+let isRestoringBookingDraft = false;
+
+const bookingDraftKey = "openframe.bookingDraft.v2";
+
+function readStoredJson(key) {
+  try {
+    return JSON.parse(localStorage.getItem(key) || "null");
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredJson(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Draft saving is a convenience; booking creation should still work without it.
+  }
+}
+
+function removeStoredJson(key) {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // Ignore browsers that block local storage.
+  }
+}
 
 function parseEmailList(value) {
   const emailMatches = String(value || "").match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi);
@@ -116,6 +143,69 @@ function getRecommendedDurationMinutes(services = getSelectedServices()) {
 
 function updateDurationForServices() {
   durationInput.value = String(getRecommendedDurationMinutes());
+}
+
+function getBookingDraft() {
+  const data = Object.fromEntries(new FormData(bookingForm).entries());
+  return {
+    propertyAddress: data.propertyAddress || "",
+    selectedClientId: clientSelect.value,
+    clientName: clientNameInput.value,
+    clientEmail: clientEmailInput.value,
+    agentName: agentNameInput.value,
+    agentPhone: agentPhoneInput.value,
+    services: getSelectedServices().map((service) => service.name),
+    date: dateInput.value,
+    time: timeInput.value,
+    durationMinutes: durationInput.value,
+    photographerName: data.photographerName || "",
+    photographerPhone: data.photographerPhone || "",
+    guestEmails: guestEmailsInput.value,
+    notes: data.notes || ""
+  };
+}
+
+function saveBookingDraft() {
+  if (isRestoringBookingDraft) {
+    return;
+  }
+
+  writeStoredJson(bookingDraftKey, getBookingDraft());
+}
+
+function restoreBookingDraft() {
+  const draft = readStoredJson(bookingDraftKey);
+  if (!draft || typeof draft !== "object") {
+    return false;
+  }
+
+  isRestoringBookingDraft = true;
+
+  bookingForm.elements.propertyAddress.value = draft.propertyAddress || "";
+  clientSelect.value = draft.selectedClientId || "";
+  clientNameInput.value = draft.clientName || "";
+  clientEmailInput.value = draft.clientEmail || "";
+  agentNameInput.value = draft.agentName || "";
+  agentPhoneInput.value = draft.agentPhone || "";
+  dateInput.value = draft.date || dateInput.value;
+  timeInput.value = draft.time || timeInput.value;
+  durationInput.value = draft.durationMinutes || durationInput.value;
+  bookingForm.elements.photographerName.value = draft.photographerName || "Barry";
+  bookingForm.elements.photographerPhone.value = draft.photographerPhone || "0403 007 853";
+  guestEmailsInput.value = draft.guestEmails || "";
+  bookingForm.elements.notes.value = draft.notes || "";
+
+  if (Array.isArray(draft.services) && draft.services.length) {
+    const selectedServices = new Set(draft.services);
+    for (const input of serviceInputs) {
+      input.checked = selectedServices.has(input.value);
+    }
+  }
+
+  syncedClientEmail = isEmailish(clientEmailInput.value.trim()) ? clientEmailInput.value.trim() : "";
+  updateInvitationSummary();
+  isRestoringBookingDraft = false;
+  return true;
 }
 
 function getBookingServiceLabel(booking) {
@@ -503,8 +593,10 @@ async function submitBooking(event) {
     bookingForm.reset();
     clientSelect.value = "";
     syncedClientEmail = "";
+    removeStoredJson(bookingDraftKey);
     setInitialDateTime();
     updateDurationForServices();
+    updateInvitationSummary();
     setMessage(
       result.booking.larkStatus === "synced"
         ? "Booking created and sent to Lark."
@@ -595,6 +687,8 @@ async function testLark() {
 }
 
 bookingForm.addEventListener("submit", submitBooking);
+bookingForm.addEventListener("input", saveBookingDraft);
+bookingForm.addEventListener("change", saveBookingDraft);
 clientForm.addEventListener("submit", saveDirectoryClient);
 refreshButton.addEventListener("click", loadBookings);
 testLarkButton.addEventListener("click", testLark);
@@ -606,7 +700,10 @@ clientEmailInput.addEventListener("blur", syncClientEmailToGuests);
 guestEmailsInput.addEventListener("input", updateInvitationSummary);
 newClientButton.addEventListener("click", resetClientForm);
 for (const input of serviceInputs) {
-  input.addEventListener("change", updateDurationForServices);
+  input.addEventListener("change", () => {
+    updateDurationForServices();
+    saveBookingDraft();
+  });
 }
 
 for (const link of navLinks) {
@@ -623,5 +720,6 @@ window.addEventListener("popstate", () => {
 setInitialDateTime();
 updateDurationForServices();
 await Promise.all([loadStatus(), loadClients(), loadBookings()]);
+restoreBookingDraft();
 updateInvitationSummary();
 setRoute(window.location.pathname, false);
