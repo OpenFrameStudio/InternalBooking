@@ -260,7 +260,8 @@ button {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.client-panel {
+.client-panel,
+.photographer-panel {
   display: grid;
   gap: 14px;
   border: 1px solid rgba(47, 158, 126, 0.26);
@@ -269,14 +270,16 @@ button {
   padding: 16px;
 }
 
-.client-panel-header {
+.client-panel-header,
+.photographer-panel-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
 
-.client-panel-header span {
+.client-panel-header span,
+.photographer-panel-header span {
   color: var(--mint-dark);
   font-size: 0.86rem;
   font-weight: 900;
@@ -294,6 +297,50 @@ button {
   color: var(--muted);
   font-size: 0.86rem;
   font-weight: 700;
+}
+
+.address-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: -8px;
+}
+
+#addressMessage {
+  min-height: 22px;
+  margin: 0;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+#addressMessage.error {
+  color: var(--red);
+}
+
+#addressMessage.success {
+  color: var(--mint-dark);
+}
+
+.address-suggestions {
+  display: grid;
+  gap: 8px;
+  margin-top: -8px;
+}
+
+.address-suggestion {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  padding: 9px 11px;
+  text-align: left;
+}
+
+.address-suggestion:hover {
+  border-color: #b8c6d1;
+  background: var(--soft);
 }
 
 .invitation-summary {
@@ -484,7 +531,8 @@ textarea:focus {
   font-weight: 700;
 }
 
-#clientMessage {
+#clientMessage,
+#photographerMessage {
   min-height: 22px;
   margin: 0;
   color: var(--muted);
@@ -500,12 +548,14 @@ textarea:focus {
 
 #formMessage.error,
 #clientMessage.error,
+#photographerMessage.error,
 #loginMessage.error {
   color: var(--red);
 }
 
 #formMessage.success,
 #clientMessage.success,
+#photographerMessage.success,
 #loginMessage.success {
   color: var(--mint-dark);
 }
@@ -589,7 +639,8 @@ textarea:focus {
   gap: 12px;
 }
 
-.client-list {
+.client-list,
+.photographer-list {
   display: grid;
   gap: 12px;
 }
@@ -605,7 +656,8 @@ textarea:focus {
   background: #fff;
 }
 
-.client-item {
+.client-item,
+.photographer-item {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 16px;
@@ -614,6 +666,13 @@ textarea:focus {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff;
+}
+
+.directory-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .booking-item.cancelled {
@@ -652,23 +711,28 @@ textarea:focus {
   min-height: 36px;
 }
 
-.client-main {
+.client-main,
+.photographer-main {
   min-width: 0;
 }
 
-.client-main h3 {
+.client-main h3,
+.photographer-main h3 {
   margin: 0 0 5px;
   overflow-wrap: anywhere;
   font-size: 1.05rem;
 }
 
-.client-main p {
+.client-main p,
+.photographer-main p {
   margin: 4px 0;
   color: var(--muted);
 }
 
 .client-email:empty,
-.client-agent:empty {
+.client-agent:empty,
+.photographer-email:empty,
+.photographer-phone:empty {
   display: none;
 }
 
@@ -741,7 +805,7 @@ textarea:focus {
 
   .top-nav {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     width: 100%;
   }
 
@@ -775,7 +839,9 @@ textarea:focus {
   .actions,
   .booking-actions,
   .client-panel-header,
+  .photographer-panel-header,
   .client-save-row,
+  .address-actions,
   .invitation-summary {
     align-items: stretch;
     flex-direction: column;
@@ -808,8 +874,18 @@ textarea:focus {
     grid-column: 1 / -1;
   }
 
-  .client-item {
+  .client-item,
+  .photographer-item {
     grid-template-columns: 1fr;
+  }
+
+  .directory-actions {
+    justify-content: stretch;
+  }
+
+  .directory-actions .ghost-button {
+    flex: 1 1 auto;
+    width: auto;
   }
 
   .cancel-button {

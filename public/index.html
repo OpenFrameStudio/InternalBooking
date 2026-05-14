@@ -11,6 +11,7 @@
       <nav class="top-nav" aria-label="Main navigation">
         <a class="nav-link active" href="/" data-route="/">Bookings</a>
         <a class="nav-link" href="/clients" data-route="/clients">Clients</a>
+        <a class="nav-link" href="/photographers" data-route="/photographers">Photographers</a>
         <button class="nav-link nav-action" id="logoutButton" type="button">Log out</button>
       </nav>
 
@@ -56,8 +57,20 @@
             <form class="booking-form" id="bookingForm">
               <label>
                 <span>Property address</span>
-                <input name="propertyAddress" placeholder="27 Willowbank Road Marrickville NSW 2204 Australia" required />
+                <input
+                  name="propertyAddress"
+                  id="propertyAddressInput"
+                  list="addressSuggestionList"
+                  placeholder="27 Willowbank Road Marrickville NSW 2204 Australia"
+                  required
+                />
               </label>
+              <datalist id="addressSuggestionList"></datalist>
+              <div class="address-actions">
+                <button class="ghost-button" id="searchAddressButton" type="button">Find address suggestions</button>
+                <p id="addressMessage" role="status"></p>
+              </div>
+              <div class="address-suggestions" id="addressSuggestions" hidden></div>
 
               <section class="client-panel" aria-label="Client details">
                 <div class="client-panel-header">
@@ -78,8 +91,8 @@
                     <input name="clientName" id="clientNameInput" placeholder="Stonebridge Collective" required />
                   </label>
                   <label>
-                    <span>Client email</span>
-                    <input name="clientEmail" id="clientEmailInput" type="email" placeholder="ava@stonebridge.example" />
+                    <span>Client / agent emails</span>
+                    <textarea name="clientEmail" id="clientEmailInput" rows="2" placeholder="ava@stonebridge.example, admin@stonebridge.example"></textarea>
                   </label>
                 </div>
 
@@ -94,7 +107,7 @@
                   </label>
                 </div>
 
-                <p class="helper-text">Client email is included in guest emails automatically.</p>
+                <p class="helper-text">Client and agent emails are included in guest emails automatically.</p>
               </section>
 
               <fieldset class="service-picker">
@@ -139,16 +152,36 @@
                 </label>
               </div>
 
-              <div class="form-row two">
+              <section class="photographer-panel" aria-label="Photographer details">
+                <div class="photographer-panel-header">
+                  <span>Photographer details</span>
+                  <a class="text-link" href="/photographers" data-route="/photographers">Manage photographers</a>
+                </div>
+
                 <label>
-                  <span>Photographer</span>
-                  <input name="photographerName" autocomplete="name" value="Barry" required />
+                  <span>Saved photographer</span>
+                  <select id="photographerSelect">
+                    <option value="">New photographer</option>
+                  </select>
                 </label>
-                <label>
-                  <span>Photographer phone</span>
-                  <input name="photographerPhone" autocomplete="tel" value="0403 007 853" />
-                </label>
-              </div>
+
+                <div class="form-row three">
+                  <label>
+                    <span>Photographer</span>
+                    <input name="photographerName" id="photographerNameInput" autocomplete="name" value="Barry" required />
+                  </label>
+                  <label>
+                    <span>Photographer email</span>
+                    <input name="photographerEmail" id="photographerEmailInput" type="email" placeholder="barry@openframe.studio" />
+                  </label>
+                  <label>
+                    <span>Photographer phone</span>
+                    <input name="photographerPhone" id="photographerPhoneInput" autocomplete="tel" value="0403 007 853" />
+                  </label>
+                </div>
+
+                <p class="helper-text">Photographer email is included in guest emails automatically, and the phone number goes into the Lark description.</p>
+              </section>
 
               <label>
                 <span>Guest emails</span>
@@ -231,8 +264,8 @@
                 <input id="directoryClientName" placeholder="Stonebridge Collective" required />
               </label>
               <label>
-                <span>Client email</span>
-                <input id="directoryClientEmail" type="email" placeholder="ava@stonebridge.example" />
+                <span>Client / agent emails</span>
+                <textarea id="directoryClientEmail" rows="2" placeholder="ava@stonebridge.example, admin@stonebridge.example"></textarea>
               </label>
             </div>
 
@@ -264,6 +297,53 @@
           </div>
 
           <div class="client-list" id="clientList"></div>
+        </section>
+      </section>
+
+      <section class="app-page" id="photographersPage" hidden>
+        <section class="directory-surface">
+          <div class="surface-header">
+            <div>
+              <p class="eyebrow">Photographer directory</p>
+              <h2>Save photographer details</h2>
+            </div>
+            <a class="ghost-button nav-button" href="/" data-route="/">Back to bookings</a>
+          </div>
+
+          <form class="booking-form photographer-form" id="photographerForm">
+            <input id="directoryPhotographerId" type="hidden" />
+            <div class="form-row three">
+              <label>
+                <span>Photographer</span>
+                <input id="directoryPhotographerName" placeholder="Maya Hart" required />
+              </label>
+              <label>
+                <span>Photographer email</span>
+                <input id="directoryPhotographerEmail" type="email" placeholder="maya@openframe.studio" />
+              </label>
+              <label>
+                <span>Photographer phone</span>
+                <input id="directoryPhotographerPhone" placeholder="0416 208 771" />
+              </label>
+            </div>
+
+            <div class="actions">
+              <button class="primary-button" type="submit">Save photographer</button>
+              <button class="ghost-button" id="newPhotographerButton" type="button">New photographer</button>
+              <p id="photographerMessage" role="status"></p>
+            </div>
+          </form>
+        </section>
+
+        <section class="list-section" aria-label="Saved photographers">
+          <div class="section-header">
+            <div>
+              <p class="eyebrow">Saved</p>
+              <h2>Photographers</h2>
+            </div>
+          </div>
+
+          <div class="photographer-list" id="photographerList"></div>
         </section>
       </section>
     </main>
@@ -299,10 +379,27 @@
           <p class="client-email"></p>
           <p class="client-agent"></p>
         </div>
-        <button class="ghost-button edit-client-button" type="button">Edit</button>
+        <div class="directory-actions">
+          <button class="ghost-button edit-client-button" type="button">Edit</button>
+          <button class="icon-button delete-client-button" type="button" title="Delete client" aria-label="Delete client">×</button>
+        </div>
       </article>
     </template>
 
-    <script src="/app.js?v=edit-bookings" type="module"></script>
+    <template id="photographerTemplate">
+      <article class="photographer-item">
+        <div class="photographer-main">
+          <h3></h3>
+          <p class="photographer-email"></p>
+          <p class="photographer-phone"></p>
+        </div>
+        <div class="directory-actions">
+          <button class="ghost-button edit-photographer-button" type="button">Edit</button>
+          <button class="icon-button delete-photographer-button" type="button" title="Delete photographer" aria-label="Delete photographer">×</button>
+        </div>
+      </article>
+    </template>
+
+    <script src="/app.js?v=multi-agent-emails" type="module"></script>
   </body>
 </html>

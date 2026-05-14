@@ -10,6 +10,7 @@ const __dirname = path.dirname(__filename);
 const publicDir = path.join(__dirname, "public");
 const bookingsFile = path.join(__dirname, "data", "bookings.json");
 const clientsFile = path.join(__dirname, "data", "clients.json");
+const photographersFile = path.join(__dirname, "data", "photographers.json");
 
 loadLocalEnv();
 
@@ -31,6 +32,8 @@ let tenantTokenCache = null;
 const sessions = new Map();
 const sessionCookieName = "internalbooking_session";
 const sessionMaxAgeSeconds = 7 * 24 * 60 * 60;
+const addressSuggestionCache = new Map();
+let lastAddressLookupAt = 0;
 
 const contentTypes = {
   ".html": "text/html; charset=utf-8",
@@ -43,6 +46,17 @@ const contentTypes = {
 };
 
 const serviceCatalog = new Set(["Photography", "Floorplan", "Drone"]);
+const larkImportDays = Number(process.env.LARK_IMPORT_DAYS || 120);
+const defaultPhotographers = [
+  {
+    id: "default-barry",
+    name: "Barry",
+    email: process.env.DEFAULT_PHOTOGRAPHER_EMAIL || "",
+    phone: "0403 007 853",
+    createdAt: "2026-05-16T00:00:00.000+10:00",
+    updatedAt: "2026-05-16T00:00:00.000+10:00"
+  }
+];
 
 function loadLocalEnv() {
   try {
@@ -244,6 +258,22 @@ async function saveClients(clients) {
   await writeFile(clientsFile, `${JSON.stringify(clients, null, 2)}\n`, "utf8");
 }
 
+async function loadPhotographers() {
+  try {
+    const raw = await readFile(photographersFile, "utf8");
+    return JSON.parse(raw);
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return defaultPhotographers;
+    }
+    throw error;
+  }
+}
+
+async function savePhotographers(photographers) {
+  await writeFile(photographersFile, `${JSON.stringify(photographers, null, 2)}\n`, "utf8");
+}
+
 function isLarkConfigured() {
   return Boolean(larkConfig.appId && larkConfig.appSecret && larkConfig.calendarId);
 }
@@ -317,6 +347,105 @@ function formatContact(name, phone) {
   return name || phone || "";
 }
 
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function normalizeAddress(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function compactAddress(result) {
+  const address = result.address || {};
+  const parts = [
+    [address.house_number, address.road].filter(Boolean).join(" "),
+    address.suburb || address.city_district || address.town || address.city || address.village,
+    address.state,
+    address.postcode,
+    address.country
+  ].filter(Boolean);
+
+  return normalizeAddress(parts.join(" "));
+}
+
+function uniqueAddressSuggestions(items) {
+  const seen = new Set();
+  const suggestions = [];
+
+  for (const item of items) {
+    const address = normalizeAddress(item.address || item.label || "");
+    if (!address) {
+      continue;
+    }
+
+    const key = address.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    suggestions.push({
+      address,
+      label: normalizeAddress(item.label || address)
+    });
+  }
+
+  return suggestions;
+}
+
+async function findAddressSuggestions(query) {
+  const cleanQuery = normalizeAddress(query);
+  if (cleanQuery.length < 4) {
+    return [];
+  }
+
+  const cacheKey = cleanQuery.toLowerCase();
+  const cached = addressSuggestionCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.suggestions;
+  }
+
+  const waitMs = Math.max(0, 1100 - (Date.now() - lastAddressLookupAt));
+  if (waitMs) {
+    await delay(waitMs);
+  }
+  lastAddressLookupAt = Date.now();
+
+  const params = new URLSearchParams({
+    format: "jsonv2",
+    addressdetails: "1",
+    countrycodes: "au",
+    limit: "6",
+    q: cleanQuery
+  });
+
+  const response = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
+    headers: {
+      "User-Agent": "OpenFrameInternalBooking/1.0 (internalbooking.openframe.studio)",
+      "Accept-Language": "en-AU,en;q=0.9"
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`Address lookup failed with ${response.status}.`);
+  }
+
+  const results = await response.json().catch(() => []);
+  const suggestions = uniqueAddressSuggestions(
+    results.map((result) => ({
+      address: compactAddress(result) || result.display_name,
+      label: result.display_name
+    }))
+  );
+
+  addressSuggestionCache.set(cacheKey, {
+    suggestions,
+    expiresAt: Date.now() + 24 * 60 * 60 * 1000
+  });
+
+  return suggestions;
+}
+
 function validateClient(input) {
   const errors = [];
   const client = {
@@ -326,16 +455,40 @@ function validateClient(input) {
     agentName: String(input.agentName || "").trim(),
     agentPhone: String(input.agentPhone || "").trim()
   };
+  const clientEmails = uniqueEmails(parseGuestEmails(client.email));
 
   if (!client.name) {
     errors.push("Enter the agency or client name.");
   }
 
-  if (client.email && !isValidEmail(client.email)) {
-    errors.push("Enter a valid client email address.");
+  for (const email of clientEmails) {
+    if (!isValidEmail(email)) {
+      errors.push(`Enter a valid client email for ${email}.`);
+    }
   }
 
+  client.email = clientEmails.join(", ");
   return { errors, client };
+}
+
+function validatePhotographer(input) {
+  const errors = [];
+  const photographer = {
+    id: String(input.id || "").trim(),
+    name: String(input.name || input.photographerName || "").trim(),
+    email: String(input.email || input.photographerEmail || "").trim(),
+    phone: String(input.phone || input.photographerPhone || "").trim()
+  };
+
+  if (!photographer.name) {
+    errors.push("Enter the photographer name.");
+  }
+
+  if (photographer.email && !isValidEmail(photographer.email)) {
+    errors.push("Enter a valid photographer email address.");
+  }
+
+  return { errors, photographer };
 }
 
 function validateBooking(input) {
@@ -348,11 +501,14 @@ function validateBooking(input) {
   const locationAddress = propertyAddress;
   const clientName = String(input.clientName || "").trim();
   const clientEmail = String(input.clientEmail || "").trim();
+  const clientEmails = uniqueEmails(parseGuestEmails(clientEmail));
   const photographerName = String(input.photographerName || "Barry").trim();
+  const photographerEmail = String(input.photographerEmail || "").trim();
   const photographerPhone = String(input.photographerPhone || "").trim();
   const agentName = String(input.agentName || "").trim();
   const agentPhone = String(input.agentPhone || "").trim();
-  const guestEmails = uniqueEmails([clientEmail, ...parseGuestEmails(input.guestEmails)]);
+  const rawGuestEmails = parseGuestEmails(input.guestEmails);
+  const guestEmails = uniqueEmails([...clientEmails, photographerEmail, ...rawGuestEmails]);
   const notes = String(input.notes || "").trim();
   const startAt = String(input.startAt || "").trim();
   const durationMinutes = Number(input.durationMinutes || 0);
@@ -375,9 +531,14 @@ function validateBooking(input) {
   if (!services.length) errors.push("Choose at least one service.");
   if (!propertyAddress) errors.push("Enter the calendar title or property address.");
   if (!clientName) errors.push("Enter the agency or client name.");
-  if (clientEmail && !isValidEmail(clientEmail)) errors.push("Enter a valid client email address.");
+  for (const email of clientEmails) {
+    if (!isValidEmail(email)) {
+      errors.push(`Enter a valid client email for ${email}.`);
+    }
+  }
   if (!photographerName) errors.push("Enter the photographer name.");
-  for (const email of guestEmails) {
+  if (photographerEmail && !isValidEmail(photographerEmail)) errors.push("Enter a valid photographer email address.");
+  for (const email of rawGuestEmails) {
     if (!isValidEmail(email)) {
       errors.push(`Enter a valid guest email for ${email}.`);
     }
@@ -402,8 +563,9 @@ function validateBooking(input) {
       locationName,
       locationAddress,
       clientName,
-      clientEmail,
+      clientEmail: clientEmails.join(", "),
       photographerName,
+      photographerEmail,
       photographerPhone,
       agentName,
       agentPhone,
@@ -526,6 +688,179 @@ function buildLarkPreview(booking) {
     eventPayload,
     attendeesPayload
   };
+}
+
+function parseLarkDateTime(time) {
+  if (!time) {
+    return null;
+  }
+
+  if (time.timestamp) {
+    const timestamp = Number(time.timestamp);
+    if (!Number.isNaN(timestamp)) {
+      return new Date(timestamp * 1000).toISOString();
+    }
+  }
+
+  if (time.date) {
+    const parsed = new Date(`${time.date}T00:00:00`);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toISOString();
+    }
+  }
+
+  return null;
+}
+
+function readDescriptionLine(description, label) {
+  const prefix = `${label}:`;
+  const line = String(description || "")
+    .split(/\r?\n/)
+    .find((item) => item.trim().toLowerCase().startsWith(prefix.toLowerCase()));
+  return line ? line.trim().slice(prefix.length).trim() : "";
+}
+
+function readDescriptionClient(description) {
+  return String(description || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line && !/^(photographer|agent|services|booking id):/i.test(line)) || "";
+}
+
+function splitContact(value) {
+  const match = String(value || "").match(/^(.*?)\s*\((.*?)\)\s*$/);
+  if (!match) {
+    return { name: String(value || "").trim(), phone: "" };
+  }
+
+  return {
+    name: match[1].trim(),
+    phone: match[2].trim()
+  };
+}
+
+function readDescriptionBookingId(description) {
+  return readDescriptionLine(description, "Booking ID");
+}
+
+function normalizeLarkEvent(event) {
+  const larkEventId = event.event_id || event.id || event.uid || "";
+  const startAt = parseLarkDateTime(event.start_time || event.start);
+  const endAt = parseLarkDateTime(event.end_time || event.end);
+  if (!larkEventId || !startAt || !endAt) {
+    return null;
+  }
+
+  const description = String(event.description || "").trim();
+  const photographer = splitContact(readDescriptionLine(description, "Photographer"));
+  const agent = splitContact(readDescriptionLine(description, "Agent"));
+  const service = readDescriptionLine(description, "Services");
+  const services = service
+    ? service.split("+").map((name) => ({ name: name.trim() })).filter((item) => item.name)
+    : [];
+  const location = event.location || {};
+  const propertyAddress = normalizeAddress(event.summary || location.address || location.name || "Lark event");
+  const startMs = new Date(startAt).getTime();
+  const endMs = new Date(endAt).getTime();
+  const status = event.status === "cancelled" ? "cancelled" : "confirmed";
+
+  return {
+    id: `lark-${larkEventId}`,
+    larkOnly: true,
+    service,
+    services,
+    propertyAddress,
+    locationName: normalizeAddress(location.name || propertyAddress),
+    locationAddress: normalizeAddress(location.address || location.name || propertyAddress),
+    clientName: readDescriptionClient(description),
+    clientEmail: "",
+    photographerName: photographer.name,
+    photographerEmail: "",
+    photographerPhone: photographer.phone,
+    agentName: agent.name,
+    agentPhone: agent.phone,
+    guestEmails: [],
+    notes: description,
+    startAt,
+    endAt,
+    durationMinutes: Math.max(15, Math.round((endMs - startMs) / 60000)),
+    status,
+    larkStatus: "synced",
+    larkEventId,
+    larkError: null,
+    larkAttendeeStatus: "synced",
+    larkAttendeeError: null,
+    createdAt: startAt,
+    importedFromLark: true,
+    sourceBookingId: readDescriptionBookingId(description)
+  };
+}
+
+function getLarkEventItems(data) {
+  if (Array.isArray(data?.items)) return data.items;
+  if (Array.isArray(data?.events)) return data.events;
+  if (Array.isArray(data?.event_infos)) return data.event_infos;
+  if (Array.isArray(data?.event_list)) return data.event_list;
+  return [];
+}
+
+async function fetchLarkImportedBookings() {
+  if (!isLarkConfigured()) {
+    return [];
+  }
+
+  const token = await getTenantAccessToken();
+  const calendarId = encodeURIComponent(larkConfig.calendarId);
+  const imported = [];
+  const firstStartMs = Date.now() - 24 * 60 * 60 * 1000;
+  const finalEndMs = Date.now() + larkImportDays * 24 * 60 * 60 * 1000;
+  const windowMs = 35 * 24 * 60 * 60 * 1000;
+
+  for (let windowStartMs = firstStartMs; windowStartMs < finalEndMs && imported.length < 500; windowStartMs += windowMs) {
+    const windowEndMs = Math.min(windowStartMs + windowMs, finalEndMs);
+    let pageToken = "";
+
+    do {
+      const params = new URLSearchParams({
+        start_time: Math.floor(windowStartMs / 1000).toString(),
+        end_time: Math.floor(windowEndMs / 1000).toString(),
+        page_size: "100"
+      });
+      if (pageToken) {
+        params.set("page_token", pageToken);
+      }
+
+      const response = await fetch(`${larkConfig.apiBase}/calendar/v4/calendars/${calendarId}/events?${params}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json; charset=utf-8"
+        }
+      });
+
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.code !== 0) {
+        const message = result.msg || result.message || `Lark event import failed with ${response.status}.`;
+        throw new Error(message);
+      }
+
+      imported.push(...getLarkEventItems(result.data).map(normalizeLarkEvent).filter(Boolean));
+      pageToken = result.data?.page_token || result.data?.next_page_token || "";
+    } while (pageToken && imported.length < 500);
+  }
+
+  return [...new Map(imported.map((booking) => [booking.larkEventId, booking])).values()];
+}
+
+function mergeLocalAndLarkBookings(localBookings, larkBookings) {
+  const localIds = new Set(localBookings.map((booking) => booking.id));
+  const localLarkIds = new Set(localBookings.map((booking) => booking.larkEventId).filter(Boolean));
+
+  return [
+    ...localBookings,
+    ...larkBookings.filter((booking) => {
+      return !localLarkIds.has(booking.larkEventId) && !localIds.has(booking.sourceBookingId);
+    })
+  ];
 }
 
 async function createLarkEvent(booking) {
@@ -717,8 +1052,33 @@ async function handleApi(req, res, url) {
 
   if (req.method === "GET" && url.pathname === "/api/bookings") {
     const bookings = await loadBookings();
-    bookings.sort((a, b) => new Date(a.startAt) - new Date(b.startAt));
-    sendJson(res, 200, { bookings });
+    let larkBookings = [];
+    let larkImportError = null;
+
+    try {
+      larkBookings = await fetchLarkImportedBookings();
+    } catch (error) {
+      larkImportError = error.message;
+    }
+
+    const mergedBookings = mergeLocalAndLarkBookings(bookings, larkBookings)
+      .sort((a, b) => new Date(a.startAt) - new Date(b.startAt));
+    sendJson(res, 200, {
+      bookings: mergedBookings,
+      larkImportedCount: larkBookings.length,
+      larkImportError
+    });
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/address-suggestions") {
+    const query = url.searchParams.get("q") || "";
+    try {
+      const suggestions = await findAddressSuggestions(query);
+      sendJson(res, 200, { suggestions });
+    } catch (error) {
+      sendJson(res, 502, { errors: [error.message || "Address lookup failed."] });
+    }
     return;
   }
 
@@ -768,6 +1128,85 @@ async function handleApi(req, res, url) {
     await saveClients(clients);
     const savedClient = clients.find((item) => item.name.toLowerCase() === client.name.toLowerCase());
     sendJson(res, 200, { client: savedClient, clients });
+    return;
+  }
+
+  const clientIdMatch = url.pathname.match(/^\/api\/clients\/([^/]+)$/);
+  if (req.method === "DELETE" && clientIdMatch) {
+    const clientId = decodeURIComponent(clientIdMatch[1]);
+    const clients = await loadClients();
+    const nextClients = clients.filter((item) => item.id !== clientId);
+
+    if (nextClients.length === clients.length) {
+      sendJson(res, 404, { errors: ["Client not found."] });
+      return;
+    }
+
+    await saveClients(nextClients);
+    sendJson(res, 200, { clients: nextClients });
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/photographers") {
+    const photographers = await loadPhotographers();
+    photographers.sort((a, b) => a.name.localeCompare(b.name));
+    sendJson(res, 200, { photographers });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/photographers") {
+    const input = await readBody(req);
+    const { errors, photographer } = validatePhotographer(input);
+    if (errors.length) {
+      sendJson(res, 400, { errors });
+      return;
+    }
+
+    const photographers = await loadPhotographers();
+    const existingIndex = photographer.id
+      ? photographers.findIndex((item) => item.id === photographer.id)
+      : photographers.findIndex((item) => item.name.toLowerCase() === photographer.name.toLowerCase());
+    const now = new Date().toISOString();
+
+    if (existingIndex >= 0) {
+      photographers[existingIndex] = {
+        ...photographers[existingIndex],
+        name: photographer.name,
+        email: photographer.email,
+        phone: photographer.phone,
+        updatedAt: now
+      };
+    } else {
+      photographers.push({
+        id: crypto.randomUUID(),
+        name: photographer.name,
+        email: photographer.email,
+        phone: photographer.phone,
+        createdAt: now,
+        updatedAt: now
+      });
+    }
+
+    photographers.sort((a, b) => a.name.localeCompare(b.name));
+    await savePhotographers(photographers);
+    const savedPhotographer = photographers.find((item) => item.name.toLowerCase() === photographer.name.toLowerCase());
+    sendJson(res, 200, { photographer: savedPhotographer, photographers });
+    return;
+  }
+
+  const photographerIdMatch = url.pathname.match(/^\/api\/photographers\/([^/]+)$/);
+  if (req.method === "DELETE" && photographerIdMatch) {
+    const photographerId = decodeURIComponent(photographerIdMatch[1]);
+    const photographers = await loadPhotographers();
+    const nextPhotographers = photographers.filter((item) => item.id !== photographerId);
+
+    if (nextPhotographers.length === photographers.length) {
+      sendJson(res, 404, { errors: ["Photographer not found."] });
+      return;
+    }
+
+    await savePhotographers(nextPhotographers);
+    sendJson(res, 200, { photographers: nextPhotographers });
     return;
   }
 
