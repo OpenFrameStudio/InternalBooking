@@ -60,8 +60,13 @@ let clients = [];
 let syncedClientEmail = "";
 
 function parseEmailList(value) {
+  const emailMatches = String(value || "").match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi);
+  if (emailMatches?.length) {
+    return emailMatches.map((email) => email.trim());
+  }
+
   return String(value || "")
-    .split(/[\n,;]/)
+    .split(/[\s,;]+/)
     .map((email) => email.trim())
     .filter(Boolean);
 }
