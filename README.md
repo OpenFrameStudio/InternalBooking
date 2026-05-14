@@ -20,6 +20,26 @@ node server.js
 
 Open `http://127.0.0.1:4180`.
 
+## Deploy to internalbooking.openframe.studio
+
+This repo includes `render.yaml` for deploying the app as a Render web service.
+Use a paid web service with the included persistent disk so saved bookings and
+clients are not wiped during restarts or deploys.
+
+1. In Render, create a new Blueprint from this GitHub repo.
+2. Keep the service as `internal-booking`.
+3. Fill in the prompted secret environment variables:
+   - `LARK_APP_ID`
+   - `LARK_APP_SECRET`
+   - `LARK_CALENDAR_ID`
+4. After the service is live, open its Custom Domains settings and verify
+   `internalbooking.openframe.studio`.
+5. In your DNS provider, add the DNS record Render gives you for the
+   `internalbooking` subdomain, then verify it in Render.
+
+The blueprint sets the app to listen on `0.0.0.0` in production, uses
+`/api/status` as the health check, and mounts the persistent disk at `data/`.
+
 ## Connect Lark Calendar
 
 1. Create a self-built app in the Lark Open Platform.
