@@ -252,11 +252,15 @@ function getEndAt(startAt, durationMinutes) {
   return new Date(new Date(startAt).getTime() + durationMinutes * 60_000).toISOString();
 }
 
-function hasBookingConflict(bookings, startAt, endAt) {
+function hasBookingConflict(bookings, startAt, endAt, ignoredBookingId = "") {
   const nextStart = new Date(startAt).getTime();
   const nextEnd = new Date(endAt).getTime();
 
   return bookings.some((booking) => {
+    if (booking.id === ignoredBookingId) {
+      return false;
+    }
+
     if (booking.status === "cancelled") {
       return false;
     }
@@ -493,14 +497,14 @@ function buildLarkEventPayload(booking) {
   };
 }
 
-function buildLarkAttendeesPayload(booking) {
-  if (!booking.guestEmails?.length) {
+function buildLarkAttendeesPayload(booking, emails = booking.guestEmails || []) {
+  if (!emails.length) {
     return null;
   }
 
   return {
     need_notification: true,
-    attendees: booking.guestEmails.map((email) => ({
+    attendees: emails.map((email) => ({
       type: "third_party",
       third_party_email: email
     }))
@@ -546,8 +550,45 @@ async function createLarkEvent(booking) {
   return result.data?.event || result.data || result;
 }
 
-async function createLarkAttendees(booking) {
-  if (!booking.larkEventId || !booking.guestEmails?.length) {
+async function updateLarkEvent(booking) {
+  if (!booking.larkEventId) {
+    throw new Error("No Lark event ID is saved for this booking.");
+  }
+
+  const token = await getTenantAccessToken();
+  const calendarId = encodeURIComponent(larkConfig.calendarId);
+  const eventId = encodeURIComponent(booking.larkEventId);
+
+  const response = await fetch(`${larkConfig.apiBase}/calendar/v4/calendars/${calendarId}/events/${eventId}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    body: JSON.stringify(buildLarkEventPayload(booking))
+  });
+
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || result.code !== 0) {
+    const message = result.msg || result.message || `Lark event update failed with ${response.status}.`;
+    throw new Error(message);
+  }
+
+  return result.data?.event || result.data || result;
+}
+
+function getAddedGuestEmails(previousEmails = [], nextEmails = []) {
+  const previous = new Set(previousEmails.map((email) => email.toLowerCase()));
+  return nextEmails.filter((email) => !previous.has(email.toLowerCase()));
+}
+
+function getRemovedGuestEmails(previousEmails = [], nextEmails = []) {
+  const next = new Set(nextEmails.map((email) => email.toLowerCase()));
+  return previousEmails.filter((email) => !next.has(email.toLowerCase()));
+}
+
+async function createLarkAttendees(booking, emails = booking.guestEmails || []) {
+  if (!booking.larkEventId || !emails.length) {
     return null;
   }
 
@@ -561,7 +602,7 @@ async function createLarkAttendees(booking) {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json; charset=utf-8"
     },
-    body: JSON.stringify(buildLarkAttendeesPayload(booking))
+    body: JSON.stringify(buildLarkAttendeesPayload(booking, emails))
   });
 
   const result = await response.json().catch(() => ({}));
@@ -571,6 +612,65 @@ async function createLarkAttendees(booking) {
   }
 
   return result.data?.attendees || result.data || result;
+}
+
+async function syncBookingToLark(booking, previousBooking = null) {
+  if (!isLarkConfigured()) {
+    booking.larkStatus = "not_configured";
+    booking.larkError = null;
+    booking.larkAttendeeStatus = "not_configured";
+    booking.larkAttendeeError = null;
+    return booking;
+  }
+
+  const previousGuestEmails = previousBooking?.guestEmails || [];
+  const hasExistingLarkEvent = Boolean(previousBooking?.larkEventId);
+  const addedGuestEmails = hasExistingLarkEvent ? getAddedGuestEmails(previousGuestEmails, booking.guestEmails) : booking.guestEmails;
+  const removedGuestEmails = hasExistingLarkEvent ? getRemovedGuestEmails(previousGuestEmails, booking.guestEmails) : [];
+
+  try {
+    if (booking.larkEventId) {
+      await updateLarkEvent(booking);
+    } else {
+      const larkEvent = await createLarkEvent(booking);
+      booking.larkEventId = larkEvent.event_id || larkEvent.id || null;
+    }
+
+    booking.larkStatus = "synced";
+    booking.larkError = null;
+
+    if (addedGuestEmails.length) {
+      try {
+        await createLarkAttendees(booking, addedGuestEmails);
+        booking.larkAttendeeStatus = "synced";
+        booking.larkAttendeeError = null;
+      } catch (error) {
+        booking.larkStatus = "attendees_failed";
+        booking.larkAttendeeStatus = "failed";
+        booking.larkAttendeeError = error.message;
+      }
+    } else if (!booking.guestEmails.length) {
+      booking.larkAttendeeStatus = "not_needed";
+      booking.larkAttendeeError = null;
+    } else if (previousBooking) {
+      booking.larkAttendeeStatus = previousBooking.larkAttendeeStatus || "synced";
+      booking.larkAttendeeError = previousBooking.larkAttendeeError || null;
+    } else {
+      booking.larkAttendeeStatus = "not_needed";
+      booking.larkAttendeeError = null;
+    }
+
+    if (removedGuestEmails.length) {
+      booking.larkAttendeeStatus = "needs_review";
+      booking.larkAttendeeError = "Guest list changed. Remove old guests from Lark manually if needed.";
+    }
+  } catch (error) {
+    booking.larkStatus = "failed";
+    booking.larkError = error.message;
+    booking.larkAttendeeStatus = booking.guestEmails.length ? "not_sent" : "not_needed";
+  }
+
+  return booking;
 }
 
 async function handleApi(req, res, url) {
@@ -717,30 +817,68 @@ async function handleApi(req, res, url) {
       createdAt: new Date().toISOString()
     };
 
-    if (isLarkConfigured()) {
-      try {
-        const larkEvent = await createLarkEvent(booking);
-        booking.larkStatus = "synced";
-        booking.larkEventId = larkEvent.event_id || larkEvent.id || null;
-
-        try {
-          await createLarkAttendees(booking);
-          booking.larkAttendeeStatus = booking.guestEmails.length ? "synced" : "not_needed";
-        } catch (error) {
-          booking.larkStatus = "attendees_failed";
-          booking.larkAttendeeStatus = "failed";
-          booking.larkAttendeeError = error.message;
-        }
-      } catch (error) {
-        booking.larkStatus = "failed";
-        booking.larkError = error.message;
-        booking.larkAttendeeStatus = booking.guestEmails.length ? "not_sent" : "not_needed";
-      }
-    }
+    await syncBookingToLark(booking);
 
     bookings.push(booking);
     await saveBookings(bookings);
     sendJson(res, 201, { booking });
+    return;
+  }
+
+  if ((req.method === "PUT" || req.method === "PATCH") && url.pathname.startsWith("/api/bookings/")) {
+    const [, apiPart, bookingsPart, id, extra] = url.pathname.split("/");
+    if (apiPart !== "api" || bookingsPart !== "bookings" || !id || extra) {
+      sendJson(res, 404, { errors: ["Booking not found."] });
+      return;
+    }
+
+    const input = await readBody(req);
+    const { errors, value } = validateBooking(input);
+    if (errors.length) {
+      sendJson(res, 400, { errors });
+      return;
+    }
+
+    const bookings = await loadBookings();
+    const bookingIndex = bookings.findIndex((item) => item.id === id);
+    if (bookingIndex === -1) {
+      sendJson(res, 404, { errors: ["Booking not found."] });
+      return;
+    }
+
+    const existingBooking = bookings[bookingIndex];
+    if (existingBooking.status === "cancelled") {
+      sendJson(res, 400, { errors: ["Cancelled bookings cannot be edited."] });
+      return;
+    }
+
+    const endAt = getEndAt(value.startAt, value.durationMinutes);
+    if (hasBookingConflict(bookings, value.startAt, endAt, id)) {
+      sendJson(res, 409, { errors: ["That time is already booked. Choose another slot."] });
+      return;
+    }
+
+    const booking = {
+      ...existingBooking,
+      ...value,
+      id: existingBooking.id,
+      endAt,
+      status: existingBooking.status || "confirmed",
+      larkStatus: existingBooking.larkStatus || (isLarkConfigured() ? "pending" : "not_configured"),
+      larkEventId: existingBooking.larkEventId || null,
+      larkError: existingBooking.larkError || null,
+      larkAttendeeStatus:
+        existingBooking.larkAttendeeStatus || (isLarkConfigured() ? (value.guestEmails.length ? "pending" : "not_needed") : "not_configured"),
+      larkAttendeeError: existingBooking.larkAttendeeError || null,
+      createdAt: existingBooking.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    await syncBookingToLark(booking, existingBooking);
+
+    bookings[bookingIndex] = booking;
+    await saveBookings(bookings);
+    sendJson(res, 200, { booking });
     return;
   }
 
