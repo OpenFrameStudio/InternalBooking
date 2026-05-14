@@ -29,6 +29,8 @@ const newClientButton = document.querySelector("#newClientButton");
 const refreshButton = document.querySelector("#refreshButton");
 const testLarkButton = document.querySelector("#testLarkButton");
 const previewLarkButton = document.querySelector("#previewLarkButton");
+const bookingSubmitButton = document.querySelector("#bookingSubmitButton");
+const cancelEditButton = document.querySelector("#cancelEditButton");
 const logoutButton = document.querySelector("#logoutButton");
 const larkPreview = document.querySelector("#larkPreview");
 const previewTitle = document.querySelector("#previewTitle");
@@ -41,6 +43,8 @@ const larkTitle = document.querySelector("#larkTitle");
 const larkDetail = document.querySelector("#larkDetail");
 const todayCount = document.querySelector("#todayCount");
 const weekCount = document.querySelector("#weekCount");
+const bookingModeEyebrow = document.querySelector("#bookingModeEyebrow");
+const bookingModeTitle = document.querySelector("#bookingModeTitle");
 
 const dateFormatter = new Intl.DateTimeFormat(undefined, {
   weekday: "short",
@@ -60,6 +64,7 @@ let bookings = [];
 let clients = [];
 let syncedClientEmail = "";
 let isRestoringBookingDraft = false;
+let editingBookingId = "";
 
 const bookingDraftKey = "openframe.bookingDraft.v2";
 const clientsCacheKey = "openframe.clients.v1";
@@ -268,7 +273,7 @@ function getBookingDraft() {
 }
 
 function saveBookingDraft() {
-  if (isRestoringBookingDraft) {
+  if (isRestoringBookingDraft || editingBookingId) {
     return;
   }
 
@@ -333,6 +338,22 @@ function toDateValue(date) {
   return `${year}-${month}-${day}`;
 }
 
+function toTimeValue(date) {
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
+function ensureDurationOption(minutes) {
+  const value = String(minutes);
+  if ([...durationInput.options].some((option) => option.value === value)) {
+    return;
+  }
+
+  const option = document.createElement("option");
+  option.value = value;
+  option.textContent = `${minutes} min`;
+  durationInput.append(option);
+}
+
 function setInitialDateTime() {
   const now = new Date();
   now.setMinutes(Math.ceil(now.getMinutes() / 15) * 15, 0, 0);
@@ -343,7 +364,7 @@ function setInitialDateTime() {
 
   dateInput.min = toDateValue(new Date());
   dateInput.value = toDateValue(now);
-  timeInput.value = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  timeInput.value = toTimeValue(now);
 }
 
 function setMessage(message, tone = "") {
@@ -354,6 +375,75 @@ function setMessage(message, tone = "") {
 function setClientMessage(message, tone = "") {
   clientMessage.textContent = message;
   clientMessage.className = tone;
+}
+
+function setBookingFormMode(booking = null) {
+  editingBookingId = booking?.id || "";
+  bookingModeEyebrow.textContent = editingBookingId ? "Edit booking" : "New booking";
+  bookingModeTitle.textContent = editingBookingId ? "Update property booking" : "Create a property booking";
+  bookingSubmitButton.textContent = editingBookingId ? "Update booking" : "Create booking";
+  cancelEditButton.hidden = !editingBookingId;
+}
+
+function setSelectedServices(booking) {
+  const selected = new Set(
+    Array.isArray(booking.services) && booking.services.length
+      ? booking.services.map((service) => service.name)
+      : String(booking.service || "")
+          .split("+")
+          .map((service) => service.trim())
+  );
+
+  for (const input of serviceInputs) {
+    input.checked = selected.has(input.value);
+  }
+}
+
+function fillBookingForm(booking) {
+  isRestoringBookingDraft = true;
+
+  bookingForm.elements.propertyAddress.value = booking.propertyAddress || "";
+  const matchingClient = clients.find((client) => {
+    const sameName = client.name.toLowerCase() === String(booking.clientName || "").toLowerCase();
+    const sameEmail = client.email && booking.clientEmail && client.email.toLowerCase() === booking.clientEmail.toLowerCase();
+    return sameName || sameEmail;
+  });
+  clientSelect.value = matchingClient?.id || "";
+  clientNameInput.value = booking.clientName || "";
+  clientEmailInput.value = booking.clientEmail || "";
+  agentNameInput.value = booking.agentName || "";
+  agentPhoneInput.value = booking.agentPhone || "";
+  setSelectedServices(booking);
+
+  const start = new Date(booking.startAt);
+  if (!Number.isNaN(start.getTime())) {
+    dateInput.value = toDateValue(start);
+    timeInput.value = toTimeValue(start);
+  }
+
+  ensureDurationOption(booking.durationMinutes || 60);
+  durationInput.value = String(booking.durationMinutes || 60);
+  bookingForm.elements.photographerName.value = booking.photographerName || "Barry";
+  bookingForm.elements.photographerPhone.value = booking.photographerPhone || "0403 007 853";
+  guestEmailsInput.value = Array.isArray(booking.guestEmails) ? booking.guestEmails.join(", ") : "";
+  bookingForm.elements.notes.value = booking.notes || "";
+  syncedClientEmail = isEmailish(clientEmailInput.value.trim()) ? clientEmailInput.value.trim() : "";
+
+  updateInvitationSummary();
+  larkPreview.hidden = true;
+  isRestoringBookingDraft = false;
+}
+
+function resetBookingForm(message = "") {
+  setBookingFormMode();
+  bookingForm.reset();
+  clientSelect.value = "";
+  syncedClientEmail = "";
+  setInitialDateTime();
+  updateDurationForServices();
+  updateInvitationSummary();
+  larkPreview.hidden = true;
+  setMessage(message);
 }
 
 function setRoute(route, push = true) {
@@ -512,6 +602,14 @@ function getSyncLabel(booking) {
     return "cancelled";
   }
 
+  if (booking.larkAttendeeStatus === "needs_review") {
+    return "check guests";
+  }
+
+  if (booking.larkAttendeeStatus === "failed") {
+    return "guests failed";
+  }
+
   const labels = {
     synced: "in Lark",
     failed: "Lark failed",
@@ -560,11 +658,21 @@ function renderBookings() {
     const pill = item.querySelector(".sync-pill");
     pill.textContent = getSyncLabel(booking);
     pill.classList.toggle("synced", booking.larkStatus === "synced");
-    pill.classList.toggle("failed", booking.larkStatus === "failed" || booking.larkStatus === "attendees_failed");
+    pill.classList.toggle(
+      "failed",
+      booking.larkStatus === "failed" ||
+        booking.larkStatus === "attendees_failed" ||
+        booking.larkAttendeeStatus === "failed" ||
+        booking.larkAttendeeStatus === "needs_review"
+    );
     pill.classList.toggle("not-configured", booking.larkStatus === "not_configured");
     if (booking.larkError || booking.larkAttendeeError) {
       pill.title = [booking.larkError, booking.larkAttendeeError].filter(Boolean).join(" ");
     }
+
+    const editButton = item.querySelector(".edit-booking-button");
+    editButton.disabled = booking.status === "cancelled";
+    editButton.addEventListener("click", () => startBookingEdit(booking.id));
 
     const cancelButton = item.querySelector(".cancel-button");
     cancelButton.disabled = booking.status === "cancelled";
@@ -574,6 +682,25 @@ function renderBookings() {
   }
 
   updateStats();
+}
+
+function startBookingEdit(id) {
+  const booking = bookings.find((item) => item.id === id);
+  if (!booking) {
+    setMessage("Booking not found.", "error");
+    return;
+  }
+
+  if (booking.status === "cancelled") {
+    setMessage("Cancelled bookings cannot be edited.", "error");
+    return;
+  }
+
+  setRoute("/", true);
+  setBookingFormMode(booking);
+  fillBookingForm(booking);
+  setMessage("Editing booking. Update booking to save changes.", "");
+  bookingForm.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function updateStats() {
@@ -672,6 +799,26 @@ async function saveDirectoryClient(event) {
   }
 }
 
+function getBookingSavedMessage(booking, action) {
+  if (booking.larkAttendeeStatus === "needs_review") {
+    return `Booking ${action}. Check guest removals in Lark.`;
+  }
+
+  if (booking.larkStatus === "synced") {
+    return `Booking ${action} and sent to Lark.`;
+  }
+
+  if (booking.larkStatus === "attendees_failed") {
+    return `Booking ${action}, but Lark guest invitations need checking.`;
+  }
+
+  if (booking.larkStatus === "failed") {
+    return `Booking ${action} locally, but Lark did not update.`;
+  }
+
+  return `Booking ${action} locally. Add Lark settings when ready.`;
+}
+
 async function submitBooking(event) {
   event.preventDefault();
 
@@ -681,12 +828,16 @@ async function submitBooking(event) {
     return;
   }
 
-  setMessage("Creating booking...");
-  bookingForm.querySelector("button[type='submit']").disabled = true;
+  const isEditing = Boolean(editingBookingId);
+  const endpoint = isEditing ? `/api/bookings/${editingBookingId}` : "/api/bookings";
+  const method = isEditing ? "PUT" : "POST";
+
+  setMessage(isEditing ? "Updating booking..." : "Creating booking...");
+  bookingSubmitButton.disabled = true;
 
   try {
-    const { response, data: result } = await fetchJson("/api/bookings", {
-      method: "POST",
+    const { response, data: result } = await fetchJson(endpoint, {
+      method,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data)
     });
@@ -696,25 +847,20 @@ async function submitBooking(event) {
       return;
     }
 
-    bookings.push(result.booking);
+    if (isEditing) {
+      bookings = bookings.map((booking) => (booking.id === result.booking.id ? result.booking : booking));
+    } else {
+      bookings.push(result.booking);
+    }
+
     renderBookings();
-    bookingForm.reset();
-    clientSelect.value = "";
-    syncedClientEmail = "";
     removeStoredJson(bookingDraftKey);
-    setInitialDateTime();
-    updateDurationForServices();
-    updateInvitationSummary();
-    setMessage(
-      result.booking.larkStatus === "synced"
-        ? "Booking created and sent to Lark."
-        : "Booking created locally. Add Lark settings when ready.",
-      "success"
-    );
+    resetBookingForm(getBookingSavedMessage(result.booking, isEditing ? "updated" : "created"));
+    formMessage.className = "success";
   } catch {
     setMessage("Could not reach the booking server.", "error");
   } finally {
-    bookingForm.querySelector("button[type='submit']").disabled = false;
+    bookingSubmitButton.disabled = false;
   }
 }
 
@@ -768,7 +914,18 @@ async function cancelBooking(id) {
 
   if (response.ok) {
     bookings = bookings.map((booking) => (booking.id === id ? result.booking : booking));
+    if (editingBookingId === id) {
+      resetBookingForm("Edit cancelled because the booking was cancelled.");
+    }
     renderBookings();
+  }
+}
+
+function cancelBookingEdit() {
+  const draft = readStoredJson(bookingDraftKey);
+  resetBookingForm("Edit cancelled.");
+  if (draft) {
+    restoreBookingDraft();
   }
 }
 
@@ -808,6 +965,7 @@ clientForm.addEventListener("submit", saveDirectoryClient);
 refreshButton.addEventListener("click", loadBookings);
 testLarkButton.addEventListener("click", testLark);
 previewLarkButton.addEventListener("click", previewLarkEvent);
+cancelEditButton.addEventListener("click", cancelBookingEdit);
 logoutButton.addEventListener("click", logout);
 clientSelect.addEventListener("change", applySelectedClient);
 clientEmailInput.addEventListener("input", syncClientEmailToGuests);
