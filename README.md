@@ -23,8 +23,9 @@ Open `http://127.0.0.1:4180`.
 ## Deploy to internalbooking.openframe.studio
 
 This repo includes `render.yaml` for deploying the app as a Render web service.
-Use a paid web service with the included persistent disk so saved bookings and
-clients are not wiped during restarts or deploys.
+The default blueprint uses Render's free web service so you can get the app live
+first. On the free plan, saved bookings and clients can be reset when Render
+restarts or redeploys the service.
 
 1. In Render, create a new Blueprint from this GitHub repo.
 2. Keep the service as `internal-booking`.
@@ -37,8 +38,9 @@ clients are not wiped during restarts or deploys.
 5. In your DNS provider, add the DNS record Render gives you for the
    `internalbooking` subdomain, then verify it in Render.
 
-The blueprint sets the app to listen on `0.0.0.0` in production, uses
-`/api/status` as the health check, and mounts the persistent disk at `data/`.
+The blueprint sets the app to listen on `0.0.0.0` in production and uses
+`/api/status` as the health check. Upgrade the service before using it for real
+bookings so the saved bookings and clients can be moved to permanent storage.
 
 ## Connect Lark Calendar
 
