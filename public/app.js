@@ -29,6 +29,7 @@ const newClientButton = document.querySelector("#newClientButton");
 const refreshButton = document.querySelector("#refreshButton");
 const testLarkButton = document.querySelector("#testLarkButton");
 const previewLarkButton = document.querySelector("#previewLarkButton");
+const logoutButton = document.querySelector("#logoutButton");
 const larkPreview = document.querySelector("#larkPreview");
 const previewTitle = document.querySelector("#previewTitle");
 const previewTime = document.querySelector("#previewTime");
@@ -133,6 +134,18 @@ function applyClientExamplePlaceholders(example = getRandomClientExample()) {
   directoryClientEmail.placeholder = example.email;
   directoryAgentName.placeholder = example.agent;
   directoryAgentPhone.placeholder = example.phone;
+}
+
+async function fetchJson(url, options) {
+  const response = await fetch(url, options);
+  const data = await response.json().catch(() => ({}));
+
+  if (response.status === 401) {
+    window.location.href = "/login";
+    throw new Error("Log in first.");
+  }
+
+  return { response, data };
 }
 
 function parseEmailList(value) {
@@ -582,8 +595,7 @@ function updateStats() {
 }
 
 async function loadStatus() {
-  const response = await fetch("/api/status");
-  const status = await response.json();
+  const { data: status } = await fetchJson("/api/status");
 
   larkDot.className = `status-dot ${status.larkConfigured ? "ready" : "offline"}`;
   larkTitle.textContent = status.larkConfigured ? "Lark connected" : "Lark not connected";
@@ -593,8 +605,7 @@ async function loadStatus() {
 }
 
 async function loadBookings() {
-  const response = await fetch("/api/bookings");
-  const data = await response.json();
+  const { data } = await fetchJson("/api/bookings");
   bookings = data.bookings || [];
   renderBookings();
 }
@@ -603,8 +614,7 @@ async function loadClients() {
   const cachedClients = getCachedClients();
 
   try {
-    const response = await fetch("/api/clients");
-    const data = await response.json();
+    const { data } = await fetchJson("/api/clients");
     clients = mergeClientLists(cachedClients, data.clients || []);
   } catch {
     clients = cachedClients;
@@ -637,12 +647,11 @@ async function saveDirectoryClient(event) {
   setClientMessage("Saving client...");
 
   try {
-    const response = await fetch("/api/clients", {
+    const { response, data: result } = await fetchJson("/api/clients", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
     });
-    const result = await response.json();
 
     if (!response.ok) {
       setClientMessage((result.errors || ["Could not save client."]).join(" "), "error");
@@ -676,12 +685,11 @@ async function submitBooking(event) {
   bookingForm.querySelector("button[type='submit']").disabled = true;
 
   try {
-    const response = await fetch("/api/bookings", {
+    const { response, data: result } = await fetchJson("/api/bookings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data)
     });
-    const result = await response.json();
 
     if (!response.ok) {
       setMessage((result.errors || ["Could not create booking."]).join(" "), "error");
@@ -734,12 +742,11 @@ async function previewLarkEvent() {
   setMessage("Building Lark preview...");
 
   try {
-    const response = await fetch("/api/lark/preview", {
+    const { response, data: result } = await fetchJson("/api/lark/preview", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data)
     });
-    const result = await response.json();
 
     if (!response.ok) {
       setMessage((result.errors || ["Could not build preview."]).join(" "), "error");
@@ -757,8 +764,7 @@ async function previewLarkEvent() {
 }
 
 async function cancelBooking(id) {
-  const response = await fetch(`/api/bookings/${id}/cancel`, { method: "POST" });
-  const result = await response.json();
+  const { response, data: result } = await fetchJson(`/api/bookings/${id}/cancel`, { method: "POST" });
 
   if (response.ok) {
     bookings = bookings.map((booking) => (booking.id === id ? result.booking : booking));
@@ -771,8 +777,7 @@ async function testLark() {
   testLarkButton.textContent = "Testing";
 
   try {
-    const response = await fetch("/api/lark/test", { method: "POST" });
-    const result = await response.json();
+    const { data: result } = await fetchJson("/api/lark/test", { method: "POST" });
     larkDot.className = `status-dot ${result.ok ? "ready" : "offline"}`;
     larkTitle.textContent = result.ok ? "Lark test passed" : "Lark test failed";
     larkDetail.textContent = result.message;
@@ -786,6 +791,16 @@ async function testLark() {
   }
 }
 
+async function logout() {
+  logoutButton.disabled = true;
+
+  try {
+    await fetch("/api/logout", { method: "POST" });
+  } finally {
+    window.location.href = "/login";
+  }
+}
+
 bookingForm.addEventListener("submit", submitBooking);
 bookingForm.addEventListener("input", saveBookingDraft);
 bookingForm.addEventListener("change", saveBookingDraft);
@@ -793,6 +808,7 @@ clientForm.addEventListener("submit", saveDirectoryClient);
 refreshButton.addEventListener("click", loadBookings);
 testLarkButton.addEventListener("click", testLark);
 previewLarkButton.addEventListener("click", previewLarkEvent);
+logoutButton.addEventListener("click", logout);
 clientSelect.addEventListener("change", applySelectedClient);
 clientEmailInput.addEventListener("input", syncClientEmailToGuests);
 clientEmailInput.addEventListener("change", syncClientEmailToGuests);
