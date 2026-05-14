@@ -98,6 +98,26 @@ function getSelectedServices() {
     .map((input) => ({ name: input.value }));
 }
 
+function getRecommendedDurationMinutes(services = getSelectedServices()) {
+  if (services.length >= 3) {
+    return 90;
+  }
+
+  if (services.length === 2) {
+    return 60;
+  }
+
+  if (services.length === 1) {
+    return 45;
+  }
+
+  return Number(durationInput.value) || 45;
+}
+
+function updateDurationForServices() {
+  durationInput.value = String(getRecommendedDurationMinutes());
+}
+
 function getBookingServiceLabel(booking) {
   if (Array.isArray(booking.services) && booking.services.length) {
     return booking.services.map((service) => service.name).join(" + ");
@@ -484,6 +504,7 @@ async function submitBooking(event) {
     clientSelect.value = "";
     syncedClientEmail = "";
     setInitialDateTime();
+    updateDurationForServices();
     setMessage(
       result.booking.larkStatus === "synced"
         ? "Booking created and sent to Lark."
@@ -584,6 +605,9 @@ clientEmailInput.addEventListener("change", syncClientEmailToGuests);
 clientEmailInput.addEventListener("blur", syncClientEmailToGuests);
 guestEmailsInput.addEventListener("input", updateInvitationSummary);
 newClientButton.addEventListener("click", resetClientForm);
+for (const input of serviceInputs) {
+  input.addEventListener("change", updateDurationForServices);
+}
 
 for (const link of navLinks) {
   link.addEventListener("click", (event) => {
@@ -597,6 +621,7 @@ window.addEventListener("popstate", () => {
 });
 
 setInitialDateTime();
+updateDurationForServices();
 await Promise.all([loadStatus(), loadClients(), loadBookings()]);
 updateInvitationSummary();
 setRoute(window.location.pathname, false);
