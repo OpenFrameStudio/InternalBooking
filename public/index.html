@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Lark Booking Desk</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <nav class="top-nav" aria-label="Main navigation">
+        <a class="nav-link active" href="/" data-route="/">Bookings</a>
+        <a class="nav-link" href="/clients" data-route="/clients">Clients</a>
+      </nav>
+
+      <section class="app-page" id="bookingPage">
+        <section class="workspace" aria-label="Booking workspace">
+          <aside class="rail">
+            <div>
+              <p class="eyebrow">Lark Booking Desk</p>
+              <h1>Book appointments into your Lark calendar.</h1>
+            </div>
+
+            <div class="status-panel" aria-live="polite">
+              <span class="status-dot" id="larkDot"></span>
+              <div>
+                <strong id="larkTitle">Checking Lark</strong>
+                <p id="larkDetail">Looking for calendar settings.</p>
+              </div>
+            </div>
+
+            <div class="mini-stats">
+              <div>
+                <span id="todayCount">0</span>
+                <small>today</small>
+              </div>
+              <div>
+                <span id="weekCount">0</span>
+                <small>next 7 days</small>
+              </div>
+            </div>
+          </aside>
+
+          <section class="booking-surface">
+            <div class="surface-header">
+              <div>
+                <p class="eyebrow">New booking</p>
+                <h2>Create a property booking</h2>
+              </div>
+              <button class="ghost-button" id="refreshButton" type="button" title="Refresh bookings">
+                Refresh
+              </button>
+            </div>
+
+            <form class="booking-form" id="bookingForm">
+              <label>
+                <span>Property address</span>
+                <input name="propertyAddress" placeholder="5 Barnett Street Ashcroft NSW 2168 Australia" required />
+              </label>
+
+              <section class="client-panel" aria-label="Client details">
+                <div class="client-panel-header">
+                  <span>Client details</span>
+                  <a class="text-link" href="/clients" data-route="/clients">Manage clients</a>
+                </div>
+
+                <label>
+                  <span>Saved client</span>
+                  <select id="clientSelect">
+                    <option value="">New client</option>
+                  </select>
+                </label>
+
+                <div class="form-row two">
+                  <label>
+                    <span>Agency / client</span>
+                    <input name="clientName" id="clientNameInput" placeholder="Khy Real Estate" required />
+                  </label>
+                  <label>
+                    <span>Client email</span>
+                    <input name="clientEmail" id="clientEmailInput" type="email" placeholder="ky@example.com" />
+                  </label>
+                </div>
+
+                <div class="form-row two">
+                  <label>
+                    <span>Agent</span>
+                    <input name="agentName" id="agentNameInput" autocomplete="name" placeholder="Agent name" />
+                  </label>
+                  <label>
+                    <span>Agent phone</span>
+                    <input name="agentPhone" id="agentPhoneInput" autocomplete="tel" placeholder="Agent phone" />
+                  </label>
+                </div>
+
+                <p class="helper-text">Client email is included in guest emails automatically.</p>
+              </section>
+
+              <fieldset class="service-picker">
+                <legend>Services</legend>
+                <label class="service-option">
+                  <input name="services" type="checkbox" value="Photography" checked />
+                  <span>
+                    <strong>Photography</strong>
+                  </span>
+                </label>
+                <label class="service-option">
+                  <input name="services" type="checkbox" value="Floorplan" />
+                  <span>
+                    <strong>Floorplan</strong>
+                  </span>
+                </label>
+                <label class="service-option">
+                  <input name="services" type="checkbox" value="Drone" />
+                  <span>
+                    <strong>Drone</strong>
+                  </span>
+                </label>
+              </fieldset>
+
+              <div class="form-row">
+                <label>
+                  <span>Date</span>
+                  <input name="date" id="dateInput" type="date" required />
+                </label>
+                <label>
+                  <span>Time</span>
+                  <input name="time" id="timeInput" type="time" min="08:00" max="18:00" step="900" required />
+                </label>
+                <label>
+                  <span>Duration</span>
+                  <select name="durationMinutes" id="durationInput" required>
+                    <option value="30">30 min</option>
+                    <option value="45">45 min</option>
+                    <option value="60" selected>60 min</option>
+                    <option value="90">90 min</option>
+                  </select>
+                </label>
+              </div>
+
+              <div class="form-row two">
+                <label>
+                  <span>Photographer</span>
+                  <input name="photographerName" autocomplete="name" value="Barry" required />
+                </label>
+                <label>
+                  <span>Photographer phone</span>
+                  <input name="photographerPhone" autocomplete="tel" value="0403 007 853" />
+                </label>
+              </div>
+
+              <label>
+                <span>Guest emails</span>
+                <input name="guestEmails" id="guestEmailsInput" type="text" placeholder="admin@example.com, stylist@example.com" />
+              </label>
+              <div class="invitation-summary">
+                <span>Invitation list</span>
+                <strong id="invitationEmails">No invitation emails yet.</strong>
+              </div>
+
+              <label>
+                <span>Notes</span>
+                <textarea name="notes" rows="4" placeholder="Access, parking, lockbox, or special instructions"></textarea>
+              </label>
+
+              <div class="actions">
+                <button class="primary-button" type="submit">Create booking</button>
+                <button class="ghost-button" id="previewLarkButton" type="button">Preview Lark event</button>
+                <p id="formMessage" role="status"></p>
+              </div>
+            </form>
+
+            <section class="lark-preview" id="larkPreview" aria-label="Lark event preview" hidden>
+              <div class="preview-header">
+                <p class="eyebrow">Lark preview</p>
+                <h3 id="previewTitle"></h3>
+              </div>
+              <dl class="preview-fields">
+                <div>
+                  <dt>Time</dt>
+                  <dd id="previewTime"></dd>
+                </div>
+                <div>
+                  <dt>Location</dt>
+                  <dd id="previewLocation"></dd>
+                </div>
+                <div>
+                  <dt>Guests</dt>
+                  <dd id="previewGuests"></dd>
+                </div>
+                <div>
+                  <dt>Notes</dt>
+                  <dd><pre id="previewDescription"></pre></dd>
+                </div>
+              </dl>
+            </section>
+          </section>
+        </section>
+
+        <section class="list-section" aria-label="Upcoming bookings">
+          <div class="section-header">
+            <div>
+              <p class="eyebrow">Schedule</p>
+              <h2>Upcoming bookings</h2>
+            </div>
+            <button class="ghost-button" id="testLarkButton" type="button">Test Lark</button>
+          </div>
+
+          <div class="booking-list" id="bookingList"></div>
+        </section>
+      </section>
+
+      <section class="app-page" id="clientsPage" hidden>
+        <section class="directory-surface">
+          <div class="surface-header">
+            <div>
+              <p class="eyebrow">Client directory</p>
+              <h2>Save client and agent details</h2>
+            </div>
+            <a class="ghost-button nav-button" href="/" data-route="/">Back to bookings</a>
+          </div>
+
+          <form class="booking-form client-form" id="clientForm">
+            <input id="directoryClientId" type="hidden" />
+            <div class="form-row two">
+              <label>
+                <span>Agency / client</span>
+                <input id="directoryClientName" placeholder="Khy Real Estate" required />
+              </label>
+              <label>
+                <span>Client email</span>
+                <input id="directoryClientEmail" type="email" placeholder="ky@example.com" />
+              </label>
+            </div>
+
+            <div class="form-row two">
+              <label>
+                <span>Agent</span>
+                <input id="directoryAgentName" placeholder="Khy" />
+              </label>
+              <label>
+                <span>Agent phone</span>
+                <input id="directoryAgentPhone" placeholder="0430 463 588" />
+              </label>
+            </div>
+
+            <div class="actions">
+              <button class="primary-button" type="submit">Save client</button>
+              <button class="ghost-button" id="newClientButton" type="button">New client</button>
+              <p id="clientMessage" role="status"></p>
+            </div>
+          </form>
+        </section>
+
+        <section class="list-section" aria-label="Saved clients">
+          <div class="section-header">
+            <div>
+              <p class="eyebrow">Saved</p>
+              <h2>Clients</h2>
+            </div>
+          </div>
+
+          <div class="client-list" id="clientList"></div>
+        </section>
+      </section>
+    </main>
+
+    <template id="bookingTemplate">
+      <article class="booking-item">
+        <div class="date-box">
+          <span class="month"></span>
+          <strong class="day"></strong>
+        </div>
+        <div class="booking-main">
+          <div class="booking-title-row">
+            <h3></h3>
+            <span class="sync-pill"></span>
+          </div>
+          <p class="booking-time"></p>
+          <p class="booking-location"></p>
+          <p class="booking-client"></p>
+          <p class="booking-contact"></p>
+          <p class="booking-notes"></p>
+        </div>
+        <button class="icon-button cancel-button" type="button" title="Cancel booking" aria-label="Cancel booking">×</button>
+      </article>
+    </template>
+
+    <template id="clientTemplate">
+      <article class="client-item">
+        <div class="client-main">
+          <h3></h3>
+          <p class="client-email"></p>
+          <p class="client-agent"></p>
+        </div>
+        <button class="ghost-button edit-client-button" type="button">Edit</button>
+      </article>
+    </template>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
