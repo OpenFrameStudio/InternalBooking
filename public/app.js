@@ -63,6 +63,39 @@ let isRestoringBookingDraft = false;
 const bookingDraftKey = "openframe.bookingDraft.v2";
 const clientsCacheKey = "openframe.clients.v1";
 
+const clientExamples = [
+  {
+    agency: "Stonebridge Collective",
+    email: "ava@stonebridge.example",
+    agent: "Ava Brooks",
+    phone: "0412 684 209"
+  },
+  {
+    agency: "Northline Estates",
+    email: "leo@northline.example",
+    agent: "Leo Tran",
+    phone: "0426 318 774"
+  },
+  {
+    agency: "Cedar & Coast Realty",
+    email: "nina@cedarcoast.example",
+    agent: "Nina Patel",
+    phone: "0437 902 146"
+  },
+  {
+    agency: "Blue Lantern Property",
+    email: "eli@bluelantern.example",
+    agent: "Eli Morris",
+    phone: "0408 571 663"
+  },
+  {
+    agency: "Park Row Agency",
+    email: "sophie@parkrow.example",
+    agent: "Sophie Lin",
+    phone: "0419 246 805"
+  }
+];
+
 function readStoredJson(key) {
   try {
     return JSON.parse(localStorage.getItem(key) || "null");
@@ -85,6 +118,21 @@ function removeStoredJson(key) {
   } catch {
     // Ignore browsers that block local storage.
   }
+}
+
+function getRandomClientExample() {
+  return clientExamples[Math.floor(Math.random() * clientExamples.length)];
+}
+
+function applyClientExamplePlaceholders(example = getRandomClientExample()) {
+  clientNameInput.placeholder = example.agency;
+  clientEmailInput.placeholder = example.email;
+  agentNameInput.placeholder = example.agent;
+  agentPhoneInput.placeholder = example.phone;
+  directoryClientName.placeholder = example.agency;
+  directoryClientEmail.placeholder = example.email;
+  directoryAgentName.placeholder = example.agent;
+  directoryAgentPhone.placeholder = example.phone;
 }
 
 function parseEmailList(value) {
@@ -397,6 +445,7 @@ function applySelectedClient() {
 function resetClientForm() {
   clientForm.reset();
   directoryClientId.value = "";
+  applyClientExamplePlaceholders();
   setClientMessage("");
   directoryClientName.focus();
 }
@@ -770,6 +819,7 @@ window.addEventListener("popstate", () => {
 
 setInitialDateTime();
 updateDurationForServices();
+applyClientExamplePlaceholders();
 await Promise.all([loadStatus(), loadClients(), loadBookings()]);
 restoreBookingDraft();
 updateInvitationSummary();
