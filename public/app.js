@@ -717,7 +717,7 @@ async function loadClients() {
   const cached = readStored(storageKeys.clients, []).filter((client) => client?.name);
   try {
     const { data } = await fetchJson('/api/clients');
-    state.clients = data.clients || [];
+    state.clients = mergeByName(cached, data.clients || []);
   } catch {
     state.clients = cached;
   }
@@ -730,7 +730,7 @@ async function loadPhotographers() {
   const cached = readStored(storageKeys.photographers, []).filter((photographer) => photographer?.name);
   try {
     const { data } = await fetchJson('/api/photographers');
-    state.photographers = data.photographers || [];
+    state.photographers = mergeByName(cached, data.photographers || []);
   } catch {
     state.photographers = cached;
   }

@@ -1,5 +1,5 @@
 import http from "node:http";
-import { readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { createReadStream, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,11 +8,19 @@ import crypto from "node:crypto";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const publicDir = path.join(__dirname, "public");
-const bookingsFile = path.join(__dirname, "data", "bookings.json");
-const clientsFile = path.join(__dirname, "data", "clients.json");
-const photographersFile = path.join(__dirname, "data", "photographers.json");
 
 loadLocalEnv();
+
+const bundledDataDir = path.join(__dirname, "data");
+const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : bundledDataDir;
+const bookingsFile = path.join(dataDir, "bookings.json");
+const clientsFile = path.join(dataDir, "clients.json");
+const photographersFile = path.join(dataDir, "photographers.json");
+const seedFiles = {
+  bookings: path.join(bundledDataDir, "bookings.json"),
+  clients: path.join(bundledDataDir, "clients.json"),
+  photographers: path.join(bundledDataDir, "photographers.json")
+};
 
 const port = Number(process.env.PORT || 4180);
 const host = process.env.HOST || (process.env.PORT ? "0.0.0.0" : "127.0.0.1");
@@ -226,52 +234,89 @@ function readBody(req) {
   });
 }
 
-async function loadBookings() {
+async function readJsonFile(filePath, fallback) {
   try {
-    const raw = await readFile(bookingsFile, "utf8");
+    const raw = await readFile(filePath, "utf8");
     return JSON.parse(raw);
   } catch (error) {
     if (error.code === "ENOENT") {
-      return [];
+      return fallback;
     }
+    throw error;
+  }
+}
+
+async function writeJsonFile(filePath, value) {
+  await mkdir(path.dirname(filePath), { recursive: true });
+  const tempFile = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(tempFile, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  await rename(tempFile, filePath);
+}
+
+async function fileExists(filePath) {
+  try {
+    await stat(filePath);
+    return true;
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function seedDataFile(targetFile, seedFile, fallback) {
+  if (await fileExists(targetFile)) {
+    return;
+  }
+
+  const seed = await readJsonFile(seedFile, fallback);
+  await writeJsonFile(targetFile, seed);
+}
+
+async function prepareDataStorage() {
+  await mkdir(dataDir, { recursive: true });
+  await Promise.all([
+    seedDataFile(bookingsFile, seedFiles.bookings, []),
+    seedDataFile(clientsFile, seedFiles.clients, []),
+    seedDataFile(photographersFile, seedFiles.photographers, defaultPhotographers)
+  ]);
+}
+
+async function loadBookings() {
+  try {
+    return await readJsonFile(bookingsFile, []);
+  } catch (error) {
     throw error;
   }
 }
 
 async function saveBookings(bookings) {
-  await writeFile(bookingsFile, `${JSON.stringify(bookings, null, 2)}\n`, "utf8");
+  await writeJsonFile(bookingsFile, bookings);
 }
 
 async function loadClients() {
   try {
-    const raw = await readFile(clientsFile, "utf8");
-    return JSON.parse(raw);
+    return await readJsonFile(clientsFile, []);
   } catch (error) {
-    if (error.code === "ENOENT") {
-      return [];
-    }
     throw error;
   }
 }
 
 async function saveClients(clients) {
-  await writeFile(clientsFile, `${JSON.stringify(clients, null, 2)}\n`, "utf8");
+  await writeJsonFile(clientsFile, clients);
 }
 
 async function loadPhotographers() {
   try {
-    const raw = await readFile(photographersFile, "utf8");
-    return JSON.parse(raw);
+    return await readJsonFile(photographersFile, defaultPhotographers);
   } catch (error) {
-    if (error.code === "ENOENT") {
-      return defaultPhotographers;
-    }
     throw error;
   }
 }
 
 async function savePhotographers(photographers) {
-  await writeFile(photographersFile, `${JSON.stringify(photographers, null, 2)}\n`, "utf8");
+  await writeJsonFile(photographersFile, photographers);
 }
 
 function isLarkConfigured() {
@@ -1040,7 +1085,8 @@ async function handleApi(req, res, url) {
     sendJson(res, 200, {
       larkConfigured: isLarkConfigured(),
       calendarId: larkConfig.calendarId,
-      timezone: larkConfig.timezone
+      timezone: larkConfig.timezone,
+      persistentStorage: Boolean(process.env.DATA_DIR)
     });
     return;
   }
@@ -1426,6 +1472,8 @@ const server = http.createServer(async (req, res) => {
     sendJson(res, 500, { errors: [error.message || "Unexpected server error."] });
   }
 });
+
+await prepareDataStorage();
 
 server.listen(port, host, () => {
   console.log(`Booking app running at http://${host}:${port}`);
