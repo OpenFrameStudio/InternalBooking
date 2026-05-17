@@ -312,13 +312,30 @@ function updateDurationForServices() {
   else if (count === 1) el.duration.value = '45';
 }
 
-function mergeByName(...lists) {
+function clientIdentityKey(client) {
+  return [
+    client?.name,
+    client?.agentName,
+    client?.email,
+    client?.agentPhone
+  ]
+    .map((value) => String(value || '').trim().toLowerCase())
+    .join('|');
+}
+
+function recordIdentityKey(item) {
+  return item?.agentName !== undefined || item?.agentPhone !== undefined
+    ? clientIdentityKey(item)
+    : String(item?.name || '').trim().toLowerCase();
+}
+
+function mergeDirectoryRecords(...lists) {
   const merged = new Map();
   for (const list of lists) {
     for (const item of list || []) {
       const name = String(item?.name || '').trim();
       if (!name) continue;
-      const key = name.toLowerCase();
+      const key = item?.id || recordIdentityKey(item);
       const current = merged.get(key);
       const next = { ...current, ...item, name };
       if (!current || new Date(next.updatedAt || 0) >= new Date(current.updatedAt || 0)) {
@@ -717,7 +734,7 @@ async function loadClients() {
   const cached = readStored(storageKeys.clients, []).filter((client) => client?.name);
   try {
     const { data } = await fetchJson('/api/clients');
-    state.clients = mergeByName(cached, data.clients || []);
+    state.clients = mergeDirectoryRecords(cached, data.clients || []);
   } catch {
     state.clients = cached;
   }
@@ -730,7 +747,7 @@ async function loadPhotographers() {
   const cached = readStored(storageKeys.photographers, []).filter((photographer) => photographer?.name);
   try {
     const { data } = await fetchJson('/api/photographers');
-    state.photographers = mergeByName(cached, data.photographers || []);
+    state.photographers = mergeDirectoryRecords(cached, data.photographers || []);
   } catch {
     state.photographers = cached;
   }

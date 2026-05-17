@@ -673,6 +673,17 @@ function validateClient(input) {
   return { errors, client };
 }
 
+function clientIdentityKey(client) {
+  return [
+    client.name,
+    client.agentName,
+    client.email,
+    client.agentPhone
+  ]
+    .map((value) => String(value || "").trim().toLowerCase())
+    .join("|");
+}
+
 function validatePhotographer(input) {
   const errors = [];
   const photographer = {
@@ -1304,7 +1315,7 @@ async function handleApi(req, res, url) {
     const clients = await loadClients();
     const existingIndex = client.id
       ? clients.findIndex((item) => item.id === client.id)
-      : clients.findIndex((item) => item.name.toLowerCase() === client.name.toLowerCase());
+      : clients.findIndex((item) => clientIdentityKey(item) === clientIdentityKey(client));
     const now = new Date().toISOString();
 
     if (existingIndex >= 0) {
@@ -1330,7 +1341,9 @@ async function handleApi(req, res, url) {
 
     clients.sort((a, b) => a.name.localeCompare(b.name));
     await saveClients(clients);
-    const savedClient = clients.find((item) => item.name.toLowerCase() === client.name.toLowerCase());
+    const savedClient = existingIndex >= 0
+      ? clients[existingIndex]
+      : clients.find((item) => clientIdentityKey(item) === clientIdentityKey(client));
     sendJson(res, 200, { client: savedClient, clients });
     return;
   }
