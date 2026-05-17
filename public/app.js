@@ -807,7 +807,9 @@ async function saveDirectoryClient(event) {
     renderOptions(el.clientSelect, state.clients, 'New client', data.client.id);
     renderClientList();
     applySelectedClient();
-    el.directoryClientId.value = data.client.id;
+    el.clientForm.reset();
+    el.directoryClientId.value = '';
+    applyExamplePlaceholders();
     setMessage(el.clientMessage, 'Client saved for bookings.', 'success');
   } catch {
     setMessage(el.clientMessage, 'Could not reach the client directory.', 'error');
@@ -848,7 +850,9 @@ async function saveDirectoryPhotographer(event) {
     renderOptions(el.photographerSelect, state.photographers, 'New photographer', data.photographer.id);
     renderPhotographerList();
     applySelectedPhotographer();
-    el.directoryPhotographerId.value = data.photographer.id;
+    el.photographerForm.reset();
+    el.directoryPhotographerId.value = '';
+    applyExamplePlaceholders();
     setMessage(el.photographerMessage, 'Photographer saved for bookings.', 'success');
   } catch {
     setMessage(el.photographerMessage, 'Could not reach the photographer directory.', 'error');
