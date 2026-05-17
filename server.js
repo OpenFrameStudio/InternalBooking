@@ -595,18 +595,40 @@ function uniqueAddressSuggestions(items) {
   return suggestions;
 }
 
-async function findAddressSuggestions(query) {
-  const cleanQuery = normalizeAddress(query);
-  if (cleanQuery.length < 4) {
-    return [];
+async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 6500) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    if (!response.ok) {
+      throw new Error(`Address lookup failed with ${response.status}.`);
+    }
+    return await response.json().catch(() => ({}));
+  } finally {
+    clearTimeout(timeout);
   }
+}
 
-  const cacheKey = cleanQuery.toLowerCase();
-  const cached = addressSuggestionCache.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now()) {
-    return cached.suggestions;
-  }
+function normalizeArcgisAddress(value) {
+  return normalizeAddress(String(value || "").replace(/,\s*AUS$/i, ", Australia"));
+}
 
+async function findArcgisAddressSuggestions(cleanQuery) {
+  const params = new URLSearchParams({
+    f: "json",
+    text: cleanQuery,
+    countryCode: "AUS",
+    maxSuggestions: "6"
+  });
+
+  const result = await fetchJsonWithTimeout(`https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/suggest?${params}`);
+  return uniqueAddressSuggestions((result.suggestions || []).map((suggestion) => ({
+    address: normalizeArcgisAddress(suggestion.text),
+    label: suggestion.text
+  })));
+}
+
+async function findNominatimAddressSuggestions(cleanQuery) {
   const waitMs = Math.max(0, 1100 - (Date.now() - lastAddressLookupAt));
   if (waitMs) {
     await delay(waitMs);
@@ -621,24 +643,45 @@ async function findAddressSuggestions(query) {
     q: cleanQuery
   });
 
-  const response = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
+  const results = await fetchJsonWithTimeout(`https://nominatim.openstreetmap.org/search?${params}`, {
     headers: {
       "User-Agent": "OpenFrameInternalBooking/1.0 (internalbooking.openframe.studio)",
       "Accept-Language": "en-AU,en;q=0.9"
     }
   });
 
-  if (!response.ok) {
-    throw new Error(`Address lookup failed with ${response.status}.`);
+  return uniqueAddressSuggestions((Array.isArray(results) ? results : []).map((result) => ({
+    address: compactAddress(result) || result.display_name,
+    label: result.display_name
+  })));
+}
+
+async function findAddressSuggestions(query) {
+  const cleanQuery = normalizeAddress(query);
+  if (cleanQuery.length < 4) {
+    return [];
   }
 
-  const results = await response.json().catch(() => []);
-  const suggestions = uniqueAddressSuggestions(
-    results.map((result) => ({
-      address: compactAddress(result) || result.display_name,
-      label: result.display_name
-    }))
-  );
+  const cacheKey = cleanQuery.toLowerCase();
+  const cached = addressSuggestionCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.suggestions;
+  }
+
+  let suggestions = [];
+  try {
+    suggestions = await findArcgisAddressSuggestions(cleanQuery);
+  } catch {
+    suggestions = [];
+  }
+
+  if (!suggestions.length) {
+    try {
+      suggestions = await findNominatimAddressSuggestions(cleanQuery);
+    } catch {
+      suggestions = [];
+    }
+  }
 
   addressSuggestionCache.set(cacheKey, {
     suggestions,

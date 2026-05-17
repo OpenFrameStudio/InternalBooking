@@ -207,6 +207,23 @@ function localAddressSuggestions(query = el.propertyAddress.value) {
     .slice(0, 8);
 }
 
+function normalizeRemoteAddress(value) {
+  return normalizeAddress(String(value || '').replace(/,\s*AUS$/i, ', Australia'));
+}
+
+async function fetchBrowserAddressSuggestions(query) {
+  const params = new URLSearchParams({
+    f: 'json',
+    text: query,
+    countryCode: 'AUS',
+    maxSuggestions: '6'
+  });
+  const response = await fetch(`https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/suggest?${params}`);
+  if (!response.ok) return [];
+  const data = await response.json().catch(() => ({}));
+  return (data.suggestions || []).map((suggestion) => normalizeRemoteAddress(suggestion.text)).filter(Boolean);
+}
+
 function renderAddressSuggestions(addresses, message = '') {
   const suggestions = uniqueAddresses(addresses).slice(0, 8);
   el.addressDatalist.innerHTML = '';
@@ -248,12 +265,15 @@ async function searchAddressSuggestions() {
   el.searchAddressButton.textContent = 'Searching';
   setMessage(el.addressMessage, 'Searching addresses...');
   try {
-    const { response, data } = await fetchJson(`/api/address-suggestions?q=${encodeURIComponent(query)}`);
-    if (!response.ok) {
-      setMessage(el.addressMessage, (data.errors || ['Could not find address suggestions.']).join(' '), 'error');
-      return;
+    let remoteAddresses = await fetchBrowserAddressSuggestions(query);
+    if (!remoteAddresses.length) {
+      const { response, data } = await fetchJson(`/api/address-suggestions?q=${encodeURIComponent(query)}`);
+      if (!response.ok) {
+        setMessage(el.addressMessage, (data.errors || ['Could not find address suggestions.']).join(' '), 'error');
+        return;
+      }
+      remoteAddresses = (data.suggestions || []).map((suggestion) => suggestion.address || suggestion.label);
     }
-    const remoteAddresses = (data.suggestions || []).map((suggestion) => suggestion.address || suggestion.label);
     const addresses = uniqueAddresses([...remoteAddresses, ...localAddressSuggestions(query)]);
     renderAddressSuggestions(addresses, addresses.length ? 'Choose an address above.' : 'No suggestions found.');
     if (addresses.length) {
