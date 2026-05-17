@@ -489,48 +489,12 @@ function getDraft() {
 }
 
 function saveDraft() {
-  if (state.restoringDraft || state.editingBookingId) return;
-  writeStored(storageKeys.draft, getDraft());
+  removeStored(storageKeys.draft);
 }
 
 function restoreDraft() {
-  const draft = readStored(storageKeys.draft, null);
-  if (!draft || typeof draft !== 'object') return false;
-  state.restoringDraft = true;
-  el.propertyAddress.value = draft.propertyAddress || '';
-  el.clientSelect.value = draft.selectedClientId || '';
-  el.clientName.value = draft.clientName || '';
-  el.clientEmail.value = draft.clientEmail || '';
-  el.agentName.value = draft.agentName || '';
-  el.agentPhone.value = draft.agentPhone || '';
-  el.date.value = draft.date || el.date.value;
-  el.time.value = draft.time || el.time.value;
-  el.duration.value = draft.durationMinutes || el.duration.value;
-  el.photographerSelect.value = draft.selectedPhotographerId || '';
-  el.photographerName.value = draft.photographerName || 'Barry';
-  el.photographerEmail.value = draft.photographerEmail || '';
-  el.photographerPhone.value = draft.photographerPhone || '0403 007 853';
-  el.guestEmails.value = draft.guestEmails || '';
-  el.bookingForm.elements.notes.value = draft.notes || '';
-  if (Array.isArray(draft.services) && draft.services.length) {
-    const selected = new Set(draft.services);
-    el.serviceInputs.forEach((input) => {
-      input.checked = selected.has(input.value);
-    });
-  }
-  if (el.clientSelect.value) {
-    applySelectedClient();
-  }
-  if (el.photographerSelect.value) {
-    applySelectedPhotographer();
-  }
-  state.syncedClientEmail = uniqueEmails(parseEmails(el.clientEmail.value)).filter(isEmail);
-  state.syncedPhotographerEmail = uniqueEmails(parseEmails(el.photographerEmail.value)).filter(isEmail);
-  updateInvitationSummary();
-  updateAddressSuggestions();
-  state.restoringDraft = false;
-  saveDraft();
-  return true;
+  removeStored(storageKeys.draft);
+  return false;
 }
 
 function setBookingMode(booking = null) {
@@ -1034,9 +998,8 @@ async function cancelBooking(id) {
 }
 
 function cancelBookingEdit() {
-  const draft = readStored(storageKeys.draft, null);
   resetBookingForm('Edit cancelled.');
-  if (draft) restoreDraft();
+  removeStored(storageKeys.draft);
 }
 
 async function testLark() {
