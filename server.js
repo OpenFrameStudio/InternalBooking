@@ -21,6 +21,13 @@ const seedFiles = {
   clients: path.join(bundledDataDir, "clients.json"),
   photographers: path.join(bundledDataDir, "photographers.json")
 };
+const githubStorage = {
+  token: process.env.GITHUB_STORAGE_TOKEN || "",
+  repo: process.env.GITHUB_STORAGE_REPO || "OpenFrameStudio/InternalBooking",
+  branch: process.env.GITHUB_STORAGE_BRANCH || "data-store",
+  pathPrefix: (process.env.GITHUB_STORAGE_PATH || "data").replace(/^\/+|\/+$/g, "")
+};
+const storageBackend = githubStorage.token && githubStorage.repo ? "github" : (process.env.DATA_DIR ? "disk" : "app");
 
 const port = Number(process.env.PORT || 4180);
 const host = process.env.HOST || (process.env.PORT ? "0.0.0.0" : "127.0.0.1");
@@ -65,6 +72,26 @@ const defaultPhotographers = [
     updatedAt: "2026-05-16T00:00:00.000+10:00"
   }
 ];
+const dataFiles = {
+  bookings: {
+    file: bookingsFile,
+    seedFile: seedFiles.bookings,
+    githubPath: githubDataPath("bookings.json"),
+    fallback: []
+  },
+  clients: {
+    file: clientsFile,
+    seedFile: seedFiles.clients,
+    githubPath: githubDataPath("clients.json"),
+    fallback: []
+  },
+  photographers: {
+    file: photographersFile,
+    seedFile: seedFiles.photographers,
+    githubPath: githubDataPath("photographers.json"),
+    fallback: defaultPhotographers
+  }
+};
 
 function loadLocalEnv() {
   try {
@@ -253,6 +280,101 @@ async function writeJsonFile(filePath, value) {
   await rename(tempFile, filePath);
 }
 
+function githubDataPath(filename) {
+  return [githubStorage.pathPrefix, filename].filter(Boolean).join("/");
+}
+
+function githubContentsUrl(filePath) {
+  const parts = githubStorage.repo.split("/");
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    throw new Error("GITHUB_STORAGE_REPO must look like owner/repo.");
+  }
+
+  const repoPath = parts.map((part) => encodeURIComponent(part)).join("/");
+  const contentPath = filePath.split("/").map((part) => encodeURIComponent(part)).join("/");
+  return `https://api.github.com/repos/${repoPath}/contents/${contentPath}`;
+}
+
+async function parseGithubError(response) {
+  const data = await response.json().catch(() => ({}));
+  return data.message || `GitHub storage request failed with ${response.status}.`;
+}
+
+async function getGithubContent(filePath) {
+  const url = `${githubContentsUrl(filePath)}?ref=${encodeURIComponent(githubStorage.branch)}`;
+  const response = await fetch(url, {
+    headers: {
+      Accept: "application/vnd.github+json",
+      Authorization: `Bearer ${githubStorage.token}`,
+      "X-GitHub-Api-Version": "2022-11-28",
+      "User-Agent": "OpenFrameInternalBooking/1.0"
+    }
+  });
+
+  if (response.status === 404) {
+    return null;
+  }
+
+  if (!response.ok) {
+    throw new Error(await parseGithubError(response));
+  }
+
+  return response.json();
+}
+
+async function readGithubJson(filePath, fallback) {
+  const content = await getGithubContent(filePath);
+  if (!content) {
+    return fallback;
+  }
+
+  if (content.type !== "file" || !content.content) {
+    throw new Error(`GitHub storage path ${filePath} is not a file.`);
+  }
+
+  const raw = Buffer.from(content.content.replace(/\s/g, ""), "base64").toString("utf8");
+  return JSON.parse(raw);
+}
+
+async function writeGithubJson(filePath, value) {
+  const json = `${JSON.stringify(value, null, 2)}\n`;
+  const content = Buffer.from(json, "utf8").toString("base64");
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const current = await getGithubContent(filePath);
+    const body = {
+      message: `Update ${filePath}`,
+      content,
+      branch: githubStorage.branch
+    };
+    if (current?.sha) {
+      body.sha = current.sha;
+    }
+
+    const response = await fetch(githubContentsUrl(filePath), {
+      method: "PUT",
+      headers: {
+        Accept: "application/vnd.github+json",
+        Authorization: `Bearer ${githubStorage.token}`,
+        "Content-Type": "application/json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "OpenFrameInternalBooking/1.0"
+      },
+      body: JSON.stringify(body)
+    });
+
+    if (response.ok) {
+      return;
+    }
+
+    if (response.status === 409 && attempt === 0) {
+      continue;
+    }
+
+    throw new Error(await parseGithubError(response));
+  }
+}
+
 async function fileExists(filePath) {
   try {
     await stat(filePath);
@@ -274,49 +396,84 @@ async function seedDataFile(targetFile, seedFile, fallback) {
   await writeJsonFile(targetFile, seed);
 }
 
+async function readStoredJson(dataFile) {
+  if (storageBackend === "github") {
+    return readGithubJson(dataFile.githubPath, dataFile.fallback);
+  }
+
+  return readJsonFile(dataFile.file, dataFile.fallback);
+}
+
+async function writeStoredJson(dataFile, value) {
+  if (storageBackend === "github") {
+    await writeGithubJson(dataFile.githubPath, value);
+    return;
+  }
+
+  await writeJsonFile(dataFile.file, value);
+}
+
+async function seedStoredDataFile(dataFile) {
+  if (storageBackend === "github") {
+    const existing = await getGithubContent(dataFile.githubPath);
+    if (existing) {
+      return;
+    }
+
+    const seed = await readJsonFile(dataFile.seedFile, dataFile.fallback);
+    await writeGithubJson(dataFile.githubPath, seed);
+    return;
+  }
+
+  await seedDataFile(dataFile.file, dataFile.seedFile, dataFile.fallback);
+}
+
 async function prepareDataStorage() {
-  await mkdir(dataDir, { recursive: true });
+  if (storageBackend !== "github") {
+    await mkdir(dataDir, { recursive: true });
+  }
+
   await Promise.all([
-    seedDataFile(bookingsFile, seedFiles.bookings, []),
-    seedDataFile(clientsFile, seedFiles.clients, []),
-    seedDataFile(photographersFile, seedFiles.photographers, defaultPhotographers)
+    seedStoredDataFile(dataFiles.bookings),
+    seedStoredDataFile(dataFiles.clients),
+    seedStoredDataFile(dataFiles.photographers)
   ]);
 }
 
 async function loadBookings() {
   try {
-    return await readJsonFile(bookingsFile, []);
+    return await readStoredJson(dataFiles.bookings);
   } catch (error) {
     throw error;
   }
 }
 
 async function saveBookings(bookings) {
-  await writeJsonFile(bookingsFile, bookings);
+  await writeStoredJson(dataFiles.bookings, bookings);
 }
 
 async function loadClients() {
   try {
-    return await readJsonFile(clientsFile, []);
+    return await readStoredJson(dataFiles.clients);
   } catch (error) {
     throw error;
   }
 }
 
 async function saveClients(clients) {
-  await writeJsonFile(clientsFile, clients);
+  await writeStoredJson(dataFiles.clients, clients);
 }
 
 async function loadPhotographers() {
   try {
-    return await readJsonFile(photographersFile, defaultPhotographers);
+    return await readStoredJson(dataFiles.photographers);
   } catch (error) {
     throw error;
   }
 }
 
 async function savePhotographers(photographers) {
-  await writeJsonFile(photographersFile, photographers);
+  await writeStoredJson(dataFiles.photographers, photographers);
 }
 
 function isLarkConfigured() {
@@ -1086,7 +1243,8 @@ async function handleApi(req, res, url) {
       larkConfigured: isLarkConfigured(),
       calendarId: larkConfig.calendarId,
       timezone: larkConfig.timezone,
-      persistentStorage: Boolean(process.env.DATA_DIR)
+      persistentStorage: storageBackend !== "app",
+      storageBackend
     });
     return;
   }
