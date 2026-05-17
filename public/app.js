@@ -21,6 +21,7 @@ const el = {
   time: $('#timeInput'),
   duration: $('#durationInput'),
   serviceInputs: $$('input[name=services]'),
+  clientSearch: $('#clientSearchInput'),
   clientSelect: $('#clientSelect'),
   clientName: $('#clientNameInput'),
   clientEmail: $('#clientEmailInput'),
@@ -444,6 +445,32 @@ function renderOptions(select, items, emptyLabel, selectedId = select.value) {
   select.value = selectedId || '';
 }
 
+function clientSearchText(client) {
+  return [
+    client.name,
+    client.agentName,
+    client.email,
+    client.agentPhone
+  ].join(' ').toLowerCase();
+}
+
+function filteredClients() {
+  const query = normalizeAddress(el.clientSearch.value).toLowerCase();
+  if (!query) return state.clients;
+  const terms = query.split(/\s+/).filter(Boolean);
+  return state.clients.filter((client) => terms.every((term) => clientSearchText(client).includes(term)));
+}
+
+function renderClientOptions(selectedId = el.clientSelect.value) {
+  const clients = filteredClients();
+  const hasSelected = state.clients.some((client) => client.id === selectedId);
+  const selectedIsVisible = clients.some((client) => client.id === selectedId);
+  const options = hasSelected && selectedId && !selectedIsVisible
+    ? [state.clients.find((client) => client.id === selectedId), ...clients]
+    : clients;
+  renderOptions(el.clientSelect, options.filter(Boolean), clients.length ? 'New client' : 'No matching clients', selectedId);
+}
+
 function renderClientList() {
   el.clientList.innerHTML = '';
   if (!state.clients.length) {
@@ -487,6 +514,8 @@ function renderPhotographerList() {
 function applySelectedClient() {
   const client = state.clients.find((item) => item.id === el.clientSelect.value);
   if (!client) return;
+  el.clientSearch.value = '';
+  renderClientOptions(client.id);
   el.clientName.value = client.name || '';
   el.clientEmail.value = client.email || '';
   el.agentName.value = client.agentName || '';
@@ -596,6 +625,7 @@ function fillBookingForm(booking) {
 function resetBookingForm(message = '') {
   setBookingMode();
   el.bookingForm.reset();
+  el.clientSearch.value = '';
   el.clientSelect.value = '';
   el.photographerSelect.value = '';
   state.syncedClientEmail = [];
@@ -759,7 +789,7 @@ async function loadClients() {
     state.clients = cached;
   }
   writeStored(storageKeys.clients, state.clients);
-  renderOptions(el.clientSelect, state.clients, 'New client');
+  renderClientOptions();
   renderClientList();
 }
 
@@ -805,7 +835,8 @@ async function saveDirectoryClient(event) {
     }
     state.clients = data.clients || state.clients;
     writeStored(storageKeys.clients, state.clients);
-    renderOptions(el.clientSelect, state.clients, 'New client', data.client.id);
+    el.clientSearch.value = '';
+    renderClientOptions(data.client.id);
     renderClientList();
     applySelectedClient();
     el.clientForm.reset();
@@ -904,7 +935,7 @@ async function deleteClient(id) {
       el.clientForm.reset();
       el.directoryClientId.value = '';
     }
-    renderOptions(el.clientSelect, state.clients, 'New client', el.clientSelect.value);
+    renderClientOptions(el.clientSelect.value);
     renderClientList();
     setMessage(el.clientMessage, 'Client deleted.', 'success');
   } catch {
@@ -1077,6 +1108,7 @@ el.testLarkButton.addEventListener('click', testLark);
 el.previewLarkButton.addEventListener('click', previewLarkEvent);
 el.cancelEditButton.addEventListener('click', cancelBookingEdit);
 el.logoutButton.addEventListener('click', logout);
+el.clientSearch.addEventListener('input', () => renderClientOptions(''));
 el.clientSelect.addEventListener('change', applySelectedClient);
 el.photographerSelect.addEventListener('change', applySelectedPhotographer);
 el.clientEmail.addEventListener('input', () => syncManagedGuestEmail(el.clientEmail, 'syncedClientEmail'));
@@ -1092,6 +1124,7 @@ el.newClientButton.addEventListener('click', () => {
   el.clientForm.reset();
   el.directoryClientId.value = '';
   applyExamplePlaceholders();
+  renderClientOptions();
   setMessage(el.clientMessage, '');
 });
 el.newPhotographerButton.addEventListener('click', () => {
