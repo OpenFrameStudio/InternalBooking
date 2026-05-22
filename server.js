@@ -41,8 +41,8 @@ const larkConfig = {
   apiBase: (process.env.LARK_API_BASE || "https://open.larksuite.com/open-apis").replace(/\/$/, "")
 };
 const authConfig = {
-  username: process.env.ADMIN_USERNAME || "OpenFrame",
-  password: process.env.ADMIN_PASSWORD || "Studio"
+  username: process.env.ADMIN_USERNAME || "ShuhanGao",
+  password: process.env.ADMIN_PASSWORD || "Sg1654723576"
 };
 const authUsers = [
   {
@@ -56,7 +56,7 @@ const authUsers = [
   },
   {
     username: process.env.EMPLOYEE_USERNAME || "Faye",
-    password: process.env.EMPLOYEE_PASSWORD || "0000",
+    password: process.env.EMPLOYEE_PASSWORD || "1111",
     role: "employee",
     label: "Employee",
     name: "Faye",

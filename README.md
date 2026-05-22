@@ -20,12 +20,14 @@ node server.js
 
 Open `http://127.0.0.1:4180`.
 
-Default login:
+Default logins:
 
-- Login: `OpenFrame`
-- Password: `Studio`
+- Boss login: `ShuhanGao`
+- Boss password: `Sg1654723576`
+- Faye login: `Faye`
+- Faye password: `1111`
 
-You can override these with `ADMIN_USERNAME` and `ADMIN_PASSWORD`.
+You can override these with `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `EMPLOYEE_USERNAME`, and `EMPLOYEE_PASSWORD`.
 
 ## Deploy to internalbooking.openframe.studio
 
