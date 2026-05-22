@@ -28,6 +28,7 @@ Default logins:
 - Faye password: `1111`
 
 Faye can access Bookings and Work. Boss can access Bookings, Clients, Photographers, and Work.
+Work actions are enforced by server-side permissions; hiding buttons in the browser is only for usability.
 
 You can override these with `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `EMPLOYEE_USERNAME`, and `EMPLOYEE_PASSWORD`.
 

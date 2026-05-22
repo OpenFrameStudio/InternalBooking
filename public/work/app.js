@@ -50,12 +50,28 @@ const state = {
   user: null,
 };
 
-function isBoss() {
-  return state.user?.role === "boss";
-}
-
 function userCanAccess(app) {
   return Boolean(state.user?.apps?.includes(app));
+}
+
+function userHasPermission(permission) {
+  return Boolean(state.user?.permissions?.includes(permission));
+}
+
+function canManageWork() {
+  return userHasPermission("manage_work");
+}
+
+function canSyncBookings() {
+  return userHasPermission("sync_work_bookings");
+}
+
+function canViewWorkMessages() {
+  return userHasPermission("view_work_messages");
+}
+
+function canCompleteAssignment(assignment) {
+  return canManageWork() || assignment?.employeeId === state.user?.employeeId;
 }
 
 async function apiFetch(url, options = {}) {
@@ -83,6 +99,29 @@ async function apiFetch(url, options = {}) {
   return data;
 }
 
+function jsonRequest(method, body = null) {
+  return {
+    method,
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  };
+}
+
+function assignmentEndpoint(id, action = "") {
+  const base = `/api/work/assignments/${encodeURIComponent(id)}`;
+  return action ? `${base}/${action}` : base;
+}
+
+const workApi = {
+  load: () => apiFetch("/api/work"),
+  syncBookings: () => apiFetch("/api/work/sync-bookings", jsonRequest("POST")),
+  createAssignment: (payload) => apiFetch("/api/work/assignments", jsonRequest("POST", payload)),
+  updateAssignment: (id, payload) => apiFetch(assignmentEndpoint(id), jsonRequest("PUT", payload)),
+  completeAssignment: (id) => apiFetch(assignmentEndpoint(id, "complete"), jsonRequest("POST")),
+  reopenAssignment: (id) => apiFetch(assignmentEndpoint(id, "reopen"), jsonRequest("POST")),
+  deleteAssignment: (id) => apiFetch(assignmentEndpoint(id), jsonRequest("DELETE")),
+  clearMessages: () => apiFetch("/api/work/messages", jsonRequest("DELETE")),
+};
+
 function applyWorkData(data) {
   state.employee = data.employee || state.employee;
   state.assignments = Array.isArray(data.assignments) ? data.assignments : [];
@@ -91,7 +130,7 @@ function applyWorkData(data) {
 }
 
 async function loadWork() {
-  applyWorkData(await apiFetch("/api/work"));
+  applyWorkData(await workApi.load());
   render();
 }
 
@@ -151,15 +190,14 @@ function renderProfile() {
 }
 
 function renderRoleAccess() {
-  const boss = isBoss();
   el.appLinks.forEach((link) => {
     link.hidden = !userCanAccess(link.dataset.appLink);
   });
-  el.addAssignmentButton.hidden = !boss;
-  el.syncBookingsButton.hidden = !boss;
-  el.bookingSyncPanel.hidden = !boss;
-  el.enableMessagesButton.hidden = !boss;
-  el.clearMessagesButton.hidden = !boss;
+  el.addAssignmentButton.hidden = !canManageWork();
+  el.syncBookingsButton.hidden = !canSyncBookings();
+  el.bookingSyncPanel.hidden = !canSyncBookings();
+  el.enableMessagesButton.hidden = !canViewWorkMessages();
+  el.clearMessagesButton.hidden = !canViewWorkMessages();
 }
 
 function renderMetrics() {
@@ -247,14 +285,14 @@ function renderAssignmentCard(assignment) {
 
   const actions = card.querySelector(".assignment-actions");
 
-  if (assignment.status !== "done") {
+  if (assignment.status !== "done" && canCompleteAssignment(assignment)) {
     const completeButton = document.createElement("button");
     completeButton.className = "ghost-button complete-button";
     completeButton.type = "button";
     completeButton.textContent = state.user?.role === "employee" ? "Mark Finished" : "Finished";
     completeButton.dataset.completeAssignment = assignment.id;
     actions.append(completeButton);
-  } else if (isBoss()) {
+  } else if (assignment.status === "done" && canManageWork()) {
     const reopenButton = document.createElement("button");
     reopenButton.className = "ghost-button complete-button";
     reopenButton.type = "button";
@@ -268,7 +306,7 @@ function renderAssignmentCard(assignment) {
     actions.append(finishedLabel);
   }
 
-  if (isBoss()) {
+  if (canManageWork()) {
     const editButton = document.createElement("button");
     editButton.className = "ghost-button icon-ghost";
     editButton.type = "button";
@@ -283,7 +321,7 @@ function renderAssignmentCard(assignment) {
 }
 
 function renderMessages() {
-  if (!isBoss()) {
+  if (!canViewWorkMessages()) {
     el.messagePanel.hidden = true;
     el.messageList.replaceChildren();
     return;
@@ -308,7 +346,7 @@ function renderMessages() {
 }
 
 function openAssignmentDialog(assignment = null) {
-  if (!isBoss()) return;
+  if (!canManageWork()) return;
 
   el.assignmentError.textContent = "";
   el.assignmentId.value = assignment?.id || "";
@@ -328,7 +366,7 @@ function closeAssignmentDialog() {
 
 async function handleAssignmentSubmit(event) {
   event.preventDefault();
-  if (!isBoss()) return;
+  if (!canManageWork()) return;
 
   const id = el.assignmentId.value;
   const payload = {
@@ -344,10 +382,9 @@ async function handleAssignmentSubmit(event) {
   }
 
   try {
-    const data = await apiFetch(id ? `/api/work/assignments/${encodeURIComponent(id)}` : "/api/work/assignments", {
-      method: id ? "PUT" : "POST",
-      body: JSON.stringify(payload),
-    });
+    const data = id
+      ? await workApi.updateAssignment(id, payload)
+      : await workApi.createAssignment(payload);
     applyWorkData(data);
     closeAssignmentDialog();
     if (!id && data.workInviteMessage) showToast(data.workInviteMessage);
@@ -358,7 +395,10 @@ async function handleAssignmentSubmit(event) {
 }
 
 async function completeAssignment(id) {
-  const data = await apiFetch(`/api/work/assignments/${encodeURIComponent(id)}/complete`, { method: "POST" });
+  const assignmentBeforeUpdate = state.assignments.find((item) => item.id === id);
+  if (!canCompleteAssignment(assignmentBeforeUpdate)) return;
+
+  const data = await workApi.completeAssignment(id);
   applyWorkData(data);
   render();
   const assignment = state.assignments.find((item) => item.id === id);
@@ -366,38 +406,38 @@ async function completeAssignment(id) {
 }
 
 async function reopenAssignment(id) {
-  if (!isBoss()) return;
-  const data = await apiFetch(`/api/work/assignments/${encodeURIComponent(id)}/reopen`, { method: "POST" });
+  if (!canManageWork()) return;
+  const data = await workApi.reopenAssignment(id);
   applyWorkData(data);
   render();
 }
 
 async function deleteCurrentAssignment() {
-  if (!isBoss()) return;
+  if (!canManageWork()) return;
 
   const id = el.assignmentId.value;
   if (!id) return;
-  const data = await apiFetch(`/api/work/assignments/${encodeURIComponent(id)}`, { method: "DELETE" });
+  const data = await workApi.deleteAssignment(id);
   applyWorkData(data);
   closeAssignmentDialog();
   render();
 }
 
 async function clearMessages() {
-  if (!isBoss()) return;
-  const data = await apiFetch("/api/work/messages", { method: "DELETE" });
+  if (!canViewWorkMessages()) return;
+  const data = await workApi.clearMessages();
   applyWorkData(data);
   render();
 }
 
 async function syncBookings() {
-  if (!isBoss()) return;
+  if (!canSyncBookings()) return;
 
   el.syncBookingsButton.disabled = true;
   el.bookingSyncStatus.textContent = "Checking upcoming bookings...";
 
   try {
-    const data = await apiFetch("/api/work/sync-bookings", { method: "POST" });
+    const data = await workApi.syncBookings();
     applyWorkData(data);
     state.filter = "open";
     const message = data.syncable === 0
@@ -437,7 +477,7 @@ function showToast(text) {
 }
 
 async function enableNotifications() {
-  if (!isBoss()) return;
+  if (!canViewWorkMessages()) return;
 
   if (!("Notification" in window)) {
     showToast("Browser messages are not available here.");

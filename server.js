@@ -381,6 +381,19 @@ function hasPermission(req, permission) {
   return Boolean(currentUser(req)?.permissions?.includes(permission));
 }
 
+function requirePermission(req, res, permission, message = "You do not have access to that feature.") {
+  if (hasPermission(req, permission)) {
+    return true;
+  }
+
+  sendForbidden(res, message);
+  return false;
+}
+
+function canCompleteWorkAssignment(user, assignment) {
+  return user?.role === "boss" || assignment.employeeId === user?.employeeId;
+}
+
 function sendForbidden(res, message = "You do not have access to that feature.") {
   sendJson(res, 403, { errors: [message] });
 }
@@ -2565,8 +2578,7 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "POST" && url.pathname === "/api/work/sync-bookings") {
-    if (!hasPermission(req, "sync_work_bookings")) {
-      sendForbidden(res, "Boss or team leader only.");
+    if (!requirePermission(req, res, "sync_work_bookings", "Boss or team leader only.")) {
       return;
     }
 
@@ -2587,8 +2599,7 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "POST" && url.pathname === "/api/work/assignments") {
-    if (!hasPermission(req, "manage_work")) {
-      sendForbidden(res, "Boss or team leader only.");
+    if (!requirePermission(req, res, "manage_work", "Boss or team leader only.")) {
       return;
     }
 
@@ -2623,7 +2634,7 @@ async function handleApi(req, res, url) {
       return;
     }
 
-    if (!isBoss(req) && assignment.employeeId !== currentUser(req)?.employeeId) {
+    if (!canCompleteWorkAssignment(currentUser(req), assignment)) {
       sendForbidden(res);
       return;
     }
@@ -2647,8 +2658,7 @@ async function handleApi(req, res, url) {
 
   const reopenWorkMatch = url.pathname.match(/^\/api\/work\/assignments\/([^/]+)\/reopen$/);
   if (req.method === "POST" && reopenWorkMatch) {
-    if (!hasPermission(req, "manage_work")) {
-      sendForbidden(res, "Boss or team leader only.");
+    if (!requirePermission(req, res, "manage_work", "Boss or team leader only.")) {
       return;
     }
 
@@ -2671,8 +2681,7 @@ async function handleApi(req, res, url) {
 
   const workAssignmentMatch = url.pathname.match(/^\/api\/work\/assignments\/([^/]+)$/);
   if ((req.method === "PUT" || req.method === "PATCH") && workAssignmentMatch) {
-    if (!hasPermission(req, "manage_work")) {
-      sendForbidden(res, "Boss or team leader only.");
+    if (!requirePermission(req, res, "manage_work", "Boss or team leader only.")) {
       return;
     }
 
@@ -2700,8 +2709,7 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "DELETE" && workAssignmentMatch) {
-    if (!hasPermission(req, "manage_work")) {
-      sendForbidden(res, "Boss or team leader only.");
+    if (!requirePermission(req, res, "manage_work", "Boss or team leader only.")) {
       return;
     }
 
@@ -2720,8 +2728,7 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "DELETE" && url.pathname === "/api/work/messages") {
-    if (!hasPermission(req, "view_work_messages")) {
-      sendForbidden(res, "Boss or team leader only.");
+    if (!requirePermission(req, res, "view_work_messages", "Boss or team leader only.")) {
       return;
     }
 
