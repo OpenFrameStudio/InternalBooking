@@ -22,6 +22,7 @@ const el = {
   duration: $('#durationInput'),
   serviceInputs: $$('input[name=services]'),
   clientSearch: $('#clientSearchInput'),
+  clientSearchResults: $('#clientSearchResults'),
   clientSelect: $('#clientSelect'),
   clientName: $('#clientNameInput'),
   clientEmail: $('#clientEmailInput'),
@@ -445,6 +446,10 @@ function renderOptions(select, items, emptyLabel, selectedId = select.value) {
   select.value = selectedId || '';
 }
 
+function clientOptionLabel(client) {
+  return [client.name, client.agentName].filter(Boolean).join(' - ');
+}
+
 function clientSearchText(client) {
   return [
     client.name,
@@ -462,13 +467,48 @@ function filteredClients() {
 }
 
 function renderClientOptions(selectedId = el.clientSelect.value) {
-  const clients = filteredClients();
-  const hasSelected = state.clients.some((client) => client.id === selectedId);
-  const selectedIsVisible = clients.some((client) => client.id === selectedId);
-  const options = hasSelected && selectedId && !selectedIsVisible
-    ? [state.clients.find((client) => client.id === selectedId), ...clients]
-    : clients;
-  renderOptions(el.clientSelect, options.filter(Boolean), clients.length ? 'New client' : 'No matching clients', selectedId);
+  renderOptions(el.clientSelect, state.clients, 'New client', selectedId);
+  renderClientSearchResults();
+}
+
+function renderClientSearchResults() {
+  const query = normalizeAddress(el.clientSearch.value);
+  el.clientSearchResults.innerHTML = '';
+
+  if (!query) {
+    el.clientSearchResults.hidden = true;
+    return;
+  }
+
+  const matches = filteredClients().slice(0, 6);
+  if (!matches.length) {
+    const empty = document.createElement('div');
+    empty.className = 'client-search-empty';
+    empty.textContent = 'No saved clients match this search.';
+    el.clientSearchResults.append(empty);
+    el.clientSearchResults.hidden = false;
+    return;
+  }
+
+  for (const client of matches) {
+    const button = document.createElement('button');
+    button.className = 'client-search-result';
+    button.type = 'button';
+
+    const title = document.createElement('strong');
+    title.textContent = clientOptionLabel(client) || client.name;
+    const meta = document.createElement('span');
+    meta.textContent = [client.email, client.agentPhone].filter(Boolean).join(' · ');
+
+    button.append(title, meta);
+    button.addEventListener('click', () => {
+      el.clientSelect.value = client.id;
+      applySelectedClient();
+    });
+    el.clientSearchResults.append(button);
+  }
+
+  el.clientSearchResults.hidden = false;
 }
 
 function renderClientList() {
@@ -514,8 +554,8 @@ function renderPhotographerList() {
 function applySelectedClient() {
   const client = state.clients.find((item) => item.id === el.clientSelect.value);
   if (!client) return;
-  el.clientSearch.value = '';
-  renderClientOptions(client.id);
+  el.clientSearch.value = clientOptionLabel(client);
+  el.clientSearchResults.hidden = true;
   el.clientName.value = client.name || '';
   el.clientEmail.value = client.email || '';
   el.agentName.value = client.agentName || '';
@@ -626,6 +666,7 @@ function resetBookingForm(message = '') {
   setBookingMode();
   el.bookingForm.reset();
   el.clientSearch.value = '';
+  el.clientSearchResults.hidden = true;
   el.clientSelect.value = '';
   el.photographerSelect.value = '';
   state.syncedClientEmail = [];
@@ -1108,7 +1149,11 @@ el.testLarkButton.addEventListener('click', testLark);
 el.previewLarkButton.addEventListener('click', previewLarkEvent);
 el.cancelEditButton.addEventListener('click', cancelBookingEdit);
 el.logoutButton.addEventListener('click', logout);
-el.clientSearch.addEventListener('input', () => renderClientOptions(''));
+el.clientSearch.addEventListener('input', () => {
+  el.clientSelect.value = '';
+  renderClientSearchResults();
+});
+el.clientSearch.addEventListener('focus', renderClientSearchResults);
 el.clientSelect.addEventListener('change', applySelectedClient);
 el.photographerSelect.addEventListener('change', applySelectedPhotographer);
 el.clientEmail.addEventListener('input', () => syncManagedGuestEmail(el.clientEmail, 'syncedClientEmail'));

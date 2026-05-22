@@ -363,6 +363,44 @@ button {
   text-underline-offset: 4px;
 }
 
+.hidden-select {
+  display: none;
+}
+
+.client-search-results {
+  display: grid;
+  gap: 8px;
+  margin-top: -6px;
+}
+
+.client-search-result,
+.client-search-empty {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.client-search-result {
+  display: grid;
+  gap: 3px;
+  color: var(--ink);
+}
+
+.client-search-result:hover {
+  border-color: var(--line-strong);
+  background: var(--soft);
+}
+
+.client-search-result span,
+.client-search-empty {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
 .client-save-row {
   display: flex;
   justify-content: flex-start;
