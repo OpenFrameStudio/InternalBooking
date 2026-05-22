@@ -2336,6 +2336,33 @@ async function updateLarkEvent(booking) {
   return result.data?.event || result.data || result;
 }
 
+async function deleteLarkEvent(booking) {
+  if (!booking.larkEventId) {
+    return null;
+  }
+
+  const token = await getTenantAccessToken();
+  const calendarId = encodeURIComponent(effectiveLarkCalendarId());
+  const eventId = encodeURIComponent(booking.larkEventId);
+  const params = new URLSearchParams({ need_notification: "true" });
+
+  const response = await fetch(`${larkConfig.apiBase}/calendar/v4/calendars/${calendarId}/events/${eventId}?${params}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json; charset=utf-8"
+    }
+  });
+
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || (result.code !== undefined && result.code !== 0)) {
+    const message = result.msg || result.message || `Lark event delete failed with ${response.status}.`;
+    throw new Error(message);
+  }
+
+  return result.data || result;
+}
+
 function getAddedGuestEmails(previousEmails = [], nextEmails = []) {
   const previous = new Set(previousEmails.map((email) => email.toLowerCase()));
   return nextEmails.filter((email) => !previous.has(email.toLowerCase()));
@@ -2427,6 +2454,39 @@ async function syncBookingToLark(booking, previousBooking = null) {
     booking.larkStatus = "failed";
     booking.larkError = error.message;
     booking.larkAttendeeStatus = booking.guestEmails.length ? "not_sent" : "not_needed";
+  }
+
+  return booking;
+}
+
+async function cancelBookingInLark(booking) {
+  if (!isLarkConfigured()) {
+    booking.larkStatus = "not_configured";
+    booking.larkError = null;
+    booking.larkAttendeeStatus = "not_configured";
+    booking.larkAttendeeError = null;
+    return booking;
+  }
+
+  if (!booking.larkEventId) {
+    booking.larkStatus = "not_needed";
+    booking.larkError = null;
+    booking.larkAttendeeStatus = "not_needed";
+    booking.larkAttendeeError = null;
+    return booking;
+  }
+
+  try {
+    await deleteLarkEvent(booking);
+    booking.larkStatus = "cancelled";
+    booking.larkError = null;
+    booking.larkAttendeeStatus = "cancelled";
+    booking.larkAttendeeError = null;
+  } catch (error) {
+    booking.larkStatus = "delete_failed";
+    booking.larkError = error.message;
+    booking.larkAttendeeStatus = booking.guestEmails?.length ? "cancel_not_sent" : "not_needed";
+    booking.larkAttendeeError = error.message;
   }
 
   return booking;
@@ -3114,6 +3174,7 @@ async function handleApi(req, res, url) {
 
     booking.status = "cancelled";
     booking.cancelledAt = new Date().toISOString();
+    await cancelBookingInLark(booking);
     await saveBookings(bookings);
     const invoices = await loadInvoices();
     const invoiceResult = upsertInvoiceForBooking(invoices, booking);

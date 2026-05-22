@@ -815,6 +815,8 @@ function buildBookingPayload() {
 }
 
 function syncLabel(booking) {
+  if (booking.status === 'cancelled' && booking.larkStatus === 'delete_failed') return 'calendar cancel failed';
+  if (booking.status === 'cancelled' && booking.larkStatus === 'cancelled') return 'calendar cancelled';
   if (booking.status === 'cancelled') return 'cancelled';
   if (booking.larkOnly) return 'from Lark';
   if (booking.larkAttendeeStatus === 'needs_review') return 'check guests';
@@ -870,8 +872,13 @@ function renderBookings() {
     editButton.title = booking.larkOnly ? 'This booking was imported from Lark.' : '';
     editButton.addEventListener('click', () => startBookingEdit(booking.id));
     const cancelButton = item.querySelector('.cancel-button');
-    cancelButton.disabled = booking.status === 'cancelled' || booking.larkOnly;
-    cancelButton.title = booking.larkOnly ? 'Cancel this in Lark.' : '';
+    const canRetryCalendarCancel = booking.status === 'cancelled' && booking.larkEventId && booking.larkStatus !== 'cancelled';
+    cancelButton.disabled = (!canRetryCalendarCancel && booking.status === 'cancelled') || booking.larkOnly;
+    cancelButton.title = booking.larkOnly
+      ? 'Cancel this in Lark.'
+      : canRetryCalendarCancel
+        ? 'Send calendar cancellation again.'
+        : '';
     cancelButton.addEventListener('click', () => cancelBooking(booking.id));
     el.bookingList.append(item);
   }
