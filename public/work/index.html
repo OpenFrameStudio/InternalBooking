@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Faye Work Desk</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
+    <script src="/work/app.js?v=1" type="module"></script>
+  </head>
+  <body>
+    <main class="shell">
+      <nav class="top-nav" aria-label="Main navigation">
+        <a class="nav-link nav-home" href="/">All apps</a>
+        <a class="nav-link" href="/bookings" data-app-link="bookings">Bookings</a>
+        <a class="nav-link" href="/clients" data-app-link="clients">Clients</a>
+        <a class="nav-link" href="/photographers" data-app-link="photographers">Photographers</a>
+        <a class="nav-link active" href="/work/" data-app-link="work">Work</a>
+        <span class="nav-link nav-status" id="sessionPill">Checking session</span>
+        <button class="nav-link nav-action" id="logoutButton" type="button">Log out</button>
+      </nav>
+
+      <section class="app-page">
+        <section class="workspace" aria-label="Work assignment workspace">
+          <aside class="rail">
+            <div>
+              <p class="eyebrow">Faye Work Desk</p>
+              <h1>Assign work and know when it is finished.</h1>
+            </div>
+
+            <div class="status-panel">
+              <span class="status-dot ready"></span>
+              <div>
+                <strong id="employeeName">Faye</strong>
+                <p id="employeeRole">Editor / Admin</p>
+                <p id="employeeAvailability">Mon-Fri, 12pm-8pm Australian time</p>
+              </div>
+            </div>
+
+            <div class="mini-stats work-mini-stats">
+              <div>
+                <span id="openCount">0</span>
+                <small>open</small>
+              </div>
+              <div>
+                <span id="dueTodayCount">0</span>
+                <small>due today</small>
+              </div>
+              <div>
+                <span id="doneCount">0</span>
+                <small>finished</small>
+              </div>
+            </div>
+          </aside>
+
+          <section class="booking-surface">
+            <div class="surface-header">
+              <div>
+                <p class="eyebrow">Work assignments</p>
+                <h2>Faye's work queue</h2>
+                <p id="summaryLine"></p>
+              </div>
+              <div class="actions">
+                <button class="ghost-button icon-ghost" id="enableMessagesButton" type="button" title="Enable messages" aria-label="Enable messages">
+                  <i data-lucide="bell"></i>
+                </button>
+                <button class="ghost-button" id="syncBookingsButton" type="button">
+                  <i data-lucide="refresh-cw"></i>
+                  <span>Sync bookings</span>
+                </button>
+                <button class="primary-button" id="addAssignmentButton" type="button">
+                  <i data-lucide="clipboard-plus"></i>
+                  <span>Assign Work</span>
+                </button>
+              </div>
+            </div>
+
+            <section class="client-panel message-panel" id="messagePanel" hidden>
+              <div class="client-panel-header">
+                <span>Completion messages</span>
+                <button class="ghost-button" id="clearMessagesButton" type="button">Clear messages</button>
+              </div>
+              <div class="message-list" id="messageList"></div>
+            </section>
+
+            <section class="client-panel integration-panel" id="bookingSyncPanel">
+              <div class="client-panel-header">
+                <span>Internal booking system</span>
+                <a class="ghost-button" href="/bookings">Open bookings</a>
+              </div>
+              <p id="bookingSyncStatus" role="status">Sync upcoming bookings into Faye's work queue.</p>
+            </section>
+
+            <fieldset class="service-picker work-filter-bar" aria-label="Work filters">
+              <legend>View</legend>
+              <label class="service-option">
+                <input name="workFilter" type="radio" data-filter="open" checked />
+                <span><strong>Open</strong></span>
+              </label>
+              <label class="service-option">
+                <input name="workFilter" type="radio" data-filter="all" />
+                <span><strong>All</strong></span>
+              </label>
+              <label class="service-option">
+                <input name="workFilter" type="radio" data-filter="done" />
+                <span><strong>Finished</strong></span>
+              </label>
+            </fieldset>
+
+            <section class="assignment-list" id="assignmentList" aria-label="Assigned work"></section>
+          </section>
+        </section>
+      </section>
+    </main>
+
+    <dialog id="assignmentDialog">
+      <form method="dialog" id="assignmentForm" class="dialog-card booking-form">
+        <div class="surface-header dialog-heading">
+          <div>
+            <p class="eyebrow">Faye</p>
+            <h2 id="assignmentDialogTitle">Assign Work</h2>
+          </div>
+          <button class="ghost-button icon-ghost" type="button" id="closeAssignmentDialogButton" title="Close" aria-label="Close">
+            <i data-lucide="x"></i>
+          </button>
+        </div>
+
+        <input type="hidden" id="assignmentId" />
+
+        <label>
+          <span>Work</span>
+          <input id="assignmentTitle" type="text" placeholder="Edit article draft" required />
+        </label>
+        <div class="form-row two">
+          <label>
+            <span>Due date</span>
+            <input id="assignmentDueDate" type="date" required />
+          </label>
+          <label>
+            <span>Priority</span>
+            <select id="assignmentPriority">
+              <option value="normal">Normal</option>
+              <option value="high">High</option>
+              <option value="low">Low</option>
+            </select>
+          </label>
+        </div>
+        <label>
+          <span>Details</span>
+          <textarea id="assignmentNotes" rows="5" placeholder="What needs to be done"></textarea>
+        </label>
+
+        <p class="form-error" id="assignmentError" role="alert"></p>
+
+        <div class="dialog-actions">
+          <button class="icon-button" id="deleteAssignmentButton" type="button" title="Delete work" aria-label="Delete work">
+            <i data-lucide="trash-2"></i>
+          </button>
+          <div>
+            <button class="ghost-button" type="button" id="cancelAssignmentButton">Cancel</button>
+            <button class="primary-button" type="submit">
+              <i data-lucide="save"></i>
+              <span>Save</span>
+            </button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
+    <div class="toast-region" id="toastRegion" aria-live="polite" aria-atomic="true"></div>
+  </body>
+</html>

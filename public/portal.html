@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OpenFrame Apps</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
+    <script src="/portal.js?v=1" type="module"></script>
+  </head>
+  <body class="portal-body">
+    <main class="portal-shell">
+      <section class="app-launcher" aria-label="OpenFrame apps">
+        <div class="launcher-header">
+          <div>
+            <p class="eyebrow">OpenFrame Studio</p>
+            <h1>Your apps</h1>
+          </div>
+          <button class="launcher-edit" type="button" title="Apps are managed by login permissions" aria-label="Apps are managed by login permissions">
+            <i data-lucide="pencil"></i>
+          </button>
+        </div>
+
+        <div class="launcher-grid" id="launcherGrid"></div>
+
+        <div class="launcher-footer">
+          <span id="sessionLabel">Checking login</span>
+          <button class="ghost-button" id="logoutButton" type="button">Log out</button>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

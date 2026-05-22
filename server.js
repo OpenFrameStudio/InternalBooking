@@ -16,10 +16,12 @@ const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : bund
 const bookingsFile = path.join(dataDir, "bookings.json");
 const clientsFile = path.join(dataDir, "clients.json");
 const photographersFile = path.join(dataDir, "photographers.json");
+const workFile = path.join(dataDir, "work-assignments.json");
 const seedFiles = {
   bookings: path.join(bundledDataDir, "bookings.json"),
   clients: path.join(bundledDataDir, "clients.json"),
-  photographers: path.join(bundledDataDir, "photographers.json")
+  photographers: path.join(bundledDataDir, "photographers.json"),
+  work: path.join(bundledDataDir, "work-assignments.json")
 };
 const githubStorage = {
   token: process.env.GITHUB_STORAGE_TOKEN || "",
@@ -42,6 +44,33 @@ const authConfig = {
   username: process.env.ADMIN_USERNAME || "OpenFrame",
   password: process.env.ADMIN_PASSWORD || "Studio"
 };
+const authUsers = [
+  {
+    username: authConfig.username,
+    password: authConfig.password,
+    role: "boss",
+    label: "Boss / Team Leader",
+    name: "Boss",
+    apps: ["bookings", "clients", "photographers", "work"],
+    permissions: ["manage_bookings", "manage_directory", "manage_work", "sync_work_bookings", "view_work_messages"]
+  },
+  {
+    username: process.env.EMPLOYEE_USERNAME || "Faye",
+    password: process.env.EMPLOYEE_PASSWORD || "0000",
+    role: "employee",
+    label: "Employee",
+    name: "Faye",
+    employeeId: "faye",
+    apps: ["work"],
+    permissions: ["complete_work"]
+  }
+];
+const workDeskOrigins = new Set(
+  (process.env.WORK_DESK_ORIGINS || "http://127.0.0.1:4173,http://localhost:4173")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+);
 
 let tenantTokenCache = null;
 const sessions = new Map();
@@ -72,6 +101,16 @@ const defaultPhotographers = [
     updatedAt: "2026-05-16T00:00:00.000+10:00"
   }
 ];
+const defaultWorkState = {
+  employee: {
+    id: "faye",
+    name: "Faye",
+    role: "Editor / Admin",
+    availability: "Mon-Fri, 12pm-8pm Australian time"
+  },
+  assignments: [],
+  messages: []
+};
 const dataFiles = {
   bookings: {
     file: bookingsFile,
@@ -90,6 +129,12 @@ const dataFiles = {
     seedFile: seedFiles.photographers,
     githubPath: githubDataPath("photographers.json"),
     fallback: defaultPhotographers
+  },
+  work: {
+    file: workFile,
+    seedFile: seedFiles.work,
+    githubPath: githubDataPath("work-assignments.json"),
+    fallback: defaultWorkState
   }
 };
 
@@ -137,6 +182,19 @@ function sendJson(res, status, payload, headers = {}) {
 function sendNoContent(res) {
   res.writeHead(204);
   res.end();
+}
+
+function applyCorsHeaders(req, res) {
+  const origin = req.headers.origin || "";
+  if (!workDeskOrigins.has(origin)) {
+    return;
+  }
+
+  res.setHeader("Access-Control-Allow-Origin", origin);
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type,Accept");
+  res.setHeader("Vary", "Origin");
 }
 
 function redirect(res, location) {
@@ -203,26 +261,77 @@ function cleanupExpiredSessions() {
   }
 }
 
-function createSession() {
+function sessionUserPayload(user) {
+  return {
+    username: user.username,
+    role: user.role,
+    label: user.label,
+    name: user.name || user.username,
+    employeeId: user.employeeId || "",
+    apps: Array.isArray(user.apps) ? user.apps : [],
+    permissions: Array.isArray(user.permissions) ? user.permissions : []
+  };
+}
+
+function createSession(user) {
   cleanupExpiredSessions();
   const token = crypto.randomBytes(32).toString("base64url");
-  sessions.set(token, { expiresAt: Date.now() + sessionMaxAgeSeconds * 1000 });
+  sessions.set(token, {
+    expiresAt: Date.now() + sessionMaxAgeSeconds * 1000,
+    user: sessionUserPayload(user)
+  });
   return token;
 }
 
-function isAuthenticated(req) {
+function currentSession(req) {
   const token = getSessionToken(req);
   const session = sessions.get(token);
   if (!session) {
-    return false;
+    return null;
   }
 
   if (session.expiresAt <= Date.now()) {
     sessions.delete(token);
-    return false;
+    return null;
   }
 
-  return true;
+  return session;
+}
+
+function currentUser(req) {
+  return currentSession(req)?.user || null;
+}
+
+function isAuthenticated(req) {
+  return Boolean(currentSession(req));
+}
+
+function isBoss(req) {
+  return currentUser(req)?.role === "boss";
+}
+
+function userCanAccessApp(user, app) {
+  return Boolean(user?.apps?.includes(app));
+}
+
+function canAccessApp(req, app) {
+  return userCanAccessApp(currentUser(req), app);
+}
+
+function hasPermission(req, permission) {
+  return Boolean(currentUser(req)?.permissions?.includes(permission));
+}
+
+function sendForbidden(res, message = "You do not have access to that feature.") {
+  sendJson(res, 403, { errors: [message] });
+}
+
+function appForRoute(pathname) {
+  if (pathname === "/bookings" || pathname === "/index.html") return "bookings";
+  if (pathname === "/clients") return "clients";
+  if (pathname === "/photographers") return "photographers";
+  if (pathname === "/work" || pathname === "/work/") return "work";
+  return "";
 }
 
 function safeEquals(left, right) {
@@ -231,8 +340,10 @@ function safeEquals(left, right) {
   return leftBuffer.length === rightBuffer.length && crypto.timingSafeEqual(leftBuffer, rightBuffer);
 }
 
-function credentialsAreValid(input) {
-  return safeEquals(input.username, authConfig.username) && safeEquals(input.password, authConfig.password);
+function findAuthUser(input) {
+  return authUsers.find((user) => {
+    return safeEquals(input.username, user.username) && safeEquals(input.password, user.password);
+  }) || null;
 }
 
 function readBody(req) {
@@ -436,7 +547,8 @@ async function prepareDataStorage() {
   await Promise.all([
     seedStoredDataFile(dataFiles.bookings),
     seedStoredDataFile(dataFiles.clients),
-    seedStoredDataFile(dataFiles.photographers)
+    seedStoredDataFile(dataFiles.photographers),
+    seedStoredDataFile(dataFiles.work)
   ]);
 }
 
@@ -474,6 +586,211 @@ async function loadPhotographers() {
 
 async function savePhotographers(photographers) {
   await writeStoredJson(dataFiles.photographers, photographers);
+}
+
+function normalizeWorkState(raw) {
+  const employee = {
+    ...defaultWorkState.employee,
+    ...(raw?.employee || {})
+  };
+
+  const assignments = Array.isArray(raw?.assignments)
+    ? raw.assignments.map((assignment) => ({
+        id: assignment.id || crypto.randomUUID(),
+        employeeId: defaultWorkState.employee.id,
+        title: String(assignment.title || "Untitled work"),
+        dueDate: /^\d{4}-\d{2}-\d{2}$/.test(String(assignment.dueDate || ""))
+          ? assignment.dueDate
+          : toDateValue(new Date()),
+        priority: ["high", "normal", "low"].includes(assignment.priority) ? assignment.priority : "normal",
+        notes: String(assignment.notes || ""),
+        status: assignment.status === "done" ? "done" : "open",
+        source: String(assignment.source || ""),
+        sourceId: String(assignment.sourceId || ""),
+        completedAt: assignment.completedAt || "",
+        createdAt: assignment.createdAt || new Date().toISOString(),
+        updatedAt: assignment.updatedAt || assignment.createdAt || new Date().toISOString()
+      }))
+    : [];
+
+  const messages = Array.isArray(raw?.messages) ? raw.messages : [];
+
+  return { employee, assignments, messages };
+}
+
+async function loadWorkState() {
+  return normalizeWorkState(await readStoredJson(dataFiles.work));
+}
+
+async function saveWorkState(workState) {
+  await writeStoredJson(dataFiles.work, normalizeWorkState(workState));
+}
+
+function visibleWorkStateForUser(workState, user) {
+  if (user?.role === "boss") {
+    return workState;
+  }
+
+  return {
+    ...workState,
+    assignments: workState.assignments.filter((assignment) => assignment.employeeId === user?.employeeId),
+    messages: []
+  };
+}
+
+function toDateValue(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function parseDateValue(value) {
+  const [year, month, day] = String(value || "").split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function validateWorkAssignment(input, existing = null) {
+  const title = String(input.title || "").trim();
+  const dueDate = String(input.dueDate || "").trim();
+  const priority = ["high", "normal", "low"].includes(input.priority) ? input.priority : "normal";
+  const notes = String(input.notes || "").trim();
+  const errors = [];
+
+  if (!title) errors.push("Enter the work title.");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) errors.push("Choose a valid due date.");
+
+  return {
+    errors,
+    assignment: {
+      id: existing?.id || crypto.randomUUID(),
+      employeeId: defaultWorkState.employee.id,
+      title,
+      dueDate,
+      priority,
+      notes,
+      status: existing?.status || "open",
+      source: existing?.source || String(input.source || ""),
+      sourceId: existing?.sourceId || String(input.sourceId || ""),
+      completedAt: existing?.completedAt || "",
+      createdAt: existing?.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    }
+  };
+}
+
+function bookingServiceLabel(booking) {
+  if (Array.isArray(booking.services) && booking.services.length) {
+    return booking.services
+      .map((service) => service?.name || service)
+      .filter(Boolean)
+      .join(" + ");
+  }
+
+  return booking.service || "Booking";
+}
+
+function bookingWindowLabel(booking) {
+  const start = new Date(booking.startAt);
+  const end = new Date(booking.endAt || booking.startAt);
+  if (Number.isNaN(start.getTime())) return "Time not set";
+
+  const date = new Intl.DateTimeFormat("en-AU", {
+    weekday: "short",
+    day: "numeric",
+    month: "short"
+  }).format(start);
+  const time = new Intl.DateTimeFormat("en-AU", {
+    hour: "numeric",
+    minute: "2-digit"
+  });
+
+  return Number.isNaN(end.getTime())
+    ? `${date}, ${time.format(start)}`
+    : `${date}, ${time.format(start)}-${time.format(end)}`;
+}
+
+function workdayBeforeBooking(booking) {
+  const start = new Date(booking.startAt);
+  if (Number.isNaN(start.getTime())) return toDateValue(new Date());
+
+  const due = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+  due.setDate(due.getDate() - 1);
+
+  while (due.getDay() === 0 || due.getDay() === 6) {
+    due.setDate(due.getDate() - 1);
+  }
+
+  const today = parseDateValue(toDateValue(new Date()));
+  return toDateValue(due < today ? today : due);
+}
+
+function bookingWorkPriority(booking) {
+  const due = parseDateValue(workdayBeforeBooking(booking));
+  const today = parseDateValue(toDateValue(new Date()));
+  const daysUntilDue = Math.ceil((due - today) / (24 * 60 * 60 * 1000));
+  return daysUntilDue <= 1 ? "high" : "normal";
+}
+
+function isSyncableBooking(booking) {
+  if (!booking?.id || booking.status === "cancelled") return false;
+  const end = new Date(booking.endAt || booking.startAt);
+  if (Number.isNaN(end.getTime())) return false;
+  return end >= parseDateValue(toDateValue(new Date()));
+}
+
+function assignmentFromBooking(booking, existing = null) {
+  const service = bookingServiceLabel(booking);
+  const title = `Booking prep: ${booking.propertyAddress || service}`;
+  const notes = [
+    "Imported from the internal booking system.",
+    `Booking: ${bookingWindowLabel(booking)}`,
+    `Services: ${service}`,
+    booking.propertyAddress ? `Address: ${booking.propertyAddress}` : "",
+    booking.clientName ? `Client: ${booking.clientName}` : "",
+    booking.agentName ? `Agent: ${booking.agentName}${booking.agentPhone ? `, ${booking.agentPhone}` : ""}` : "",
+    booking.photographerName ? `Photographer: ${booking.photographerName}${booking.photographerPhone ? `, ${booking.photographerPhone}` : ""}` : "",
+    booking.notes ? `Booking notes: ${booking.notes}` : ""
+  ].filter(Boolean).join("\n");
+
+  return {
+    id: existing?.id || crypto.randomUUID(),
+    employeeId: defaultWorkState.employee.id,
+    title,
+    dueDate: workdayBeforeBooking(booking),
+    priority: bookingWorkPriority(booking),
+    notes,
+    status: existing?.status || "open",
+    source: "booking",
+    sourceId: booking.id,
+    completedAt: existing?.completedAt || "",
+    createdAt: existing?.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+}
+
+function mergeBookingWorkAssignments(workState, bookings) {
+  let created = 0;
+  let updated = 0;
+
+  for (const booking of bookings.filter(isSyncableBooking)) {
+    const existing = workState.assignments.find((assignment) => {
+      return assignment.source === "booking" && assignment.sourceId === booking.id;
+    });
+    const next = assignmentFromBooking(booking, existing);
+
+    if (existing) {
+      workState.assignments = workState.assignments.map((assignment) =>
+        assignment.id === existing.id ? next : assignment
+      );
+      updated += 1;
+    } else {
+      workState.assignments.push(next);
+      created += 1;
+    }
+  }
+
+  return { created, updated, syncable: bookings.filter(isSyncableBooking).length };
 }
 
 function isLarkConfigured() {
@@ -1266,19 +1583,21 @@ async function syncBookingToLark(booking, previousBooking = null) {
 
 async function handleApi(req, res, url) {
   if (req.method === "GET" && url.pathname === "/api/session") {
-    sendJson(res, 200, { authenticated: isAuthenticated(req) });
+    const user = currentUser(req);
+    sendJson(res, 200, { authenticated: Boolean(user), user });
     return;
   }
 
   if (req.method === "POST" && url.pathname === "/api/login") {
     const input = await readBody(req);
-    if (!credentialsAreValid(input)) {
+    const user = findAuthUser(input);
+    if (!user) {
       sendJson(res, 401, { errors: ["Login details did not match."] });
       return;
     }
 
-    const token = createSession();
-    sendJson(res, 200, { ok: true }, { "Set-Cookie": buildSessionCookie(req, token) });
+    const token = createSession(user);
+    sendJson(res, 200, { ok: true, user: sessionUserPayload(user) }, { "Set-Cookie": buildSessionCookie(req, token) });
     return;
   }
 
@@ -1308,7 +1627,179 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  if (url.pathname.startsWith("/api/work") && !canAccessApp(req, "work")) {
+    sendForbidden(res);
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/work") {
+    const workState = await loadWorkState();
+    sendJson(res, 200, {
+      ...visibleWorkStateForUser(workState, currentUser(req)),
+      user: currentUser(req)
+    });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/work/sync-bookings") {
+    if (!hasPermission(req, "sync_work_bookings")) {
+      sendForbidden(res, "Boss or team leader only.");
+      return;
+    }
+
+    const workState = await loadWorkState();
+    const bookings = await loadBookings();
+    const result = mergeBookingWorkAssignments(workState, bookings);
+    await saveWorkState(workState);
+    sendJson(res, 200, { ...visibleWorkStateForUser(workState, currentUser(req)), ...result, user: currentUser(req) });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/work/assignments") {
+    if (!hasPermission(req, "manage_work")) {
+      sendForbidden(res, "Boss or team leader only.");
+      return;
+    }
+
+    const input = await readBody(req);
+    const { errors, assignment } = validateWorkAssignment(input);
+    if (errors.length) {
+      sendJson(res, 400, { errors });
+      return;
+    }
+
+    const workState = await loadWorkState();
+    workState.assignments.push(assignment);
+    await saveWorkState(workState);
+    sendJson(res, 201, { assignment, ...visibleWorkStateForUser(workState, currentUser(req)), user: currentUser(req) });
+    return;
+  }
+
+  const completeWorkMatch = url.pathname.match(/^\/api\/work\/assignments\/([^/]+)\/complete$/);
+  if (req.method === "POST" && completeWorkMatch) {
+    const assignmentId = decodeURIComponent(completeWorkMatch[1]);
+    const workState = await loadWorkState();
+    const assignment = workState.assignments.find((item) => item.id === assignmentId);
+    if (!assignment) {
+      sendJson(res, 404, { errors: ["Work not found."] });
+      return;
+    }
+
+    if (!isBoss(req) && assignment.employeeId !== currentUser(req)?.employeeId) {
+      sendForbidden(res);
+      return;
+    }
+
+    const completedAt = new Date().toISOString();
+    workState.assignments = workState.assignments.map((item) =>
+      item.id === assignmentId
+        ? { ...item, status: "done", completedAt, updatedAt: completedAt }
+        : item
+    );
+    workState.messages.unshift({
+      id: crypto.randomUUID(),
+      text: `${workState.employee.name} finished: ${assignment.title}`,
+      createdAt: completedAt
+    });
+    workState.messages = workState.messages.slice(0, 12);
+    await saveWorkState(workState);
+    sendJson(res, 200, { ...visibleWorkStateForUser(workState, currentUser(req)), user: currentUser(req) });
+    return;
+  }
+
+  const reopenWorkMatch = url.pathname.match(/^\/api\/work\/assignments\/([^/]+)\/reopen$/);
+  if (req.method === "POST" && reopenWorkMatch) {
+    if (!hasPermission(req, "manage_work")) {
+      sendForbidden(res, "Boss or team leader only.");
+      return;
+    }
+
+    const assignmentId = decodeURIComponent(reopenWorkMatch[1]);
+    const workState = await loadWorkState();
+    if (!workState.assignments.some((item) => item.id === assignmentId)) {
+      sendJson(res, 404, { errors: ["Work not found."] });
+      return;
+    }
+
+    workState.assignments = workState.assignments.map((item) =>
+      item.id === assignmentId
+        ? { ...item, status: "open", completedAt: "", updatedAt: new Date().toISOString() }
+        : item
+    );
+    await saveWorkState(workState);
+    sendJson(res, 200, { ...visibleWorkStateForUser(workState, currentUser(req)), user: currentUser(req) });
+    return;
+  }
+
+  const workAssignmentMatch = url.pathname.match(/^\/api\/work\/assignments\/([^/]+)$/);
+  if ((req.method === "PUT" || req.method === "PATCH") && workAssignmentMatch) {
+    if (!hasPermission(req, "manage_work")) {
+      sendForbidden(res, "Boss or team leader only.");
+      return;
+    }
+
+    const assignmentId = decodeURIComponent(workAssignmentMatch[1]);
+    const workState = await loadWorkState();
+    const existing = workState.assignments.find((item) => item.id === assignmentId);
+    if (!existing) {
+      sendJson(res, 404, { errors: ["Work not found."] });
+      return;
+    }
+
+    const input = await readBody(req);
+    const { errors, assignment } = validateWorkAssignment(input, existing);
+    if (errors.length) {
+      sendJson(res, 400, { errors });
+      return;
+    }
+
+    workState.assignments = workState.assignments.map((item) =>
+      item.id === assignmentId ? assignment : item
+    );
+    await saveWorkState(workState);
+    sendJson(res, 200, { assignment, ...visibleWorkStateForUser(workState, currentUser(req)), user: currentUser(req) });
+    return;
+  }
+
+  if (req.method === "DELETE" && workAssignmentMatch) {
+    if (!hasPermission(req, "manage_work")) {
+      sendForbidden(res, "Boss or team leader only.");
+      return;
+    }
+
+    const assignmentId = decodeURIComponent(workAssignmentMatch[1]);
+    const workState = await loadWorkState();
+    const nextAssignments = workState.assignments.filter((item) => item.id !== assignmentId);
+    if (nextAssignments.length === workState.assignments.length) {
+      sendJson(res, 404, { errors: ["Work not found."] });
+      return;
+    }
+
+    workState.assignments = nextAssignments;
+    await saveWorkState(workState);
+    sendJson(res, 200, { ...visibleWorkStateForUser(workState, currentUser(req)), user: currentUser(req) });
+    return;
+  }
+
+  if (req.method === "DELETE" && url.pathname === "/api/work/messages") {
+    if (!hasPermission(req, "view_work_messages")) {
+      sendForbidden(res, "Boss or team leader only.");
+      return;
+    }
+
+    const workState = await loadWorkState();
+    workState.messages = [];
+    await saveWorkState(workState);
+    sendJson(res, 200, { ...visibleWorkStateForUser(workState, currentUser(req)), user: currentUser(req) });
+    return;
+  }
+
   if (req.method === "GET" && url.pathname === "/api/bookings") {
+    if (!canAccessApp(req, "bookings")) {
+      sendForbidden(res);
+      return;
+    }
+
     const bookings = await loadBookings();
     let larkBookings = [];
     let larkImportError = null;
@@ -1330,6 +1821,11 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "GET" && url.pathname === "/api/address-suggestions") {
+    if (!canAccessApp(req, "bookings")) {
+      sendForbidden(res);
+      return;
+    }
+
     const query = url.searchParams.get("q") || "";
     try {
       const suggestions = await findAddressSuggestions(query);
@@ -1341,6 +1837,11 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "GET" && url.pathname === "/api/clients") {
+    if (!canAccessApp(req, "bookings") && !canAccessApp(req, "clients")) {
+      sendForbidden(res);
+      return;
+    }
+
     const clients = await loadClients();
     clients.sort((a, b) => a.name.localeCompare(b.name));
     sendJson(res, 200, { clients });
@@ -1348,6 +1849,11 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "POST" && url.pathname === "/api/clients") {
+    if (!hasPermission(req, "manage_directory")) {
+      sendForbidden(res, "Boss or team leader only.");
+      return;
+    }
+
     const input = await readBody(req);
     const { errors, client } = validateClient(input);
     if (errors.length) {
@@ -1393,6 +1899,11 @@ async function handleApi(req, res, url) {
 
   const clientIdMatch = url.pathname.match(/^\/api\/clients\/([^/]+)$/);
   if (req.method === "DELETE" && clientIdMatch) {
+    if (!hasPermission(req, "manage_directory")) {
+      sendForbidden(res, "Boss or team leader only.");
+      return;
+    }
+
     const clientId = decodeURIComponent(clientIdMatch[1]);
     const clients = await loadClients();
     const nextClients = clients.filter((item) => item.id !== clientId);
@@ -1408,6 +1919,11 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "GET" && url.pathname === "/api/photographers") {
+    if (!canAccessApp(req, "bookings") && !canAccessApp(req, "photographers")) {
+      sendForbidden(res);
+      return;
+    }
+
     const photographers = await loadPhotographers();
     photographers.sort((a, b) => a.name.localeCompare(b.name));
     sendJson(res, 200, { photographers });
@@ -1415,6 +1931,11 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "POST" && url.pathname === "/api/photographers") {
+    if (!hasPermission(req, "manage_directory")) {
+      sendForbidden(res, "Boss or team leader only.");
+      return;
+    }
+
     const input = await readBody(req);
     const { errors, photographer } = validatePhotographer(input);
     if (errors.length) {
@@ -1456,6 +1977,11 @@ async function handleApi(req, res, url) {
 
   const photographerIdMatch = url.pathname.match(/^\/api\/photographers\/([^/]+)$/);
   if (req.method === "DELETE" && photographerIdMatch) {
+    if (!hasPermission(req, "manage_directory")) {
+      sendForbidden(res, "Boss or team leader only.");
+      return;
+    }
+
     const photographerId = decodeURIComponent(photographerIdMatch[1]);
     const photographers = await loadPhotographers();
     const nextPhotographers = photographers.filter((item) => item.id !== photographerId);
@@ -1471,6 +1997,11 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "POST" && url.pathname === "/api/lark/preview") {
+    if (!canAccessApp(req, "bookings")) {
+      sendForbidden(res);
+      return;
+    }
+
     const input = await readBody(req);
     const { errors, value } = validateBooking(input);
     if (errors.length) {
@@ -1489,6 +2020,11 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "POST" && url.pathname === "/api/bookings") {
+    if (!canAccessApp(req, "bookings")) {
+      sendForbidden(res);
+      return;
+    }
+
     const input = await readBody(req);
     const { errors, value } = validateBooking(input);
     if (errors.length) {
@@ -1525,6 +2061,11 @@ async function handleApi(req, res, url) {
   }
 
   if ((req.method === "PUT" || req.method === "PATCH") && url.pathname.startsWith("/api/bookings/")) {
+    if (!canAccessApp(req, "bookings")) {
+      sendForbidden(res);
+      return;
+    }
+
     const [, apiPart, bookingsPart, id, extra] = url.pathname.split("/");
     if (apiPart !== "api" || bookingsPart !== "bookings" || !id || extra) {
       sendJson(res, 404, { errors: ["Booking not found."] });
@@ -1582,6 +2123,11 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "POST" && url.pathname.startsWith("/api/bookings/") && url.pathname.endsWith("/cancel")) {
+    if (!canAccessApp(req, "bookings")) {
+      sendForbidden(res);
+      return;
+    }
+
     const id = url.pathname.split("/")[3];
     const bookings = await loadBookings();
     const booking = bookings.find((item) => item.id === id);
@@ -1599,6 +2145,11 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "POST" && url.pathname === "/api/lark/test") {
+    if (!hasPermission(req, "manage_bookings")) {
+      sendForbidden(res, "Boss or team leader only.");
+      return;
+    }
+
     if (!isLarkConfigured()) {
       sendJson(res, 400, { ok: false, message: "Add LARK_APP_ID, LARK_APP_SECRET, and LARK_CALENDAR_ID first." });
       return;
@@ -1623,7 +2174,12 @@ async function handleApi(req, res, url) {
 
 async function serveStatic(req, res, url) {
   const routePath = url.pathname === "/login" ? "/login.html" : url.pathname;
-  const requestedPath = decodeURIComponent(routePath === "/" ? "/index.html" : routePath);
+  const appPath =
+    routePath === "/" ? "/portal.html"
+      : routePath === "/bookings" ? "/index.html"
+        : routePath === "/work" || routePath === "/work/" ? "/work/index.html"
+          : routePath;
+  const requestedPath = decodeURIComponent(appPath);
   let filePath = path.normalize(path.join(publicDir, requestedPath));
 
   if (!filePath.startsWith(publicDir)) {
@@ -1664,6 +2220,12 @@ const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
 
     if (url.pathname.startsWith("/api/")) {
+      applyCorsHeaders(req, res);
+      if (req.method === "OPTIONS") {
+        sendNoContent(res);
+        return;
+      }
+
       await handleApi(req, res, url);
       return;
     }
@@ -1678,6 +2240,13 @@ const server = http.createServer(async (req, res) => {
 
     if (isAuthenticated(req) && isLoginPage) {
       redirect(res, "/");
+      return;
+    }
+
+    const requestedApp = appForRoute(url.pathname);
+    if (requestedApp && !userCanAccessApp(currentUser(req), requestedApp)) {
+      const fallbackApp = currentUser(req)?.apps?.[0] || "bookings";
+      redirect(res, fallbackApp === "work" ? "/work/" : "/");
       return;
     }
 

@@ -68,7 +68,8 @@ const el = {
   todayCount: $('#todayCount'),
   weekCount: $('#weekCount'),
   modeEyebrow: $('#bookingModeEyebrow'),
-  modeTitle: $('#bookingModeTitle')
+  modeTitle: $('#bookingModeTitle'),
+  appLinks: $$('[data-app-link]')
 };
 
 const state = {
@@ -78,7 +79,8 @@ const state = {
   editingBookingId: '',
   restoringDraft: false,
   syncedClientEmail: [],
-  syncedPhotographerEmail: []
+  syncedPhotographerEmail: [],
+  user: null
 };
 
 const storageKeys = {
@@ -147,6 +149,35 @@ async function fetchJson(url, options) {
 function setMessage(target, message, tone = '') {
   target.textContent = message;
   target.className = tone;
+}
+
+async function loadSession() {
+  const { data } = await fetchJson('/api/session');
+  state.user = data.user || null;
+  applyAppAccess();
+}
+
+function userCanAccess(app) {
+  return Boolean(state.user?.apps?.includes(app));
+}
+
+function userHasPermission(permission) {
+  return Boolean(state.user?.permissions?.includes(permission));
+}
+
+function applyAppAccess() {
+  el.appLinks.forEach((link) => {
+    link.hidden = !userCanAccess(link.dataset.appLink);
+  });
+  el.testLarkButton.hidden = !userHasPermission('manage_bookings');
+
+  if (!userCanAccess('clients') && window.location.pathname === '/clients') {
+    setRoute('/bookings');
+  }
+
+  if (!userCanAccess('photographers') && window.location.pathname === '/photographers') {
+    setRoute('/bookings');
+  }
 }
 
 function randomItem(items) {
@@ -681,8 +712,8 @@ function resetBookingForm(message = '') {
 }
 
 function setRoute(route, push = true) {
-  const nextRoute = route === '/clients' || route === '/photographers' ? route : '/';
-  el.bookingPage.hidden = nextRoute !== '/';
+  const nextRoute = route === '/clients' || route === '/photographers' ? route : '/bookings';
+  el.bookingPage.hidden = nextRoute !== '/bookings';
   el.clientsPage.hidden = nextRoute !== '/clients';
   el.photographersPage.hidden = nextRoute !== '/photographers';
   $$('[data-route]').forEach((link) => link.classList.toggle('active', link.dataset.route === nextRoute));
@@ -779,7 +810,7 @@ function startBookingEdit(id) {
     setMessage(el.formMessage, message, 'error');
     return;
   }
-  setRoute('/');
+  setRoute('/bookings');
   setBookingMode(booking);
   fillBookingForm(booking);
   setMessage(el.formMessage, 'Editing booking. Update booking to save changes.');
@@ -1191,8 +1222,10 @@ window.addEventListener('popstate', () => setRoute(window.location.pathname, fal
 setInitialDateTime();
 updateDurationForServices();
 applyExamplePlaceholders();
+await loadSession();
 await Promise.all([loadStatus(), loadClients(), loadPhotographers(), loadBookings()]);
 restoreDraft();
 updateInvitationSummary();
 updateAddressSuggestions();
+applyAppAccess();
 setRoute(window.location.pathname, false);
