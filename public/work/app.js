@@ -37,6 +37,8 @@ const el = {
   toastRegion: $("#toastRegion"),
 };
 
+const initialBookingSyncStatus = "Sync upcoming bookings into Faye's work queue.";
+
 const state = {
   employee: {
     id: "faye",
@@ -46,9 +48,67 @@ const state = {
   },
   assignments: [],
   messages: [],
-  filter: "open",
   user: null,
+  ui: {
+    assignmentDialogOpen: false,
+    assignmentDraft: emptyAssignmentDraft(),
+    assignmentError: "",
+    bookingSyncStatus: initialBookingSyncStatus,
+    filter: "open",
+    loggingOut: false,
+    notificationPermission: getNotificationPermission(),
+    syncInProgress: false,
+    toasts: [],
+  },
 };
+
+function emptyAssignmentDraft() {
+  return {
+    id: "",
+    title: "",
+    dueDate: toISODate(new Date()),
+    priority: "normal",
+    notes: "",
+  };
+}
+
+function assignmentDraftFromAssignment(assignment = null) {
+  if (!assignment) return emptyAssignmentDraft();
+
+  return {
+    id: assignment.id || "",
+    title: assignment.title || "",
+    dueDate: assignment.dueDate || toISODate(new Date()),
+    priority: assignment.priority || "normal",
+    notes: assignment.notes || "",
+  };
+}
+
+function setState(patch = {}) {
+  Object.assign(state, patch);
+  render();
+}
+
+function setUiState(patch = {}) {
+  state.ui = {
+    ...state.ui,
+    ...patch,
+  };
+  render();
+}
+
+function setWorkData(data, uiPatch = {}) {
+  setState({
+    employee: data.employee || state.employee,
+    assignments: Array.isArray(data.assignments) ? data.assignments : state.assignments,
+    messages: Array.isArray(data.messages) ? data.messages : state.messages,
+    user: data.user || state.user,
+    ui: {
+      ...state.ui,
+      ...uiPatch,
+    },
+  });
+}
 
 function userCanAccess(app) {
   return Boolean(state.user?.apps?.includes(app));
@@ -122,16 +182,8 @@ const workApi = {
   clearMessages: () => apiFetch("/api/work/messages", jsonRequest("DELETE")),
 };
 
-function applyWorkData(data) {
-  state.employee = data.employee || state.employee;
-  state.assignments = Array.isArray(data.assignments) ? data.assignments : [];
-  state.messages = Array.isArray(data.messages) ? data.messages : [];
-  state.user = data.user || state.user;
-}
-
 async function loadWork() {
-  applyWorkData(await workApi.load());
-  render();
+  setWorkData(await workApi.load());
 }
 
 function parseISODate(value) {
@@ -171,6 +223,11 @@ function priorityWeight(priority) {
   return { high: 3, normal: 2, low: 1 }[priority] || 2;
 }
 
+function getNotificationPermission() {
+  if (!("Notification" in window)) return "unavailable";
+  return Notification.permission;
+}
+
 function render() {
   renderProfile();
   renderMetrics();
@@ -178,7 +235,10 @@ function render() {
   renderFilters();
   renderMessages();
   renderAssignments();
-  updateNotificationButton();
+  renderAssignmentDialog();
+  renderBookingSync();
+  renderNotificationButton();
+  renderToasts();
   refreshIcons();
 }
 
@@ -187,6 +247,7 @@ function renderProfile() {
   el.employeeName.textContent = state.employee.name;
   el.employeeRole.textContent = state.employee.role;
   el.employeeAvailability.textContent = state.employee.availability;
+  el.logoutButton.disabled = state.ui.loggingOut;
 }
 
 function renderRoleAccess() {
@@ -209,20 +270,20 @@ function renderMetrics() {
   el.openCount.textContent = open.length;
   el.doneCount.textContent = done.length;
   el.dueTodayCount.textContent = dueToday.length;
-  el.summaryLine.textContent = `${open.length} open · ${dueToday.length} due today · ${overdue.length} overdue`;
+  el.summaryLine.textContent = `${open.length} open - ${dueToday.length} due today - ${overdue.length} overdue`;
 }
 
 function renderFilters() {
   el.filterButtons.forEach((button) => {
-    button.checked = button.dataset.filter === state.filter;
+    button.checked = button.dataset.filter === state.ui.filter;
   });
 }
 
 function getVisibleAssignments() {
   return [...state.assignments]
     .filter((assignment) => {
-      if (state.filter === "done") return assignment.status === "done";
-      if (state.filter === "open") return assignment.status !== "done";
+      if (state.ui.filter === "done") return assignment.status === "done";
+      if (state.ui.filter === "open") return assignment.status !== "done";
       return true;
     })
     .sort((a, b) => {
@@ -243,7 +304,7 @@ function renderAssignments() {
       </div>
     `;
     el.assignmentList.querySelector("span").textContent =
-      state.filter === "done" ? "No finished work yet." : "Ready for the next assignment.";
+      state.ui.filter === "done" ? "No finished work yet." : "Ready for the next assignment.";
     return;
   }
 
@@ -345,52 +406,128 @@ function renderMessages() {
   }));
 }
 
+function renderAssignmentDialog() {
+  const draft = state.ui.assignmentDraft;
+  const wasOpen = el.assignmentDialog.open;
+
+  el.assignmentDialogTitle.textContent = draft.id ? "Edit Work" : "Assign Work";
+  el.assignmentId.value = draft.id;
+  el.assignmentTitle.value = draft.title;
+  el.assignmentDueDate.value = draft.dueDate;
+  el.assignmentPriority.value = draft.priority;
+  el.assignmentNotes.value = draft.notes;
+  el.assignmentError.textContent = state.ui.assignmentError;
+  el.deleteAssignmentButton.hidden = !draft.id;
+
+  if (state.ui.assignmentDialogOpen && !wasOpen) {
+    el.assignmentDialog.showModal();
+    el.assignmentTitle.focus();
+  }
+
+  if (!state.ui.assignmentDialogOpen && wasOpen) {
+    el.assignmentDialog.close();
+  }
+}
+
+function renderBookingSync() {
+  el.syncBookingsButton.disabled = state.ui.syncInProgress || !canSyncBookings();
+  el.bookingSyncStatus.textContent = state.ui.bookingSyncStatus;
+}
+
+function renderNotificationButton() {
+  if (state.ui.notificationPermission === "unavailable") {
+    el.enableMessagesButton.disabled = true;
+    el.enableMessagesButton.title = "Browser messages unavailable";
+    return;
+  }
+
+  const enabled = state.ui.notificationPermission === "granted";
+  el.enableMessagesButton.disabled = !canViewWorkMessages();
+  el.enableMessagesButton.classList.toggle("active", enabled);
+  el.enableMessagesButton.title = enabled ? "Messages enabled" : "Enable messages";
+  el.enableMessagesButton.setAttribute("aria-label", enabled ? "Messages enabled" : "Enable messages");
+}
+
+function renderToasts() {
+  el.toastRegion.replaceChildren(...state.ui.toasts.map((toast) => {
+    const item = document.createElement("div");
+    item.className = "toast";
+    item.dataset.toastId = toast.id;
+    item.textContent = toast.text;
+    return item;
+  }));
+}
+
 function openAssignmentDialog(assignment = null) {
   if (!canManageWork()) return;
 
-  el.assignmentError.textContent = "";
-  el.assignmentId.value = assignment?.id || "";
-  el.assignmentTitle.value = assignment?.title || "";
-  el.assignmentDueDate.value = assignment?.dueDate || toISODate(new Date());
-  el.assignmentPriority.value = assignment?.priority || "normal";
-  el.assignmentNotes.value = assignment?.notes || "";
-  el.assignmentDialogTitle.textContent = assignment ? "Edit Work" : "Assign Work";
-  el.deleteAssignmentButton.hidden = !assignment;
-  el.assignmentDialog.showModal();
-  el.assignmentTitle.focus();
+  setUiState({
+    assignmentDialogOpen: true,
+    assignmentDraft: assignmentDraftFromAssignment(assignment),
+    assignmentError: "",
+  });
 }
 
 function closeAssignmentDialog() {
-  el.assignmentDialog.close();
+  setUiState({
+    assignmentDialogOpen: false,
+    assignmentDraft: emptyAssignmentDraft(),
+    assignmentError: "",
+  });
+}
+
+function updateAssignmentDraft(event) {
+  const fieldById = {
+    assignmentTitle: "title",
+    assignmentDueDate: "dueDate",
+    assignmentPriority: "priority",
+    assignmentNotes: "notes",
+  };
+  const field = fieldById[event.target.id];
+  if (!field || !state.ui.assignmentDialogOpen) return;
+
+  setUiState({
+    assignmentDraft: {
+      ...state.ui.assignmentDraft,
+      [field]: event.target.value,
+    },
+    assignmentError: "",
+  });
+}
+
+function assignmentPayloadFromDraft(draft) {
+  return {
+    title: draft.title.trim(),
+    dueDate: draft.dueDate,
+    priority: draft.priority,
+    notes: draft.notes.trim(),
+  };
 }
 
 async function handleAssignmentSubmit(event) {
   event.preventDefault();
   if (!canManageWork()) return;
 
-  const id = el.assignmentId.value;
-  const payload = {
-    title: el.assignmentTitle.value.trim(),
-    dueDate: el.assignmentDueDate.value,
-    priority: el.assignmentPriority.value,
-    notes: el.assignmentNotes.value.trim(),
-  };
+  const draft = state.ui.assignmentDraft;
+  const payload = assignmentPayloadFromDraft(draft);
 
   if (!payload.title || !payload.dueDate) {
-    el.assignmentError.textContent = "Work and due date are required.";
+    setUiState({ assignmentError: "Work and due date are required." });
     return;
   }
 
   try {
-    const data = id
-      ? await workApi.updateAssignment(id, payload)
+    const data = draft.id
+      ? await workApi.updateAssignment(draft.id, payload)
       : await workApi.createAssignment(payload);
-    applyWorkData(data);
-    closeAssignmentDialog();
-    if (!id && data.workInviteMessage) showToast(data.workInviteMessage);
-    render();
+    setWorkData(data, {
+      assignmentDialogOpen: false,
+      assignmentDraft: emptyAssignmentDraft(),
+      assignmentError: "",
+    });
+    if (!draft.id && data.workInviteMessage) showToast(data.workInviteMessage);
   } catch (error) {
-    el.assignmentError.textContent = error.message;
+    setUiState({ assignmentError: error.message });
   }
 }
 
@@ -399,81 +536,85 @@ async function completeAssignment(id) {
   if (!canCompleteAssignment(assignmentBeforeUpdate)) return;
 
   const data = await workApi.completeAssignment(id);
-  applyWorkData(data);
-  render();
-  const assignment = state.assignments.find((item) => item.id === id);
+  setWorkData(data);
+  const assignment = data.assignments?.find((item) => item.id === id);
   if (assignment) notifyCompletion(assignment);
 }
 
 async function reopenAssignment(id) {
   if (!canManageWork()) return;
-  const data = await workApi.reopenAssignment(id);
-  applyWorkData(data);
-  render();
+  setWorkData(await workApi.reopenAssignment(id));
 }
 
 async function deleteCurrentAssignment() {
   if (!canManageWork()) return;
 
-  const id = el.assignmentId.value;
+  const id = state.ui.assignmentDraft.id;
   if (!id) return;
-  const data = await workApi.deleteAssignment(id);
-  applyWorkData(data);
-  closeAssignmentDialog();
-  render();
+  setWorkData(await workApi.deleteAssignment(id), {
+    assignmentDialogOpen: false,
+    assignmentDraft: emptyAssignmentDraft(),
+    assignmentError: "",
+  });
 }
 
 async function clearMessages() {
   if (!canViewWorkMessages()) return;
-  const data = await workApi.clearMessages();
-  applyWorkData(data);
-  render();
+  setWorkData(await workApi.clearMessages());
 }
 
 async function syncBookings() {
   if (!canSyncBookings()) return;
 
-  el.syncBookingsButton.disabled = true;
-  el.bookingSyncStatus.textContent = "Checking upcoming bookings...";
+  setUiState({
+    syncInProgress: true,
+    bookingSyncStatus: "Checking upcoming bookings...",
+  });
 
   try {
     const data = await workApi.syncBookings();
-    applyWorkData(data);
-    state.filter = "open";
     const message = data.syncable === 0
       ? "No upcoming bookings found to assign to Faye."
       : `Synced ${data.syncable} upcoming bookings: ${data.created} new, ${data.updated} updated.`;
     const fullMessage = data.workInviteMessage ? `${message} ${data.workInviteMessage}` : message;
-    el.bookingSyncStatus.textContent = fullMessage;
+
+    setWorkData(data, {
+      bookingSyncStatus: fullMessage,
+      filter: "open",
+      syncInProgress: false,
+    });
     showToast(fullMessage);
-    render();
   } catch (error) {
-    el.bookingSyncStatus.textContent = error.message;
+    setUiState({
+      bookingSyncStatus: error.message,
+      syncInProgress: false,
+    });
     showToast(error.message);
-  } finally {
-    el.syncBookingsButton.disabled = false;
   }
 }
 
 function notifyCompletion(assignment) {
-  const text = `${state.employee.name} finished: ${assignment.title}`;
-  showToast(text);
+  showToast(`${state.employee.name} finished: ${assignment.title}`);
 
-  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  if (!("Notification" in window) || state.ui.notificationPermission !== "granted") return;
 
   try {
-    new Notification("Work finished", { body: text });
+    new Notification("Work finished", { body: `${state.employee.name} finished: ${assignment.title}` });
   } catch {
     showToast("Browser message could not be shown.");
   }
 }
 
 function showToast(text) {
-  const toast = document.createElement("div");
-  toast.className = "toast";
-  toast.textContent = text;
-  el.toastRegion.append(toast);
-  window.setTimeout(() => toast.remove(), 5200);
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  setUiState({
+    toasts: [...state.ui.toasts, { id, text }],
+  });
+  window.setTimeout(() => {
+    setUiState({
+      toasts: state.ui.toasts.filter((toast) => toast.id !== id),
+    });
+  }, 5200);
 }
 
 async function enableNotifications() {
@@ -485,25 +626,12 @@ async function enableNotifications() {
   }
 
   const permission = await Notification.requestPermission();
-  updateNotificationButton();
+  setUiState({ notificationPermission: permission });
   showToast(permission === "granted" ? "Messages enabled." : "Messages were not enabled.");
 }
 
-function updateNotificationButton() {
-  if (!("Notification" in window)) {
-    el.enableMessagesButton.disabled = true;
-    el.enableMessagesButton.title = "Browser messages unavailable";
-    return;
-  }
-
-  const enabled = Notification.permission === "granted";
-  el.enableMessagesButton.classList.toggle("active", enabled);
-  el.enableMessagesButton.title = enabled ? "Messages enabled" : "Enable messages";
-  el.enableMessagesButton.setAttribute("aria-label", enabled ? "Messages enabled" : "Enable messages");
-}
-
 async function logout() {
-  el.logoutButton.disabled = true;
+  setUiState({ loggingOut: true });
   try {
     await fetch("/api/logout", { method: "POST", credentials: "include" });
   } finally {
@@ -526,8 +654,7 @@ function wireEvents() {
 
   el.filterButtons.forEach((button) => {
     button.addEventListener("change", () => {
-      state.filter = button.dataset.filter;
-      render();
+      setUiState({ filter: button.dataset.filter });
     });
   });
 
@@ -551,12 +678,22 @@ function wireEvents() {
     }
   });
 
+  el.assignmentForm.addEventListener("input", updateAssignmentDraft);
+  el.assignmentForm.addEventListener("change", updateAssignmentDraft);
   el.assignmentForm.addEventListener("submit", handleAssignmentSubmit);
+  el.assignmentDialog.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    closeAssignmentDialog();
+  });
+  el.assignmentDialog.addEventListener("close", () => {
+    if (state.ui.assignmentDialogOpen) closeAssignmentDialog();
+  });
   el.deleteAssignmentButton.addEventListener("click", deleteCurrentAssignment);
   el.cancelAssignmentButton.addEventListener("click", closeAssignmentDialog);
   el.closeAssignmentDialogButton.addEventListener("click", closeAssignmentDialog);
 }
 
 wireEvents();
+render();
 loadWork().catch((error) => showToast(error.message));
 window.addEventListener("load", refreshIcons);
