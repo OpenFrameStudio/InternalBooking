@@ -61,7 +61,7 @@ const authUsers = [
     label: "Employee",
     name: "Faye",
     employeeId: "faye",
-    apps: ["work"],
+    apps: ["bookings", "work"],
     permissions: ["complete_work"]
   }
 ];

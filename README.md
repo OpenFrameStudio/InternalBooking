@@ -27,6 +27,8 @@ Default logins:
 - Faye login: `Faye`
 - Faye password: `1111`
 
+Faye can access Bookings and Work. Boss can access Bookings, Clients, Photographers, and Work.
+
 You can override these with `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `EMPLOYEE_USERNAME`, and `EMPLOYEE_PASSWORD`.
 
 ## Deploy to internalbooking.openframe.studio
