@@ -52,6 +52,9 @@ restarts or redeploys the service.
    - `LARK_APP_ID`
    - `LARK_APP_SECRET`
    - `LARK_CALENDAR_ID`
+   - optional: `LARK_ORGANIZER_CALENDAR_ID` for the admin sender calendar
+   - optional: `LARK_SENDER_EMAIL` (defaults to `admin@openframe.studio`)
+   - optional: `LARK_SENDER_NAME` (defaults to `admin@openframe.studio`)
    - optional: `ADMIN_USERNAME`
    - optional: `ADMIN_PASSWORD`
 4. After the service is live, open its Custom Domains settings and verify
@@ -80,6 +83,11 @@ The app calls Lark's tenant token endpoint and then creates events at:
 POST /open-apis/auth/v3/tenant_access_token/internal
 POST /open-apis/calendar/v4/calendars/{calendar_id}/events
 ```
+
+For invite emails to show from the admin account, set
+`LARK_ORGANIZER_CALENDAR_ID` to the actual Lark calendar ID owned by
+`admin@openframe.studio`. Lark controls the final email sender header, so the
+calendar that owns the event is what matters.
 
 ## Files
 

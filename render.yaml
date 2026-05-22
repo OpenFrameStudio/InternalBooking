@@ -24,3 +24,9 @@ services:
         sync: false
       - key: LARK_CALENDAR_ID
         sync: false
+      - key: LARK_ORGANIZER_CALENDAR_ID
+        sync: false
+      - key: LARK_SENDER_EMAIL
+        value: admin@openframe.studio
+      - key: LARK_SENDER_NAME
+        value: admin@openframe.studio

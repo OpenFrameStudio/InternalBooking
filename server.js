@@ -39,6 +39,10 @@ const larkConfig = {
   appId: process.env.LARK_APP_ID || "",
   appSecret: process.env.LARK_APP_SECRET || "",
   calendarId: process.env.LARK_CALENDAR_ID || "primary",
+  organizerCalendarId: process.env.LARK_ORGANIZER_CALENDAR_ID || "",
+  organizerUserId: process.env.LARK_ORGANIZER_USER_ID || "",
+  senderEmail: process.env.LARK_SENDER_EMAIL || "admin@openframe.studio",
+  senderName: process.env.LARK_SENDER_NAME || "admin@openframe.studio",
   timezone: process.env.LARK_TIMEZONE || "Australia/Sydney",
   apiBase: (process.env.LARK_API_BASE || "https://open.larksuite.com/open-apis").replace(/\/$/, "")
 };
@@ -994,7 +998,25 @@ function syncInvoicesFromBookings(invoices, bookings) {
 }
 
 function isLarkConfigured() {
-  return Boolean(larkConfig.appId && larkConfig.appSecret && larkConfig.calendarId);
+  return Boolean(larkConfig.appId && larkConfig.appSecret && effectiveLarkCalendarId());
+}
+
+function effectiveLarkCalendarId() {
+  return larkConfig.organizerCalendarId || larkConfig.calendarId;
+}
+
+function buildLarkOrganizerPayload() {
+  const organizer = {};
+
+  if (larkConfig.organizerUserId) {
+    organizer.user_id = larkConfig.organizerUserId;
+  }
+
+  if (larkConfig.senderName || larkConfig.senderEmail) {
+    organizer.display_name = larkConfig.senderName || larkConfig.senderEmail;
+  }
+
+  return Object.keys(organizer).length ? organizer : null;
 }
 
 function getEndAt(startAt, durationMinutes) {
@@ -1409,10 +1431,13 @@ function buildLarkDescription(booking) {
 function buildLarkEventPayload(booking) {
   const startTime = Math.floor(new Date(booking.startAt).getTime() / 1000).toString();
   const endTime = Math.floor(new Date(booking.endAt).getTime() / 1000).toString();
+  const organizer = buildLarkOrganizerPayload();
+  const calendarId = effectiveLarkCalendarId();
 
-  return {
+  const payload = {
     summary: booking.propertyAddress,
     description: buildLarkDescription(booking),
+    need_notification: true,
     start_time: {
       timestamp: startTime,
       timezone: larkConfig.timezone
@@ -1430,6 +1455,16 @@ function buildLarkEventPayload(booking) {
     },
     reminders: [{ minutes: 30 }]
   };
+
+  if (calendarId && calendarId !== "primary") {
+    payload.organizer_calendar_id = calendarId;
+  }
+
+  if (organizer) {
+    payload.event_organizer = organizer;
+  }
+
+  return payload;
 }
 
 function buildLarkAttendeesPayload(booking, emails = booking.guestEmails || []) {
@@ -1457,6 +1492,9 @@ function buildLarkPreview(booking) {
     timezone: larkConfig.timezone,
     location: eventPayload.location,
     description: eventPayload.description,
+    senderEmail: larkConfig.senderEmail,
+    senderName: larkConfig.senderName,
+    calendarId: effectiveLarkCalendarId(),
     guestEmails: booking.guestEmails,
     eventPayload,
     attendeesPayload
@@ -1583,7 +1621,7 @@ async function fetchLarkImportedBookings() {
   }
 
   const token = await getTenantAccessToken();
-  const calendarId = encodeURIComponent(larkConfig.calendarId);
+  const calendarId = encodeURIComponent(effectiveLarkCalendarId());
   const imported = [];
   const firstStartMs = Date.now() - 24 * 60 * 60 * 1000;
   const finalEndMs = Date.now() + larkImportDays * 24 * 60 * 60 * 1000;
@@ -1638,7 +1676,7 @@ function mergeLocalAndLarkBookings(localBookings, larkBookings) {
 
 async function createLarkEvent(booking) {
   const token = await getTenantAccessToken();
-  const calendarId = encodeURIComponent(larkConfig.calendarId);
+  const calendarId = encodeURIComponent(effectiveLarkCalendarId());
 
   const response = await fetch(`${larkConfig.apiBase}/calendar/v4/calendars/${calendarId}/events`, {
     method: "POST",
@@ -1664,7 +1702,7 @@ async function updateLarkEvent(booking) {
   }
 
   const token = await getTenantAccessToken();
-  const calendarId = encodeURIComponent(larkConfig.calendarId);
+  const calendarId = encodeURIComponent(effectiveLarkCalendarId());
   const eventId = encodeURIComponent(booking.larkEventId);
 
   const response = await fetch(`${larkConfig.apiBase}/calendar/v4/calendars/${calendarId}/events/${eventId}`, {
@@ -1701,7 +1739,7 @@ async function createLarkAttendees(booking, emails = booking.guestEmails || []) 
   }
 
   const token = await getTenantAccessToken();
-  const calendarId = encodeURIComponent(larkConfig.calendarId);
+  const calendarId = encodeURIComponent(effectiveLarkCalendarId());
   const eventId = encodeURIComponent(booking.larkEventId);
 
   const response = await fetch(`${larkConfig.apiBase}/calendar/v4/calendars/${calendarId}/events/${eventId}/attendees`, {
@@ -1814,7 +1852,10 @@ async function handleApi(req, res, url) {
   if (req.method === "GET" && url.pathname === "/api/status") {
     sendJson(res, 200, {
       larkConfigured: isLarkConfigured(),
-      calendarId: larkConfig.calendarId,
+      calendarId: effectiveLarkCalendarId(),
+      senderEmail: larkConfig.senderEmail,
+      senderName: larkConfig.senderName,
+      organizerCalendarConfigured: Boolean(larkConfig.organizerCalendarId),
       timezone: larkConfig.timezone,
       persistentStorage: storageBackend !== "app",
       storageBackend
@@ -2413,7 +2454,7 @@ async function handleApi(req, res, url) {
     }
 
     if (!isLarkConfigured()) {
-      sendJson(res, 400, { ok: false, message: "Add LARK_APP_ID, LARK_APP_SECRET, and LARK_CALENDAR_ID first." });
+      sendJson(res, 400, { ok: false, message: "Add LARK_APP_ID, LARK_APP_SECRET, and LARK_CALENDAR_ID or LARK_ORGANIZER_CALENDAR_ID first." });
       return;
     }
 
