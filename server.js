@@ -1850,6 +1850,9 @@ function buildLarkEventPayload(booking) {
     visibility: "default",
     attendee_ability: "can_see_others",
     free_busy_status: "busy",
+    vchat: {
+      vc_type: "no_meeting"
+    },
     location: {
       name: booking.locationName || booking.propertyAddress,
       address: booking.locationAddress || booking.propertyAddress

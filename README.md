@@ -92,6 +92,9 @@ For invite emails to show from the admin account, set
 `admin@openframe.studio`. Lark controls the final email sender header, so the
 calendar that owns the event is what matters.
 
+Bookings are created without a Lark video meeting by sending `vchat.vc_type`
+as `no_meeting`.
+
 ## Send Invoices
 
 The invoice desk can send a PDF tax invoice to the saved client email through
