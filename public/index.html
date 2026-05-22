@@ -91,13 +91,16 @@
                 </div>
 
                 <label>
-                  <span>Find saved client</span>
-                  <input id="clientSearchInput" type="search" placeholder="Type company, agent, email, or phone" autocomplete="off" />
+                  <span>Saved client</span>
+                  <select id="clientSelect">
+                    <option value="">New client / enter manually</option>
+                  </select>
                 </label>
 
-                <select class="hidden-select" id="clientSelect" aria-label="Saved client">
-                  <option value="">New client</option>
-                </select>
+                <label>
+                  <span>Search saved clients</span>
+                  <input id="clientSearchInput" type="search" placeholder="Optional: type company, agent, email, or phone" autocomplete="off" />
+                </label>
                 <div class="client-search-results" id="clientSearchResults" hidden></div>
 
                 <div class="form-row two">

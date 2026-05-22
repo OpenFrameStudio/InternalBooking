@@ -571,7 +571,7 @@ function filteredClients() {
 }
 
 function renderClientOptions(selectedId = el.clientSelect.value) {
-  renderOptions(el.clientSelect, state.clients, 'New client', selectedId);
+  renderOptions(el.clientSelect, state.clients, 'New client / enter manually', selectedId);
   renderClientSearchResults();
 }
 
@@ -657,7 +657,16 @@ function renderPhotographerList() {
 
 function applySelectedClient() {
   const client = state.clients.find((item) => item.id === el.clientSelect.value);
-  if (!client) return;
+  if (!client) {
+    el.clientSearch.value = '';
+    el.clientSearchResults.hidden = true;
+    el.clientName.value = '';
+    el.clientEmail.value = '';
+    el.agentName.value = '';
+    el.agentPhone.value = '';
+    syncManagedGuestEmail(el.clientEmail, 'syncedClientEmail');
+    return;
+  }
   el.clientSearch.value = clientOptionLabel(client);
   el.clientSearchResults.hidden = true;
   el.clientName.value = client.name || '';
