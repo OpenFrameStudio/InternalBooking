@@ -111,6 +111,8 @@ INVOICE_EMAIL_REPLY_TO=admin@openframe.studio
 ```
 
 In Render, the only required secret is usually `INVOICE_EMAIL_PASSWORD`.
+The app also accepts `INVOICE_MAIL_PASSWORD` if that name was already saved in
+Render.
 
 ## Files
 

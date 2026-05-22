@@ -53,7 +53,7 @@ const invoiceEmailConfig = {
   port: Number.isFinite(invoiceEmailPort) ? invoiceEmailPort : 587,
   secure: normalizeEnvBoolean(process.env.INVOICE_EMAIL_SECURE || process.env.SMTP_SECURE, invoiceEmailPort === 465),
   user: invoiceEmailUser,
-  pass: process.env.INVOICE_EMAIL_PASSWORD || process.env.SMTP_PASSWORD || "",
+  pass: process.env.INVOICE_EMAIL_PASSWORD || process.env.INVOICE_MAIL_PASSWORD || process.env.SMTP_PASSWORD || "",
   from: process.env.INVOICE_EMAIL_FROM || `OpenFrame Studio <${invoiceEmailUser}>`,
   replyTo: process.env.INVOICE_EMAIL_REPLY_TO || "admin@openframe.studio",
   bcc: process.env.INVOICE_EMAIL_BCC || "",
