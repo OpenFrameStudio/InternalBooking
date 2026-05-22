@@ -46,14 +46,15 @@ const larkConfig = {
   timezone: process.env.LARK_TIMEZONE || "Australia/Sydney",
   apiBase: (process.env.LARK_API_BASE || "https://open.larksuite.com/open-apis").replace(/\/$/, "")
 };
-const invoiceEmailPort = Number(process.env.INVOICE_EMAIL_PORT || process.env.SMTP_PORT || 587);
+const invoiceEmailUser = process.env.INVOICE_EMAIL_USER || process.env.SMTP_USER || "admin@openframe.studio";
+const invoiceEmailPort = Number(process.env.INVOICE_EMAIL_PORT || process.env.SMTP_PORT || 465);
 const invoiceEmailConfig = {
-  host: process.env.INVOICE_EMAIL_HOST || process.env.SMTP_HOST || "",
+  host: process.env.INVOICE_EMAIL_HOST || process.env.SMTP_HOST || "smtp.larksuite.com",
   port: Number.isFinite(invoiceEmailPort) ? invoiceEmailPort : 587,
   secure: normalizeEnvBoolean(process.env.INVOICE_EMAIL_SECURE || process.env.SMTP_SECURE, invoiceEmailPort === 465),
-  user: process.env.INVOICE_EMAIL_USER || process.env.SMTP_USER || "",
+  user: invoiceEmailUser,
   pass: process.env.INVOICE_EMAIL_PASSWORD || process.env.SMTP_PASSWORD || "",
-  from: process.env.INVOICE_EMAIL_FROM || `OpenFrame Studio <${process.env.INVOICE_EMAIL_USER || process.env.SMTP_USER || "admin@openframe.studio"}>`,
+  from: process.env.INVOICE_EMAIL_FROM || `OpenFrame Studio <${invoiceEmailUser}>`,
   replyTo: process.env.INVOICE_EMAIL_REPLY_TO || "admin@openframe.studio",
   bcc: process.env.INVOICE_EMAIL_BCC || "",
   subjectPrefix: process.env.INVOICE_EMAIL_SUBJECT_PREFIX || "Tax Invoice"
@@ -1277,6 +1278,7 @@ async function createInvoiceTransport() {
     host: invoiceEmailConfig.host,
     port: invoiceEmailConfig.port,
     secure: invoiceEmailConfig.secure,
+    requireTLS: !invoiceEmailConfig.secure,
     auth: {
       user: invoiceEmailConfig.user,
       pass: invoiceEmailConfig.pass
