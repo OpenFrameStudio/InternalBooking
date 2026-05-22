@@ -55,11 +55,8 @@ restarts or redeploys the service.
    - optional: `LARK_ORGANIZER_CALENDAR_ID` for the admin sender calendar
    - optional: `LARK_SENDER_EMAIL` (defaults to `admin@openframe.studio`)
    - optional: `LARK_SENDER_NAME` (defaults to `admin@openframe.studio`)
-   - `INVOICE_EMAIL_PASSWORD`
-   - optional: `INVOICE_EMAIL_HOST` (defaults to Lark Mail `smtp.larksuite.com`)
-   - optional: `INVOICE_EMAIL_PORT` (defaults to `465`)
-   - optional: `INVOICE_EMAIL_SECURE` (defaults to `true`)
-   - optional: `INVOICE_EMAIL_USER` (defaults to `admin@openframe.studio`)
+   - `RESEND_API_KEY`
+   - optional: `INVOICE_EMAIL_PROVIDER` (defaults to `resend`)
    - optional: `INVOICE_EMAIL_FROM` (defaults to `OpenFrame Studio <admin@openframe.studio>`)
    - optional: `ADMIN_USERNAME`
    - optional: `ADMIN_PASSWORD`
@@ -98,25 +95,20 @@ calendar that owns the event is what matters.
 ## Send Invoices
 
 The invoice desk can send a PDF tax invoice to the saved client email through
-Lark Mail. The app defaults to Lark's SMTP server:
+Resend over HTTPS, which works on Render free.
 
 ```text
-INVOICE_EMAIL_HOST=smtp.larksuite.com
-INVOICE_EMAIL_PORT=465
-INVOICE_EMAIL_SECURE=true
-INVOICE_EMAIL_USER=admin@openframe.studio
-INVOICE_EMAIL_PASSWORD
+INVOICE_EMAIL_PROVIDER=resend
+RESEND_API_KEY
 INVOICE_EMAIL_FROM=OpenFrame Studio <admin@openframe.studio>
 INVOICE_EMAIL_REPLY_TO=admin@openframe.studio
 ```
 
-In Render, the only required secret is usually `INVOICE_EMAIL_PASSWORD`.
-The app also accepts `INVOICE_MAIL_PASSWORD` if that name was already saved in
-Render.
+Verify `openframe.studio` in Resend first so emails can send from
+`admin@openframe.studio`.
 
-Render free services block outbound SMTP ports such as `465` and `587`, so Lark
-Mail SMTP invoice sending needs a paid Render service or a later switch to an
-HTTP email provider.
+SMTP is still available if `INVOICE_EMAIL_PROVIDER=smtp`, but Render free
+services block outbound SMTP ports such as `465` and `587`.
 
 ## Files
 

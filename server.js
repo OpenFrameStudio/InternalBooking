@@ -49,6 +49,8 @@ const larkConfig = {
 const invoiceEmailUser = process.env.INVOICE_EMAIL_USER || process.env.SMTP_USER || "admin@openframe.studio";
 const invoiceEmailPort = Number(process.env.INVOICE_EMAIL_PORT || process.env.SMTP_PORT || 465);
 const invoiceEmailTimeoutMs = Number(process.env.INVOICE_EMAIL_TIMEOUT_MS || 15_000);
+const invoiceEmailProviderValue = String(process.env.INVOICE_EMAIL_PROVIDER || "resend").trim().toLowerCase();
+const invoiceEmailProvider = ["resend", "smtp"].includes(invoiceEmailProviderValue) ? invoiceEmailProviderValue : "resend";
 const invoiceEmailConfig = {
   host: process.env.INVOICE_EMAIL_HOST || process.env.SMTP_HOST || "smtp.larksuite.com",
   port: Number.isFinite(invoiceEmailPort) ? invoiceEmailPort : 587,
@@ -60,6 +62,10 @@ const invoiceEmailConfig = {
   bcc: process.env.INVOICE_EMAIL_BCC || "",
   subjectPrefix: process.env.INVOICE_EMAIL_SUBJECT_PREFIX || "Tax Invoice",
   timeoutMs: Number.isFinite(invoiceEmailTimeoutMs) ? invoiceEmailTimeoutMs : 15_000
+};
+const resendConfig = {
+  apiKey: process.env.RESEND_API_KEY || "",
+  apiBase: (process.env.RESEND_API_BASE || "https://api.resend.com").replace(/\/$/, "")
 };
 const authConfig = {
   username: process.env.ADMIN_USERNAME || "ShuhanGao",
@@ -1024,6 +1030,11 @@ function syncInvoicesFromBookings(invoices, bookings) {
 
 function invoiceEmailMissingSettings() {
   const missing = [];
+  if (invoiceEmailProvider === "resend") {
+    if (!resendConfig.apiKey) missing.push("RESEND_API_KEY");
+    return missing;
+  }
+
   if (!invoiceEmailConfig.host) missing.push("INVOICE_EMAIL_HOST");
   if (!invoiceEmailConfig.user) missing.push("INVOICE_EMAIL_USER");
   if (!invoiceEmailConfig.pass) missing.push("INVOICE_EMAIL_PASSWORD");
@@ -1291,6 +1302,44 @@ async function createInvoiceTransport() {
   });
 }
 
+async function sendInvoiceWithResend(invoice, recipients, pdf, bcc = []) {
+  const payload = {
+    from: invoiceEmailConfig.from,
+    to: recipients,
+    subject: buildInvoiceEmailSubject(invoice),
+    text: buildInvoiceEmailText(invoice),
+    html: buildInvoiceEmailHtml(invoice),
+    reply_to: invoiceEmailConfig.replyTo,
+    attachments: [
+      {
+        filename: invoiceFileName(invoice),
+        content: pdf.toString("base64")
+      }
+    ]
+  };
+
+  if (bcc.length) {
+    payload.bcc = bcc;
+  }
+
+  const response = await withTimeout(fetch(`${resendConfig.apiBase}/emails`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${resendConfig.apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  }), invoiceEmailConfig.timeoutMs, "Resend email request timed out.");
+  const result = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    const message = result.message || result.error?.message || result.error || `Resend email request failed with ${response.status}.`;
+    throw new Error(message);
+  }
+
+  return result;
+}
+
 async function withTimeout(promise, milliseconds, message) {
   let timeoutId;
   const timeout = new Promise((_, reject) => {
@@ -1322,10 +1371,15 @@ async function sendInvoiceEmail(invoice, recipients) {
     throw new Error(`Invoice email is not set up yet. Add ${invoiceEmailMissingSettings().join(", ")} in Render.`);
   }
 
-  const transport = await createInvoiceTransport();
   const pdf = await createInvoicePdfBuffer(invoice);
   const bcc = uniqueEmails(parseGuestEmails(invoiceEmailConfig.bcc)).filter(isValidEmail);
 
+  if (invoiceEmailProvider === "resend") {
+    await sendInvoiceWithResend(invoice, recipients, pdf, bcc);
+    return;
+  }
+
+  const transport = await createInvoiceTransport();
   await withTimeout(transport.sendMail({
     from: invoiceEmailConfig.from,
     to: recipients,
@@ -2204,6 +2258,7 @@ async function handleApi(req, res, url) {
       senderName: larkConfig.senderName,
       organizerCalendarConfigured: Boolean(larkConfig.organizerCalendarId),
       invoiceEmailConfigured: isInvoiceEmailConfigured(),
+      invoiceEmailProvider,
       timezone: larkConfig.timezone,
       persistentStorage: storageBackend !== "app",
       storageBackend

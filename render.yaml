@@ -30,6 +30,18 @@ services:
         value: admin@openframe.studio
       - key: LARK_SENDER_NAME
         value: admin@openframe.studio
+      - key: INVOICE_EMAIL_PROVIDER
+        value: resend
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_API_BASE
+        value: https://api.resend.com
+      - key: INVOICE_EMAIL_FROM
+        value: OpenFrame Studio <admin@openframe.studio>
+      - key: INVOICE_EMAIL_REPLY_TO
+        value: admin@openframe.studio
+      - key: INVOICE_EMAIL_BCC
+        sync: false
       - key: INVOICE_EMAIL_HOST
         value: smtp.larksuite.com
       - key: INVOICE_EMAIL_PORT
@@ -39,10 +51,4 @@ services:
       - key: INVOICE_EMAIL_USER
         value: admin@openframe.studio
       - key: INVOICE_EMAIL_PASSWORD
-        sync: false
-      - key: INVOICE_EMAIL_FROM
-        value: OpenFrame Studio <admin@openframe.studio>
-      - key: INVOICE_EMAIL_REPLY_TO
-        value: admin@openframe.studio
-      - key: INVOICE_EMAIL_BCC
         sync: false
