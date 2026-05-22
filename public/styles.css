@@ -52,6 +52,10 @@ button {
   cursor: pointer;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 .shell {
   width: min(1240px, calc(100% - 36px));
   margin: 0 auto;
