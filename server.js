@@ -67,6 +67,15 @@ const resendConfig = {
   apiKey: process.env.RESEND_API_KEY || "",
   apiBase: (process.env.RESEND_API_BASE || "https://api.resend.com").replace(/\/$/, "")
 };
+const workInviteEmailConfig = {
+  enabled: normalizeEnvBoolean(process.env.WORK_INVITE_EMAIL_ENABLED, true),
+  to: process.env.WORK_INVITE_EMAIL_TO || process.env.EMPLOYEE_EMAIL || "",
+  from: process.env.WORK_INVITE_EMAIL_FROM || invoiceEmailConfig.from,
+  replyTo: process.env.WORK_INVITE_EMAIL_REPLY_TO || invoiceEmailConfig.replyTo,
+  bcc: process.env.WORK_INVITE_EMAIL_BCC || "",
+  subjectPrefix: process.env.WORK_INVITE_EMAIL_SUBJECT_PREFIX || "Work invite",
+  timeoutMs: Number.isFinite(invoiceEmailTimeoutMs) ? invoiceEmailTimeoutMs : 15_000
+};
 const authConfig = {
   username: process.env.ADMIN_USERNAME || "ShuhanGao",
   password: process.env.ADMIN_PASSWORD || "Sg1654723576"
@@ -139,6 +148,7 @@ const defaultWorkState = {
   employee: {
     id: "faye",
     name: "Faye",
+    email: parseGuestEmails(workInviteEmailConfig.to)[0] || "",
     role: "Editor / Admin",
     availability: "Mon-Fri, 12pm-8pm Australian time"
   },
@@ -650,7 +660,8 @@ async function saveInvoices(invoices) {
 function normalizeWorkState(raw) {
   const employee = {
     ...defaultWorkState.employee,
-    ...(raw?.employee || {})
+    ...(raw?.employee || {}),
+    email: String(raw?.employee?.email || defaultWorkState.employee.email || "").trim()
   };
 
   const assignments = Array.isArray(raw?.assignments)
@@ -666,6 +677,11 @@ function normalizeWorkState(raw) {
         status: assignment.status === "done" ? "done" : "open",
         source: String(assignment.source || ""),
         sourceId: String(assignment.sourceId || ""),
+        inviteStatus: ["sent", "failed", "not_configured"].includes(assignment.inviteStatus) ? assignment.inviteStatus : "",
+        inviteSentAt: assignment.inviteSentAt || "",
+        inviteTo: uniqueEmails(parseGuestEmails(assignment.inviteTo || "")).join(", "),
+        inviteEmailFrom: String(assignment.inviteEmailFrom || ""),
+        inviteError: String(assignment.inviteError || ""),
         completedAt: assignment.completedAt || "",
         createdAt: assignment.createdAt || new Date().toISOString(),
         updatedAt: assignment.updatedAt || assignment.createdAt || new Date().toISOString()
@@ -731,6 +747,11 @@ function validateWorkAssignment(input, existing = null) {
       status: existing?.status || "open",
       source: existing?.source || String(input.source || ""),
       sourceId: existing?.sourceId || String(input.sourceId || ""),
+      inviteStatus: existing?.inviteStatus || "",
+      inviteSentAt: existing?.inviteSentAt || "",
+      inviteTo: existing?.inviteTo || "",
+      inviteEmailFrom: existing?.inviteEmailFrom || "",
+      inviteError: existing?.inviteError || "",
       completedAt: existing?.completedAt || "",
       createdAt: existing?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString()
@@ -822,6 +843,11 @@ function assignmentFromBooking(booking, existing = null) {
     status: existing?.status || "open",
     source: "booking",
     sourceId: booking.id,
+    inviteStatus: existing?.inviteStatus || "",
+    inviteSentAt: existing?.inviteSentAt || "",
+    inviteTo: existing?.inviteTo || "",
+    inviteEmailFrom: existing?.inviteEmailFrom || "",
+    inviteError: existing?.inviteError || "",
     completedAt: existing?.completedAt || "",
     createdAt: existing?.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString()
@@ -831,6 +857,7 @@ function assignmentFromBooking(booking, existing = null) {
 function mergeBookingWorkAssignments(workState, bookings) {
   let created = 0;
   let updated = 0;
+  const createdAssignments = [];
 
   for (const booking of bookings.filter(isSyncableBooking)) {
     const existing = workState.assignments.find((assignment) => {
@@ -845,11 +872,12 @@ function mergeBookingWorkAssignments(workState, bookings) {
       updated += 1;
     } else {
       workState.assignments.push(next);
+      createdAssignments.push(next);
       created += 1;
     }
   }
 
-  return { created, updated, syncable: bookings.filter(isSyncableBooking).length };
+  return { created, updated, syncable: bookings.filter(isSyncableBooking).length, createdAssignments };
 }
 
 function normalizeInvoiceStatus(status) {
@@ -1312,6 +1340,25 @@ async function createInvoiceTransport() {
   });
 }
 
+async function sendResendEmail(payload, timeoutMs, timeoutMessage = "Resend email request timed out.") {
+  const response = await withTimeout(fetch(`${resendConfig.apiBase}/emails`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${resendConfig.apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  }), timeoutMs, timeoutMessage);
+  const result = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    const message = result.message || result.error?.message || result.error || `Resend email request failed with ${response.status}.`;
+    throw new Error(message);
+  }
+
+  return result;
+}
+
 async function sendInvoiceWithResend(invoice, recipients, pdf, bcc = []) {
   const payload = {
     from: invoiceEmailConfig.from,
@@ -1332,22 +1379,7 @@ async function sendInvoiceWithResend(invoice, recipients, pdf, bcc = []) {
     payload.bcc = bcc;
   }
 
-  const response = await withTimeout(fetch(`${resendConfig.apiBase}/emails`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${resendConfig.apiKey}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(payload)
-  }), invoiceEmailConfig.timeoutMs, "Resend email request timed out.");
-  const result = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    const message = result.message || result.error?.message || result.error || `Resend email request failed with ${response.status}.`;
-    throw new Error(message);
-  }
-
-  return result;
+  return sendResendEmail(payload, invoiceEmailConfig.timeoutMs, "Resend email request timed out.");
 }
 
 async function withTimeout(promise, milliseconds, message) {
@@ -1406,6 +1438,172 @@ async function sendInvoiceEmail(invoice, recipients) {
       }
     ]
   }), invoiceEmailConfig.timeoutMs + 2_000, "Invoice email timed out connecting to Lark Mail.");
+}
+
+function workInviteRecipients(workState = null) {
+  return uniqueEmails([
+    ...parseGuestEmails(workInviteEmailConfig.to),
+    ...parseGuestEmails(workState?.employee?.email || "")
+  ]).filter(isValidEmail);
+}
+
+function workInviteEmailMissingSettings(workState = null) {
+  const missing = [];
+  if (!workInviteEmailConfig.enabled) missing.push("WORK_INVITE_EMAIL_ENABLED");
+  if (!resendConfig.apiKey) missing.push("RESEND_API_KEY");
+  if (!workInviteRecipients(workState).length) missing.push("WORK_INVITE_EMAIL_TO");
+  return missing;
+}
+
+function isWorkInviteEmailConfigured() {
+  return workInviteEmailMissingSettings().length === 0;
+}
+
+function formatWorkInviteDueDate(assignment) {
+  const dueDate = parseDateValue(assignment.dueDate);
+  if (Number.isNaN(dueDate.getTime())) return assignment.dueDate || "Not set";
+
+  return new Intl.DateTimeFormat("en-AU", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric"
+  }).format(dueDate);
+}
+
+function buildWorkInviteEmailSubject(assignment) {
+  return `${workInviteEmailConfig.subjectPrefix}: ${assignment.title}`;
+}
+
+function buildWorkInviteEmailText(assignment, workState) {
+  const lines = [
+    `Hi ${workState?.employee?.name || "Faye"},`,
+    "",
+    "A new work item has been assigned to you in the OpenFrame internal booking system.",
+    "",
+    `Work: ${assignment.title}`,
+    `Due: ${formatWorkInviteDueDate(assignment)}`,
+    `Priority: ${assignment.priority}`,
+    ""
+  ];
+
+  if (assignment.notes) {
+    lines.push("Details:", assignment.notes, "");
+  }
+
+  lines.push(
+    "Open the work desk:",
+    "https://internalbooking.openframe.studio/work/",
+    "",
+    "Thank you,",
+    "OpenFrame Studio"
+  );
+
+  return lines.join("\n");
+}
+
+function buildWorkInviteEmailHtml(assignment, workState) {
+  const notes = assignment.notes
+    ? `<p><strong>Details:</strong><br />${escapeHtmlForEmail(assignment.notes).replace(/\n/g, "<br />")}</p>`
+    : "";
+
+  return `
+    <div style="font-family:Arial,sans-serif;color:#111611;line-height:1.5">
+      <p>Hi ${escapeHtmlForEmail(workState?.employee?.name || "Faye")},</p>
+      <p>A new work item has been assigned to you in the OpenFrame internal booking system.</p>
+      <p><strong>Work:</strong> ${escapeHtmlForEmail(assignment.title)}</p>
+      <p><strong>Due:</strong> ${escapeHtmlForEmail(formatWorkInviteDueDate(assignment))}</p>
+      <p><strong>Priority:</strong> ${escapeHtmlForEmail(assignment.priority)}</p>
+      ${notes}
+      <p><a href="https://internalbooking.openframe.studio/work/">Open the work desk</a></p>
+      <p>Thank you,<br />OpenFrame Studio</p>
+    </div>
+  `;
+}
+
+async function sendWorkInviteEmail(assignment, workState) {
+  const missing = workInviteEmailMissingSettings(workState);
+  if (missing.length) {
+    return { sent: false, skipped: true, missing };
+  }
+
+  const recipients = workInviteRecipients(workState);
+  const bcc = uniqueEmails(parseGuestEmails(workInviteEmailConfig.bcc)).filter(isValidEmail);
+  const payload = {
+    from: workInviteEmailConfig.from,
+    to: recipients,
+    subject: buildWorkInviteEmailSubject(assignment),
+    text: buildWorkInviteEmailText(assignment, workState),
+    html: buildWorkInviteEmailHtml(assignment, workState),
+    reply_to: workInviteEmailConfig.replyTo
+  };
+
+  if (bcc.length) {
+    payload.bcc = bcc;
+  }
+
+  await sendResendEmail(payload, workInviteEmailConfig.timeoutMs, "Work invite email request timed out.");
+  return { sent: true, recipients };
+}
+
+async function sendWorkInviteEmails(workState, assignments) {
+  const summary = {
+    attempted: assignments.length,
+    sent: 0,
+    skipped: 0,
+    failed: 0,
+    recipients: [],
+    errors: [],
+    missing: []
+  };
+
+  for (const assignment of assignments) {
+    try {
+      const result = await sendWorkInviteEmail(assignment, workState);
+      const now = new Date().toISOString();
+
+      if (result.sent) {
+        summary.sent += 1;
+        summary.recipients = uniqueEmails([...summary.recipients, ...result.recipients]);
+        assignment.inviteStatus = "sent";
+        assignment.inviteSentAt = now;
+        assignment.inviteTo = result.recipients.join(", ");
+        assignment.inviteEmailFrom = workInviteEmailConfig.from;
+        assignment.inviteError = "";
+      } else {
+        summary.skipped += 1;
+        summary.missing = uniqueEmails([...summary.missing, ...(result.missing || [])]);
+        assignment.inviteStatus = "not_configured";
+        assignment.inviteEmailFrom = workInviteEmailConfig.from;
+        assignment.inviteError = result.missing?.length
+          ? `Missing ${result.missing.join(", ")}`
+          : "Work invite email is not configured.";
+      }
+    } catch (error) {
+      summary.failed += 1;
+      const message = error.message || "Could not send work invite email.";
+      summary.errors.push(message);
+      assignment.inviteStatus = "failed";
+      assignment.inviteEmailFrom = workInviteEmailConfig.from;
+      assignment.inviteError = message;
+    }
+  }
+
+  return summary;
+}
+
+function workInviteMessage(summary) {
+  if (!summary?.attempted) return "";
+  if (summary.sent) {
+    return `Work invite sent from ${workInviteEmailConfig.from} to ${summary.recipients.join(", ")}.`;
+  }
+  if (summary.failed) {
+    return `Work saved, but the invite email could not send: ${summary.errors[0] || "unknown error"}`;
+  }
+  if (summary.skipped) {
+    return `Work saved. Add WORK_INVITE_EMAIL_TO in Render to email Faye from ${workInviteEmailConfig.from}.`;
+  }
+  return "";
 }
 
 function isLarkConfigured() {
@@ -2272,6 +2470,8 @@ async function handleApi(req, res, url) {
       organizerCalendarConfigured: Boolean(larkConfig.organizerCalendarId),
       invoiceEmailConfigured: isInvoiceEmailConfigured(),
       invoiceEmailProvider,
+      workInviteEmailConfigured: isWorkInviteEmailConfigured(),
+      workInviteEmailFrom: workInviteEmailConfig.from,
       timezone: larkConfig.timezone,
       persistentStorage: storageBackend !== "app",
       storageBackend
@@ -2312,8 +2512,16 @@ async function handleApi(req, res, url) {
     const workState = await loadWorkState();
     const bookings = await loadBookings();
     const result = mergeBookingWorkAssignments(workState, bookings);
+    const { createdAssignments, ...syncResult } = result;
+    const workInvite = await sendWorkInviteEmails(workState, createdAssignments);
     await saveWorkState(workState);
-    sendJson(res, 200, { ...visibleWorkStateForUser(workState, currentUser(req)), ...result, user: currentUser(req) });
+    sendJson(res, 200, {
+      ...visibleWorkStateForUser(workState, currentUser(req)),
+      ...syncResult,
+      workInvite,
+      workInviteMessage: workInviteMessage(workInvite),
+      user: currentUser(req)
+    });
     return;
   }
 
@@ -2332,8 +2540,15 @@ async function handleApi(req, res, url) {
 
     const workState = await loadWorkState();
     workState.assignments.push(assignment);
+    const workInvite = await sendWorkInviteEmails(workState, [assignment]);
     await saveWorkState(workState);
-    sendJson(res, 201, { assignment, ...visibleWorkStateForUser(workState, currentUser(req)), user: currentUser(req) });
+    sendJson(res, 201, {
+      assignment,
+      ...visibleWorkStateForUser(workState, currentUser(req)),
+      workInvite,
+      workInviteMessage: workInviteMessage(workInvite),
+      user: currentUser(req)
+    });
     return;
   }
 

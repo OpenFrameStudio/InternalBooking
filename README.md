@@ -58,6 +58,8 @@ restarts or redeploys the service.
    - `RESEND_API_KEY`
    - optional: `INVOICE_EMAIL_PROVIDER` (defaults to `resend`)
    - optional: `INVOICE_EMAIL_FROM` (defaults to `OpenFrame Studio <admin@openframe.studio>`)
+   - optional: `WORK_INVITE_EMAIL_TO` for Faye's work assignment invite emails
+   - optional: `WORK_INVITE_EMAIL_FROM` (defaults to `OpenFrame Studio <admin@openframe.studio>`)
    - optional: `ADMIN_USERNAME`
    - optional: `ADMIN_PASSWORD`
 4. After the service is live, open its Custom Domains settings and verify
@@ -109,6 +111,10 @@ INVOICE_EMAIL_REPLY_TO=admin@openframe.studio
 
 Verify `openframe.studio` in Resend first so emails can send from
 `admin@openframe.studio`.
+
+Work assignment invites also use Resend over HTTPS. Set
+`WORK_INVITE_EMAIL_TO` to Faye's email address; the default sender is
+`OpenFrame Studio <admin@openframe.studio>`.
 
 SMTP is still available if `INVOICE_EMAIL_PROVIDER=smtp`, but Render free
 services block outbound SMTP ports such as `465` and `587`.

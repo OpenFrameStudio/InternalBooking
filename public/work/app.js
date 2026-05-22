@@ -350,6 +350,7 @@ async function handleAssignmentSubmit(event) {
     });
     applyWorkData(data);
     closeAssignmentDialog();
+    if (!id && data.workInviteMessage) showToast(data.workInviteMessage);
     render();
   } catch (error) {
     el.assignmentError.textContent = error.message;
@@ -402,8 +403,9 @@ async function syncBookings() {
     const message = data.syncable === 0
       ? "No upcoming bookings found to assign to Faye."
       : `Synced ${data.syncable} upcoming bookings: ${data.created} new, ${data.updated} updated.`;
-    el.bookingSyncStatus.textContent = message;
-    showToast(message);
+    const fullMessage = data.workInviteMessage ? `${message} ${data.workInviteMessage}` : message;
+    el.bookingSyncStatus.textContent = fullMessage;
+    showToast(fullMessage);
     render();
   } catch (error) {
     el.bookingSyncStatus.textContent = error.message;
