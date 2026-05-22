@@ -831,6 +831,11 @@ function formatInvoiceDate(value) {
   return Number.isNaN(date.getTime()) ? 'Not set' : invoiceDateFormatter.format(date);
 }
 
+function formatInvoiceIsoDate(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '' : toDateValue(date);
+}
+
 function invoiceStatusLabel(status) {
   return {
     draft: 'Draft',
@@ -843,6 +848,21 @@ function invoiceBookingLabel(invoice) {
   const start = new Date(invoice.bookingStartAt);
   if (Number.isNaN(start.getTime())) return invoice.propertyAddress || 'Booking';
   return `${invoice.propertyAddress || 'Booking'} - ${dateFormatter.format(start)}, ${timeFormatter.format(start)}`;
+}
+
+function invoiceProductDescription(invoice) {
+  const serviceNames = (invoice.items || []).map((item) => item.name).filter(Boolean).join(' + ');
+  return [invoice.propertyAddress || 'Booking', serviceNames].filter(Boolean).join('\n');
+}
+
+function invoiceStampLabel(invoice) {
+  if (invoice.status === 'paid') return 'PAID';
+  if (invoice.status === 'void') return 'VOID';
+  return 'UNPAID';
+}
+
+function invoicePrintTitle(invoice) {
+  return [invoice.invoiceNumber, invoice.propertyAddress, 'Tax Invoice'].filter(Boolean).join(' - ');
 }
 
 function updateInvoiceStats() {
@@ -918,58 +938,74 @@ function printInvoice(id) {
   const invoice = state.invoices.find((item) => item.id === id);
   if (!invoice) return;
 
-  const rows = (invoice.items || []).map((item) => `
+  const productLines = escapeHtml(invoiceProductDescription(invoice)).replace(/\n/g, '<br />');
+  const rows = `
     <tr>
-      <td>${escapeHtml(item.name)}</td>
-      <td>${escapeHtml(item.quantity || 1)}</td>
-      <td>${escapeHtml(formatMoney(item.unitPrice))}</td>
-      <td>${escapeHtml(formatMoney(item.amount))}</td>
+      <td>${productLines}</td>
+      <td>1</td>
+      <td>${escapeHtml(formatMoney(invoice.subtotal))}</td>
+      <td>${escapeHtml(formatMoney(invoice.subtotal))}</td>
     </tr>
-  `).join('');
+  `;
 
   el.invoicePrintSheet.innerHTML = `
-    <div class="print-invoice-header">
-      <div>
-        <p>OpenFrame Studio</p>
-        <h1>Invoice</h1>
-      </div>
-      <div>
-        <strong>${escapeHtml(invoice.invoiceNumber)}</strong>
-        <span>${escapeHtml(invoiceStatusLabel(invoice.status))}</span>
-      </div>
+    <div class="tax-invoice-header">
+      <h1>Tax Invoice</h1>
+      <img src="/openframe-logo.png" alt="OpenFrame Studio" />
     </div>
-    <div class="print-invoice-grid">
+    <div class="tax-invoice-meta">
+      <span>Invoice Number</span>
+      <strong>${escapeHtml(invoice.invoiceNumber)}</strong>
+      <span>Invoice Date</span>
+      <strong>${escapeHtml(formatInvoiceIsoDate(invoice.issuedAt))}</strong>
+    </div>
+    <div class="tax-info-grid">
       <section>
-        <span>Bill to</span>
-        <strong>${escapeHtml(invoice.clientName || 'Client')}</strong>
-        <p>${escapeHtml(invoice.clientEmail || '')}</p>
-        <p>${escapeHtml(invoice.agentName || '')}${invoice.agentPhone ? ` (${escapeHtml(invoice.agentPhone)})` : ''}</p>
+        <h2>OUR INFORMATION</h2>
+        <p>OpenFrame Studio Pty Ltd</p>
+        <p>23 Selborne St</p>
+        <p>Burwood</p>
+        <p>NSW 2134</p>
+        <p>ABN: 35 687 073 114</p>
+        <p>Email: openframeau@gmail.com</p>
       </section>
       <section>
-        <span>Booking</span>
-        <strong>${escapeHtml(invoice.propertyAddress || 'Booking')}</strong>
-        <p>${escapeHtml(invoiceBookingLabel(invoice))}</p>
-        <p>Issued ${escapeHtml(formatInvoiceDate(invoice.issuedAt))}</p>
-        <p>Due ${escapeHtml(formatInvoiceDate(invoice.dueAt))}</p>
+        <h2>BILLING TO</h2>
+        <p>${escapeHtml(invoice.propertyAddress || invoice.clientName || 'Client')}</p>
       </section>
     </div>
-    <table>
+    <table class="tax-invoice-table">
       <thead>
-        <tr><th>Service</th><th>Qty</th><th>Rate</th><th>Amount</th></tr>
+        <tr><th>PRODUCT</th><th>QUANTITY</th><th>PRICE</th><th>SUBTOTAL</th></tr>
       </thead>
       <tbody>${rows}</tbody>
-      <tfoot>
-        <tr><td colspan="3">Subtotal</td><td>${escapeHtml(formatMoney(invoice.subtotal))}</td></tr>
-        <tr><td colspan="3">GST 10%</td><td>${escapeHtml(formatMoney(invoice.gstAmount))}</td></tr>
-        <tr><td colspan="3">Total incl. GST</td><td>${escapeHtml(formatMoney(invoice.total))}</td></tr>
-      </tfoot>
     </table>
-    <p class="print-note">${escapeHtml(invoice.notes || 'Generated from internal booking.')}</p>
+    <div class="tax-invoice-lower">
+      <div class="invoice-stamp ${escapeHtml(invoice.status)}">${escapeHtml(invoiceStampLabel(invoice))}</div>
+      <table class="tax-total-table">
+        <tbody>
+          <tr><th>Total</th><td>${escapeHtml(formatMoney(invoice.subtotal))}</td></tr>
+          <tr><th>GST (10%)</th><td>${escapeHtml(formatMoney(invoice.gstAmount))}</td></tr>
+          <tr><th>Total Due</th><td>${escapeHtml(formatMoney(invoice.total))}</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <section class="payment-info">
+      <h2>PAYMENT INFORMATION</h2>
+      <p>Bank Transfer:</p>
+      <p>Name: Openframe Studio Pty Ltd</p>
+      <p>BSB: 062-128</p>
+      <p>Account: 11440602</p>
+      <p>Please reference ${escapeHtml(invoice.invoiceNumber)} for the payment</p>
+    </section>
   `;
   el.invoicePrintSheet.hidden = false;
   document.body.classList.add('printing-invoice');
+  const previousTitle = document.title;
+  document.title = invoicePrintTitle(invoice);
   window.print();
   window.setTimeout(() => {
+    document.title = previousTitle;
     document.body.classList.remove('printing-invoice');
     el.invoicePrintSheet.hidden = true;
   }, 600);

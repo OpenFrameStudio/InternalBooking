@@ -906,13 +906,16 @@ function bookingInvoiceItems(booking) {
 }
 
 function nextInvoiceNumber(invoices) {
-  const year = new Date().getFullYear();
   const maxNumber = invoices.reduce((max, invoice) => {
-    const match = String(invoice.invoiceNumber || "").match(/^INV-(\d{4})-(\d{4,})$/);
-    if (!match || Number(match[1]) !== year) return max;
-    return Math.max(max, Number(match[2]));
+    const value = String(invoice.invoiceNumber || "");
+    const receiptMatch = value.match(/^R(\d+)$/);
+    if (receiptMatch) return Math.max(max, Number(receiptMatch[1]));
+
+    const legacyMatch = value.match(/^INV-\d{4}-(\d{4,})$/);
+    if (legacyMatch) return Math.max(max, Number(legacyMatch[1]));
+    return max;
   }, 0);
-  return `INV-${year}-${String(maxNumber + 1).padStart(4, "0")}`;
+  return `R${String(maxNumber + 1).padStart(3, "0")}`;
 }
 
 function invoiceFromBooking(booking, invoices, existing = null) {
