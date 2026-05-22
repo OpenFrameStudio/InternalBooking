@@ -39,7 +39,7 @@ Invoices are created automatically from confirmed bookings. The default draft in
 
 Invoices always add 10% GST to the service subtotal.
 
-## Deploy to internalbooking.openframe.studio
+## Deploy to openframe.studio
 
 This repo includes `render.yaml` for deploying the app as a Render web service.
 The default blueprint uses Render's free web service so you can get the app live
@@ -56,6 +56,7 @@ restarts or redeploys the service.
    - optional: `LARK_SENDER_EMAIL` (defaults to `admin@openframe.studio`)
    - optional: `LARK_SENDER_NAME` (defaults to `admin@openframe.studio`)
    - `RESEND_API_KEY`
+   - optional: `APP_PUBLIC_URL` (defaults to `https://system.openframe.studio`)
    - optional: `INVOICE_EMAIL_PROVIDER` (defaults to `resend`)
    - optional: `INVOICE_EMAIL_FROM` (defaults to `OpenFrame Studio <admin@openframe.studio>`)
    - optional: `WORK_INVITE_EMAIL_TO` for Faye's work assignment invite emails
@@ -63,9 +64,9 @@ restarts or redeploys the service.
    - optional: `ADMIN_USERNAME`
    - optional: `ADMIN_PASSWORD`
 4. After the service is live, open its Custom Domains settings and verify
-   `internalbooking.openframe.studio`.
-5. In your DNS provider, add the DNS record Render gives you for the
-   `internalbooking` subdomain, then verify it in Render.
+   `internalbooking.openframe.studio` and `system.openframe.studio`.
+5. In your DNS provider, add the DNS records Render gives you for the
+   `internalbooking` and `system` subdomains, then verify them in Render.
 
 The blueprint sets the app to listen on `0.0.0.0` in production and uses
 `/api/status` as the health check. Upgrade the service before using it for real

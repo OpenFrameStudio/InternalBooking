@@ -9,11 +9,14 @@ services:
     healthCheckPath: /api/status
     domains:
       - internalbooking.openframe.studio
+      - system.openframe.studio
     envVars:
       - key: NODE_ENV
         value: production
       - key: HOST
         value: 0.0.0.0
+      - key: APP_PUBLIC_URL
+        value: https://system.openframe.studio
       - key: LARK_TIMEZONE
         value: Australia/Sydney
       - key: LARK_API_BASE

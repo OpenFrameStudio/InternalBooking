@@ -35,6 +35,7 @@ const storageBackend = githubStorage.token && githubStorage.repo ? "github" : (p
 
 const port = Number(process.env.PORT || 4180);
 const host = process.env.HOST || (process.env.PORT ? "0.0.0.0" : "127.0.0.1");
+const publicAppUrl = (process.env.APP_PUBLIC_URL || "https://system.openframe.studio").replace(/\/$/, "");
 const larkConfig = {
   appId: process.env.LARK_APP_ID || "",
   appSecret: process.env.LARK_APP_SECRET || "",
@@ -1493,7 +1494,7 @@ function buildWorkInviteEmailText(assignment, workState) {
 
   lines.push(
     "Open the work desk:",
-    "https://internalbooking.openframe.studio/work/",
+    `${publicAppUrl}/work/`,
     "",
     "Thank you,",
     "OpenFrame Studio"
@@ -1515,7 +1516,7 @@ function buildWorkInviteEmailHtml(assignment, workState) {
       <p><strong>Due:</strong> ${escapeHtmlForEmail(formatWorkInviteDueDate(assignment))}</p>
       <p><strong>Priority:</strong> ${escapeHtmlForEmail(assignment.priority)}</p>
       ${notes}
-      <p><a href="https://internalbooking.openframe.studio/work/">Open the work desk</a></p>
+      <p><a href="${escapeHtmlForEmail(`${publicAppUrl}/work/`)}">Open the work desk</a></p>
       <p>Thank you,<br />OpenFrame Studio</p>
     </div>
   `;
