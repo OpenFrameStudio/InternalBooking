@@ -13,6 +13,7 @@
         <a class="nav-link active" href="/bookings" data-route="/bookings" data-app-link="bookings">Bookings</a>
         <a class="nav-link" href="/clients" data-route="/clients" data-app-link="clients">Clients</a>
         <a class="nav-link" href="/photographers" data-route="/photographers" data-app-link="photographers">Photographers</a>
+        <a class="nav-link" href="/invoices" data-route="/invoices" data-app-link="invoices">Invoices</a>
         <a class="nav-link" href="/work/" data-app-link="work">Work</a>
         <button class="nav-link nav-action" id="logoutButton" type="button">Log out</button>
       </nav>
@@ -351,6 +352,51 @@
           <div class="photographer-list" id="photographerList"></div>
         </section>
       </section>
+
+      <section class="app-page" id="invoicesPage" hidden>
+        <section class="directory-surface invoice-summary-surface">
+          <div class="surface-header">
+            <div>
+              <p class="eyebrow">Invoice desk</p>
+              <h2>Invoices from bookings</h2>
+              <p class="surface-subtitle">Draft invoices are created automatically when a booking is confirmed.</p>
+            </div>
+            <a class="ghost-button nav-button" href="/bookings" data-route="/bookings">Back to bookings</a>
+          </div>
+
+          <div class="invoice-stats">
+            <div>
+              <span id="invoiceDraftCount">0</span>
+              <small>draft</small>
+            </div>
+            <div>
+              <span id="invoicePaidCount">0</span>
+              <small>paid</small>
+            </div>
+            <div>
+              <span id="invoiceTotalValue">$0</span>
+              <small>draft total</small>
+            </div>
+          </div>
+
+          <div class="actions">
+            <button class="primary-button" id="syncInvoicesButton" type="button">Create missing invoices</button>
+            <button class="ghost-button" id="refreshInvoicesButton" type="button">Refresh invoices</button>
+            <p id="invoiceMessage" role="status"></p>
+          </div>
+        </section>
+
+        <section class="list-section" aria-label="Invoices">
+          <div class="section-header">
+            <div>
+              <p class="eyebrow">Billing</p>
+              <h2>Invoices</h2>
+            </div>
+          </div>
+
+          <div class="invoice-list" id="invoiceList"></div>
+        </section>
+      </section>
     </main>
 
     <template id="bookingTemplate">
@@ -404,6 +450,31 @@
         </div>
       </article>
     </template>
+
+    <template id="invoiceTemplate">
+      <article class="invoice-item">
+        <div class="invoice-main">
+          <div class="booking-title-row">
+            <h3></h3>
+            <span class="invoice-status"></span>
+          </div>
+          <p class="invoice-client"></p>
+          <p class="invoice-booking"></p>
+          <p class="invoice-services"></p>
+        </div>
+        <div class="invoice-total">
+          <strong></strong>
+          <small></small>
+        </div>
+        <div class="invoice-actions">
+          <button class="ghost-button print-invoice-button" type="button">Print</button>
+          <button class="ghost-button paid-invoice-button" type="button">Mark paid</button>
+          <button class="icon-button void-invoice-button" type="button" title="Void invoice" aria-label="Void invoice">×</button>
+        </div>
+      </article>
+    </template>
+
+    <section class="invoice-print-sheet" id="invoicePrintSheet" hidden aria-label="Printable invoice"></section>
 
     <script src="/app.js?v=multi-agent-emails" type="module"></script>
   </body>

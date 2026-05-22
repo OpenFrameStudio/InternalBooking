@@ -31,6 +31,12 @@ Faye can access Bookings and Work. Boss can access Bookings, Clients, Photograph
 
 You can override these with `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `EMPLOYEE_USERNAME`, and `EMPLOYEE_PASSWORD`.
 
+Invoices are created automatically from confirmed bookings. The default draft invoice prices are:
+
+- Photography: `$150`
+- Floorplan: `$50`
+- Drone: `$50`
+
 ## Deploy to internalbooking.openframe.studio
 
 This repo includes `render.yaml` for deploying the app as a Render web service.

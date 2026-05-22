@@ -7,9 +7,11 @@ const el = {
   bookingTemplate: $('#bookingTemplate'),
   clientTemplate: $('#clientTemplate'),
   photographerTemplate: $('#photographerTemplate'),
+  invoiceTemplate: $('#invoiceTemplate'),
   bookingPage: $('#bookingPage'),
   clientsPage: $('#clientsPage'),
   photographersPage: $('#photographersPage'),
+  invoicesPage: $('#invoicesPage'),
   propertyAddress: $('#propertyAddressInput'),
   addressDatalist: $('#addressSuggestionList'),
   addressSuggestions: $('#addressSuggestions'),
@@ -47,6 +49,14 @@ const el = {
   directoryPhotographerName: $('#directoryPhotographerName'),
   directoryPhotographerEmail: $('#directoryPhotographerEmail'),
   directoryPhotographerPhone: $('#directoryPhotographerPhone'),
+  invoiceList: $('#invoiceList'),
+  invoiceMessage: $('#invoiceMessage'),
+  invoiceDraftCount: $('#invoiceDraftCount'),
+  invoicePaidCount: $('#invoicePaidCount'),
+  invoiceTotalValue: $('#invoiceTotalValue'),
+  syncInvoicesButton: $('#syncInvoicesButton'),
+  refreshInvoicesButton: $('#refreshInvoicesButton'),
+  invoicePrintSheet: $('#invoicePrintSheet'),
   refreshButton: $('#refreshButton'),
   searchAddressButton: $('#searchAddressButton'),
   testLarkButton: $('#testLarkButton'),
@@ -76,6 +86,7 @@ const state = {
   bookings: [],
   clients: [],
   photographers: [],
+  invoices: [],
   editingBookingId: '',
   restoringDraft: false,
   syncedClientEmail: [],
@@ -110,6 +121,8 @@ const dateFormatter = new Intl.DateTimeFormat(undefined, { weekday: 'short', mon
 const timeFormatter = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
 const monthFormatter = new Intl.DateTimeFormat(undefined, { month: 'short' });
 const dayFormatter = new Intl.DateTimeFormat(undefined, { day: '2-digit' });
+const invoiceDateFormatter = new Intl.DateTimeFormat('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
+const currencyFormatter = new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' });
 
 function readStored(key, fallback) {
   try {
@@ -176,6 +189,10 @@ function applyAppAccess() {
   }
 
   if (!userCanAccess('photographers') && window.location.pathname === '/photographers') {
+    setRoute('/bookings');
+  }
+
+  if (!userCanAccess('invoices') && window.location.pathname === '/invoices') {
     setRoute('/bookings');
   }
 }
@@ -712,14 +729,16 @@ function resetBookingForm(message = '') {
 }
 
 function setRoute(route, push = true) {
-  const nextRoute = route === '/clients' || route === '/photographers' ? route : '/bookings';
+  const nextRoute = ['/clients', '/photographers', '/invoices'].includes(route) ? route : '/bookings';
   el.bookingPage.hidden = nextRoute !== '/bookings';
   el.clientsPage.hidden = nextRoute !== '/clients';
   el.photographersPage.hidden = nextRoute !== '/photographers';
+  el.invoicesPage.hidden = nextRoute !== '/invoices';
   $$('[data-route]').forEach((link) => link.classList.toggle('active', link.dataset.route === nextRoute));
   if (push && window.location.pathname !== nextRoute) history.pushState({ route: nextRoute }, '', nextRoute);
   if (nextRoute === '/clients') renderClientList();
   if (nextRoute === '/photographers') renderPhotographerList();
+  if (nextRoute === '/invoices') renderInvoices();
 }
 
 function buildBookingPayload() {
@@ -803,6 +822,154 @@ function renderBookings() {
   updateStats();
 }
 
+function formatMoney(value) {
+  return currencyFormatter.format(Number(value || 0));
+}
+
+function formatInvoiceDate(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 'Not set' : invoiceDateFormatter.format(date);
+}
+
+function invoiceStatusLabel(status) {
+  return {
+    draft: 'Draft',
+    paid: 'Paid',
+    void: 'Void'
+  }[status] || 'Draft';
+}
+
+function invoiceBookingLabel(invoice) {
+  const start = new Date(invoice.bookingStartAt);
+  if (Number.isNaN(start.getTime())) return invoice.propertyAddress || 'Booking';
+  return `${invoice.propertyAddress || 'Booking'} - ${dateFormatter.format(start)}, ${timeFormatter.format(start)}`;
+}
+
+function updateInvoiceStats() {
+  const drafts = state.invoices.filter((invoice) => invoice.status === 'draft');
+  const paid = state.invoices.filter((invoice) => invoice.status === 'paid');
+  el.invoiceDraftCount.textContent = drafts.length;
+  el.invoicePaidCount.textContent = paid.length;
+  el.invoiceTotalValue.textContent = formatMoney(drafts.reduce((sum, invoice) => sum + Number(invoice.total || 0), 0));
+}
+
+function renderInvoices() {
+  if (!userCanAccess('invoices')) return;
+
+  el.invoiceList.innerHTML = '';
+  const invoices = [...state.invoices].sort((a, b) => new Date(b.issuedAt) - new Date(a.issuedAt));
+  updateInvoiceStats();
+
+  if (!invoices.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty-state';
+    empty.textContent = 'No invoices yet. Create or sync booking invoices and they will appear here.';
+    el.invoiceList.append(empty);
+    return;
+  }
+
+  for (const invoice of invoices) {
+    const item = el.invoiceTemplate.content.firstElementChild.cloneNode(true);
+    item.classList.toggle('paid', invoice.status === 'paid');
+    item.classList.toggle('void', invoice.status === 'void');
+    item.querySelector('h3').textContent = `${invoice.invoiceNumber} - ${invoice.propertyAddress || 'Booking invoice'}`;
+    item.querySelector('.invoice-status').textContent = invoiceStatusLabel(invoice.status);
+    item.querySelector('.invoice-status').classList.toggle('paid', invoice.status === 'paid');
+    item.querySelector('.invoice-status').classList.toggle('void', invoice.status === 'void');
+    item.querySelector('.invoice-client').textContent = [invoice.clientName, invoice.agentName].filter(Boolean).join(' - ') || 'No client saved';
+    item.querySelector('.invoice-booking').textContent = `Issued ${formatInvoiceDate(invoice.issuedAt)} - due ${formatInvoiceDate(invoice.dueAt)}`;
+    item.querySelector('.invoice-services').textContent = (invoice.items || []).map((item) => `${item.name} ${formatMoney(item.amount)}`).join(' + ');
+    item.querySelector('.invoice-total strong').textContent = formatMoney(invoice.total);
+    item.querySelector('.invoice-total small').textContent = invoice.currency || 'AUD';
+
+    item.querySelector('.print-invoice-button').addEventListener('click', () => printInvoice(invoice.id));
+    const paidButton = item.querySelector('.paid-invoice-button');
+    paidButton.hidden = invoice.status !== 'draft';
+    paidButton.addEventListener('click', () => updateInvoiceStatus(invoice.id, 'paid'));
+    const voidButton = item.querySelector('.void-invoice-button');
+    voidButton.hidden = invoice.status !== 'draft';
+    voidButton.addEventListener('click', () => updateInvoiceStatus(invoice.id, 'void'));
+    el.invoiceList.append(item);
+  }
+}
+
+function upsertStateInvoice(invoice) {
+  if (!invoice || !userCanAccess('invoices')) return;
+  const index = state.invoices.findIndex((item) => item.id === invoice.id || item.bookingId === invoice.bookingId);
+  if (index >= 0) state.invoices[index] = invoice;
+  else state.invoices.unshift(invoice);
+  renderInvoices();
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  }[char]));
+}
+
+function printInvoice(id) {
+  const invoice = state.invoices.find((item) => item.id === id);
+  if (!invoice) return;
+
+  const rows = (invoice.items || []).map((item) => `
+    <tr>
+      <td>${escapeHtml(item.name)}</td>
+      <td>${escapeHtml(item.quantity || 1)}</td>
+      <td>${escapeHtml(formatMoney(item.unitPrice))}</td>
+      <td>${escapeHtml(formatMoney(item.amount))}</td>
+    </tr>
+  `).join('');
+
+  el.invoicePrintSheet.innerHTML = `
+    <div class="print-invoice-header">
+      <div>
+        <p>OpenFrame Studio</p>
+        <h1>Invoice</h1>
+      </div>
+      <div>
+        <strong>${escapeHtml(invoice.invoiceNumber)}</strong>
+        <span>${escapeHtml(invoiceStatusLabel(invoice.status))}</span>
+      </div>
+    </div>
+    <div class="print-invoice-grid">
+      <section>
+        <span>Bill to</span>
+        <strong>${escapeHtml(invoice.clientName || 'Client')}</strong>
+        <p>${escapeHtml(invoice.clientEmail || '')}</p>
+        <p>${escapeHtml(invoice.agentName || '')}${invoice.agentPhone ? ` (${escapeHtml(invoice.agentPhone)})` : ''}</p>
+      </section>
+      <section>
+        <span>Booking</span>
+        <strong>${escapeHtml(invoice.propertyAddress || 'Booking')}</strong>
+        <p>${escapeHtml(invoiceBookingLabel(invoice))}</p>
+        <p>Issued ${escapeHtml(formatInvoiceDate(invoice.issuedAt))}</p>
+        <p>Due ${escapeHtml(formatInvoiceDate(invoice.dueAt))}</p>
+      </section>
+    </div>
+    <table>
+      <thead>
+        <tr><th>Service</th><th>Qty</th><th>Rate</th><th>Amount</th></tr>
+      </thead>
+      <tbody>${rows}</tbody>
+      <tfoot>
+        <tr><td colspan="3">Total</td><td>${escapeHtml(formatMoney(invoice.total))}</td></tr>
+      </tfoot>
+    </table>
+    <p class="print-note">${escapeHtml(invoice.notes || 'Generated from internal booking.')}</p>
+  `;
+  el.invoicePrintSheet.hidden = false;
+  document.body.classList.add('printing-invoice');
+  window.print();
+  window.setTimeout(() => {
+    document.body.classList.remove('printing-invoice');
+    el.invoicePrintSheet.hidden = true;
+  }, 600);
+}
+
 function startBookingEdit(id) {
   const booking = state.bookings.find((item) => item.id === id);
   if (!booking || booking.status === 'cancelled' || booking.larkOnly) {
@@ -876,6 +1043,58 @@ async function loadPhotographers() {
   writeStored(storageKeys.photographers, state.photographers);
   renderOptions(el.photographerSelect, state.photographers, 'New photographer');
   renderPhotographerList();
+}
+
+async function loadInvoices() {
+  if (!userCanAccess('invoices')) return;
+  try {
+    const { response, data } = await fetchJson('/api/invoices');
+    if (!response.ok) {
+      setMessage(el.invoiceMessage, (data.errors || ['Could not load invoices.']).join(' '), 'error');
+      return;
+    }
+    state.invoices = data.invoices || [];
+    renderInvoices();
+  } catch {
+    setMessage(el.invoiceMessage, 'Could not reach the invoice app.', 'error');
+  }
+}
+
+async function syncInvoices() {
+  if (!userCanAccess('invoices')) return;
+  el.syncInvoicesButton.disabled = true;
+  setMessage(el.invoiceMessage, 'Creating missing invoices...');
+  try {
+    const { response, data } = await fetchJson('/api/invoices/sync', { method: 'POST' });
+    if (!response.ok) {
+      setMessage(el.invoiceMessage, (data.errors || ['Could not sync invoices.']).join(' '), 'error');
+      return;
+    }
+    state.invoices = data.invoices || [];
+    renderInvoices();
+    setMessage(el.invoiceMessage, `Invoices synced: ${data.created || 0} created, ${data.updated || 0} updated.`, 'success');
+  } catch {
+    setMessage(el.invoiceMessage, 'Could not reach the invoice app.', 'error');
+  } finally {
+    el.syncInvoicesButton.disabled = false;
+  }
+}
+
+async function updateInvoiceStatus(id, status) {
+  const action = status === 'paid' ? 'Marking invoice paid...' : 'Voiding invoice...';
+  setMessage(el.invoiceMessage, action);
+  try {
+    const { response, data } = await fetchJson(`/api/invoices/${encodeURIComponent(id)}/${status}`, { method: 'POST' });
+    if (!response.ok) {
+      setMessage(el.invoiceMessage, (data.errors || ['Could not update invoice.']).join(' '), 'error');
+      return;
+    }
+    state.invoices = data.invoices || state.invoices.map((invoice) => invoice.id === id ? data.invoice : invoice);
+    renderInvoices();
+    setMessage(el.invoiceMessage, status === 'paid' ? 'Invoice marked paid.' : 'Invoice voided.', 'success');
+  } catch {
+    setMessage(el.invoiceMessage, 'Could not reach the invoice app.', 'error');
+  }
 }
 
 async function saveDirectoryClient(event) {
@@ -1077,6 +1296,7 @@ async function submitBooking(event) {
     } else {
       state.bookings.push(result.booking);
     }
+    upsertStateInvoice(result.invoice);
     rememberAddress(result.booking.propertyAddress);
     renderBookings();
     removeStored(storageKeys.draft);
@@ -1133,6 +1353,7 @@ async function cancelBooking(id) {
   const { response, data } = await fetchJson(`/api/bookings/${id}/cancel`, { method: 'POST' });
   if (!response.ok) return;
   state.bookings = state.bookings.map((booking) => booking.id === id ? data.booking : booking);
+  upsertStateInvoice(data.invoice);
   if (state.editingBookingId === id) resetBookingForm('Edit cancelled because the booking was cancelled.');
   renderBookings();
 }
@@ -1175,6 +1396,8 @@ el.bookingForm.addEventListener('change', saveDraft);
 el.clientForm.addEventListener('submit', saveDirectoryClient);
 el.photographerForm.addEventListener('submit', saveDirectoryPhotographer);
 el.refreshButton.addEventListener('click', loadBookings);
+el.refreshInvoicesButton.addEventListener('click', loadInvoices);
+el.syncInvoicesButton.addEventListener('click', syncInvoices);
 el.searchAddressButton.addEventListener('click', searchAddressSuggestions);
 el.testLarkButton.addEventListener('click', testLark);
 el.previewLarkButton.addEventListener('click', previewLarkEvent);
@@ -1224,6 +1447,7 @@ updateDurationForServices();
 applyExamplePlaceholders();
 await loadSession();
 await Promise.all([loadStatus(), loadClients(), loadPhotographers(), loadBookings()]);
+await loadInvoices();
 restoreDraft();
 updateInvitationSummary();
 updateAddressSuggestions();

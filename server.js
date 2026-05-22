@@ -17,11 +17,13 @@ const bookingsFile = path.join(dataDir, "bookings.json");
 const clientsFile = path.join(dataDir, "clients.json");
 const photographersFile = path.join(dataDir, "photographers.json");
 const workFile = path.join(dataDir, "work-assignments.json");
+const invoicesFile = path.join(dataDir, "invoices.json");
 const seedFiles = {
   bookings: path.join(bundledDataDir, "bookings.json"),
   clients: path.join(bundledDataDir, "clients.json"),
   photographers: path.join(bundledDataDir, "photographers.json"),
-  work: path.join(bundledDataDir, "work-assignments.json")
+  work: path.join(bundledDataDir, "work-assignments.json"),
+  invoices: path.join(bundledDataDir, "invoices.json")
 };
 const githubStorage = {
   token: process.env.GITHUB_STORAGE_TOKEN || "",
@@ -51,8 +53,8 @@ const authUsers = [
     role: "boss",
     label: "Boss / Team Leader",
     name: "Boss",
-    apps: ["bookings", "clients", "photographers", "work"],
-    permissions: ["manage_bookings", "manage_directory", "manage_work", "sync_work_bookings", "view_work_messages"]
+    apps: ["bookings", "clients", "photographers", "work", "invoices"],
+    permissions: ["manage_bookings", "manage_directory", "manage_work", "sync_work_bookings", "view_work_messages", "manage_invoices"]
   },
   {
     username: process.env.EMPLOYEE_USERNAME || "Faye",
@@ -90,6 +92,12 @@ const contentTypes = {
 };
 
 const serviceCatalog = new Set(["Photography", "Floorplan", "Drone"]);
+const invoiceServicePrices = {
+  Photography: 150,
+  Floorplan: 50,
+  Drone: 50
+};
+const invoiceCurrency = "AUD";
 const larkImportDays = Number(process.env.LARK_IMPORT_DAYS || 120);
 const defaultPhotographers = [
   {
@@ -135,6 +143,12 @@ const dataFiles = {
     seedFile: seedFiles.work,
     githubPath: githubDataPath("work-assignments.json"),
     fallback: defaultWorkState
+  },
+  invoices: {
+    file: invoicesFile,
+    seedFile: seedFiles.invoices,
+    githubPath: githubDataPath("invoices.json"),
+    fallback: []
   }
 };
 
@@ -331,6 +345,7 @@ function appForRoute(pathname) {
   if (pathname === "/clients") return "clients";
   if (pathname === "/photographers") return "photographers";
   if (pathname === "/work" || pathname === "/work/") return "work";
+  if (pathname === "/invoices") return "invoices";
   return "";
 }
 
@@ -548,7 +563,8 @@ async function prepareDataStorage() {
     seedStoredDataFile(dataFiles.bookings),
     seedStoredDataFile(dataFiles.clients),
     seedStoredDataFile(dataFiles.photographers),
-    seedStoredDataFile(dataFiles.work)
+    seedStoredDataFile(dataFiles.work),
+    seedStoredDataFile(dataFiles.invoices)
   ]);
 }
 
@@ -586,6 +602,15 @@ async function loadPhotographers() {
 
 async function savePhotographers(photographers) {
   await writeStoredJson(dataFiles.photographers, photographers);
+}
+
+async function loadInvoices() {
+  const invoices = await readStoredJson(dataFiles.invoices);
+  return normalizeInvoices(invoices);
+}
+
+async function saveInvoices(invoices) {
+  await writeStoredJson(dataFiles.invoices, normalizeInvoices(invoices));
 }
 
 function normalizeWorkState(raw) {
@@ -791,6 +816,165 @@ function mergeBookingWorkAssignments(workState, bookings) {
   }
 
   return { created, updated, syncable: bookings.filter(isSyncableBooking).length };
+}
+
+function normalizeInvoiceStatus(status) {
+  return ["draft", "paid", "void"].includes(status) ? status : "draft";
+}
+
+function normalizeMoney(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.round(number * 100) / 100 : 0;
+}
+
+function normalizeInvoice(invoice) {
+  const items = Array.isArray(invoice?.items)
+    ? invoice.items.map((item) => ({
+        name: String(item.name || "Service").trim() || "Service",
+        quantity: Math.max(1, Number(item.quantity || 1)),
+        unitPrice: normalizeMoney(item.unitPrice),
+        amount: normalizeMoney(item.amount ?? Number(item.quantity || 1) * Number(item.unitPrice || 0))
+      }))
+    : [];
+  const subtotal = normalizeMoney(invoice?.subtotal ?? items.reduce((sum, item) => sum + item.amount, 0));
+  const total = normalizeMoney(invoice?.total ?? subtotal);
+
+  return {
+    id: invoice?.id || crypto.randomUUID(),
+    invoiceNumber: String(invoice?.invoiceNumber || "").trim(),
+    bookingId: String(invoice?.bookingId || ""),
+    propertyAddress: String(invoice?.propertyAddress || ""),
+    clientName: String(invoice?.clientName || ""),
+    clientEmail: String(invoice?.clientEmail || ""),
+    agentName: String(invoice?.agentName || ""),
+    agentPhone: String(invoice?.agentPhone || ""),
+    photographerName: String(invoice?.photographerName || ""),
+    bookingStartAt: invoice?.bookingStartAt || "",
+    bookingEndAt: invoice?.bookingEndAt || "",
+    items,
+    subtotal,
+    total,
+    currency: invoice?.currency || invoiceCurrency,
+    status: normalizeInvoiceStatus(invoice?.status),
+    issuedAt: invoice?.issuedAt || new Date().toISOString(),
+    dueAt: invoice?.dueAt || addDays(new Date(), 7).toISOString(),
+    paidAt: invoice?.paidAt || "",
+    voidedAt: invoice?.voidedAt || "",
+    notes: String(invoice?.notes || ""),
+    createdAt: invoice?.createdAt || new Date().toISOString(),
+    updatedAt: invoice?.updatedAt || invoice?.createdAt || new Date().toISOString()
+  };
+}
+
+function normalizeInvoices(invoices) {
+  return Array.isArray(invoices)
+    ? invoices.map(normalizeInvoice).filter((invoice) => invoice.bookingId || invoice.invoiceNumber)
+    : [];
+}
+
+function addDays(date, days) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function bookingInvoiceItems(booking) {
+  const services = Array.isArray(booking.services) && booking.services.length
+    ? booking.services.map((service) => service?.name || service).filter(Boolean)
+    : String(booking.service || "").split("+").map((service) => service.trim()).filter(Boolean);
+  const uniqueServices = [...new Set(services)];
+
+  return uniqueServices.map((name) => {
+    const unitPrice = normalizeMoney(invoiceServicePrices[name] ?? 0);
+    return {
+      name,
+      quantity: 1,
+      unitPrice,
+      amount: unitPrice
+    };
+  });
+}
+
+function nextInvoiceNumber(invoices) {
+  const year = new Date().getFullYear();
+  const maxNumber = invoices.reduce((max, invoice) => {
+    const match = String(invoice.invoiceNumber || "").match(/^INV-(\d{4})-(\d{4,})$/);
+    if (!match || Number(match[1]) !== year) return max;
+    return Math.max(max, Number(match[2]));
+  }, 0);
+  return `INV-${year}-${String(maxNumber + 1).padStart(4, "0")}`;
+}
+
+function invoiceFromBooking(booking, invoices, existing = null) {
+  const now = new Date().toISOString();
+  const isPaid = existing?.status === "paid";
+  const existingItems = Array.isArray(existing?.items) ? existing.items : [];
+  const items = isPaid ? existingItems : bookingInvoiceItems(booking);
+  const subtotal = normalizeMoney(items.reduce((sum, item) => sum + item.amount, 0));
+  const status = booking.status === "cancelled"
+    ? (isPaid ? "paid" : "void")
+    : (isPaid ? "paid" : "draft");
+
+  return normalizeInvoice({
+    ...(existing || {}),
+    id: existing?.id || crypto.randomUUID(),
+    invoiceNumber: existing?.invoiceNumber || nextInvoiceNumber(invoices),
+    bookingId: booking.id,
+    propertyAddress: booking.propertyAddress || "",
+    clientName: booking.clientName || "",
+    clientEmail: booking.clientEmail || "",
+    agentName: booking.agentName || "",
+    agentPhone: booking.agentPhone || "",
+    photographerName: booking.photographerName || "",
+    bookingStartAt: booking.startAt || "",
+    bookingEndAt: booking.endAt || "",
+    items,
+    subtotal,
+    total: subtotal,
+    currency: invoiceCurrency,
+    status,
+    issuedAt: existing?.issuedAt || now,
+    dueAt: existing?.dueAt || addDays(new Date(), 7).toISOString(),
+    paidAt: existing?.paidAt || "",
+    voidedAt: status === "void" ? (existing?.voidedAt || now) : "",
+    notes: "Generated from internal booking.",
+    createdAt: existing?.createdAt || now,
+    updatedAt: now
+  });
+}
+
+function upsertInvoiceForBooking(invoices, booking) {
+  if (!booking?.id || booking.larkOnly) {
+    return { invoice: null, created: false, updated: false };
+  }
+
+  const index = invoices.findIndex((invoice) => invoice.bookingId === booking.id);
+  const existing = index >= 0 ? invoices[index] : null;
+  if (booking.status === "cancelled" && !existing) {
+    return { invoice: null, created: false, updated: false };
+  }
+
+  const invoice = invoiceFromBooking(booking, invoices, existing);
+  if (index >= 0) {
+    invoices[index] = invoice;
+    return { invoice, created: false, updated: true };
+  }
+
+  invoices.push(invoice);
+  return { invoice, created: true, updated: false };
+}
+
+function syncInvoicesFromBookings(invoices, bookings) {
+  let created = 0;
+  let updated = 0;
+
+  for (const booking of bookings.filter((item) => !item.larkOnly)) {
+    const result = upsertInvoiceForBooking(invoices, booking);
+    if (result.created) created += 1;
+    if (result.updated) updated += 1;
+  }
+
+  return { created, updated, total: invoices.length };
 }
 
 function isLarkConfigured() {
@@ -1632,6 +1816,11 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  if (url.pathname.startsWith("/api/invoices") && !canAccessApp(req, "invoices")) {
+    sendForbidden(res);
+    return;
+  }
+
   if (req.method === "GET" && url.pathname === "/api/work") {
     const workState = await loadWorkState();
     sendJson(res, 200, {
@@ -1791,6 +1980,54 @@ async function handleApi(req, res, url) {
     workState.messages = [];
     await saveWorkState(workState);
     sendJson(res, 200, { ...visibleWorkStateForUser(workState, currentUser(req)), user: currentUser(req) });
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/invoices") {
+    const invoices = await loadInvoices();
+    invoices.sort((a, b) => new Date(b.issuedAt) - new Date(a.issuedAt));
+    sendJson(res, 200, { invoices });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/invoices/sync") {
+    if (!hasPermission(req, "manage_invoices")) {
+      sendForbidden(res, "Boss or team leader only.");
+      return;
+    }
+
+    const invoices = await loadInvoices();
+    const bookings = await loadBookings();
+    const result = syncInvoicesFromBookings(invoices, bookings);
+    await saveInvoices(invoices);
+    invoices.sort((a, b) => new Date(b.issuedAt) - new Date(a.issuedAt));
+    sendJson(res, 200, { invoices, ...result });
+    return;
+  }
+
+  const invoiceActionMatch = url.pathname.match(/^\/api\/invoices\/([^/]+)\/(paid|void|draft)$/);
+  if (req.method === "POST" && invoiceActionMatch) {
+    if (!hasPermission(req, "manage_invoices")) {
+      sendForbidden(res, "Boss or team leader only.");
+      return;
+    }
+
+    const invoiceId = decodeURIComponent(invoiceActionMatch[1]);
+    const status = invoiceActionMatch[2] === "paid" ? "paid" : invoiceActionMatch[2];
+    const invoices = await loadInvoices();
+    const invoice = invoices.find((item) => item.id === invoiceId);
+    if (!invoice) {
+      sendJson(res, 404, { errors: ["Invoice not found."] });
+      return;
+    }
+
+    invoice.status = normalizeInvoiceStatus(status);
+    invoice.updatedAt = new Date().toISOString();
+    invoice.paidAt = invoice.status === "paid" ? (invoice.paidAt || invoice.updatedAt) : "";
+    invoice.voidedAt = invoice.status === "void" ? (invoice.voidedAt || invoice.updatedAt) : "";
+    await saveInvoices(invoices);
+    invoices.sort((a, b) => new Date(b.issuedAt) - new Date(a.issuedAt));
+    sendJson(res, 200, { invoice, invoices });
     return;
   }
 
@@ -2056,7 +2293,10 @@ async function handleApi(req, res, url) {
 
     bookings.push(booking);
     await saveBookings(bookings);
-    sendJson(res, 201, { booking });
+    const invoices = await loadInvoices();
+    const invoiceResult = upsertInvoiceForBooking(invoices, booking);
+    await saveInvoices(invoices);
+    sendJson(res, 201, { booking, invoice: invoiceResult.invoice });
     return;
   }
 
@@ -2118,7 +2358,10 @@ async function handleApi(req, res, url) {
 
     bookings[bookingIndex] = booking;
     await saveBookings(bookings);
-    sendJson(res, 200, { booking });
+    const invoices = await loadInvoices();
+    const invoiceResult = upsertInvoiceForBooking(invoices, booking);
+    await saveInvoices(invoices);
+    sendJson(res, 200, { booking, invoice: invoiceResult.invoice });
     return;
   }
 
@@ -2140,7 +2383,10 @@ async function handleApi(req, res, url) {
     booking.status = "cancelled";
     booking.cancelledAt = new Date().toISOString();
     await saveBookings(bookings);
-    sendJson(res, 200, { booking });
+    const invoices = await loadInvoices();
+    const invoiceResult = upsertInvoiceForBooking(invoices, booking);
+    await saveInvoices(invoices);
+    sendJson(res, 200, { booking, invoice: invoiceResult.invoice });
     return;
   }
 
@@ -2177,6 +2423,7 @@ async function serveStatic(req, res, url) {
   const appPath =
     routePath === "/" ? "/portal.html"
       : routePath === "/bookings" ? "/index.html"
+        : routePath === "/invoices" ? "/index.html"
         : routePath === "/work" || routePath === "/work/" ? "/work/index.html"
           : routePath;
   const requestedPath = decodeURIComponent(appPath);

@@ -14,6 +14,13 @@ const appCatalog = [
     tone: "blue",
   },
   {
+    id: "invoices",
+    name: "Invoices",
+    href: "/invoices",
+    icon: "receipt-text",
+    tone: "violet",
+  },
+  {
     id: "clients",
     name: "Clients",
     href: "/clients",
