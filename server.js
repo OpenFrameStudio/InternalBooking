@@ -121,6 +121,7 @@ const contentTypes = {
   ".css": "text/css; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
+  ".webmanifest": "application/manifest+json; charset=utf-8",
   ".svg": "image/svg+xml",
   ".png": "image/png",
   ".ico": "image/x-icon"
@@ -3278,7 +3279,19 @@ const server = http.createServer(async (req, res) => {
     }
 
     const isLoginPage = url.pathname === "/login" || url.pathname === "/login.html";
-    const isPublicAsset = isLoginPage || url.pathname === "/styles.css" || url.pathname === "/favicon.ico";
+    const publicAssets = new Set([
+      "/apple-touch-icon.png",
+      "/favicon-32.png",
+      "/favicon.ico",
+      "/icons/icon-192.png",
+      "/icons/icon-512.png",
+      "/install.js",
+      "/openframe-logo.png",
+      "/service-worker.js",
+      "/site.webmanifest",
+      "/styles.css"
+    ]);
+    const isPublicAsset = isLoginPage || publicAssets.has(url.pathname);
 
     if (!isAuthenticated(req) && !isPublicAsset) {
       redirect(res, "/login");
