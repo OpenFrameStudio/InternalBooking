@@ -878,9 +878,12 @@ function renderInvoices() {
     item.querySelector('.invoice-status').classList.toggle('void', invoice.status === 'void');
     item.querySelector('.invoice-client').textContent = [invoice.clientName, invoice.agentName].filter(Boolean).join(' - ') || 'No client saved';
     item.querySelector('.invoice-booking').textContent = `Issued ${formatInvoiceDate(invoice.issuedAt)} - due ${formatInvoiceDate(invoice.dueAt)}`;
-    item.querySelector('.invoice-services').textContent = (invoice.items || []).map((item) => `${item.name} ${formatMoney(item.amount)}`).join(' + ');
+    item.querySelector('.invoice-services').textContent = [
+      (invoice.items || []).map((item) => `${item.name} ${formatMoney(item.amount)}`).join(' + '),
+      `GST 10% ${formatMoney(invoice.gstAmount)}`
+    ].filter(Boolean).join(' - ');
     item.querySelector('.invoice-total strong').textContent = formatMoney(invoice.total);
-    item.querySelector('.invoice-total small').textContent = invoice.currency || 'AUD';
+    item.querySelector('.invoice-total small').textContent = `${invoice.currency || 'AUD'} incl. GST`;
 
     item.querySelector('.print-invoice-button').addEventListener('click', () => printInvoice(invoice.id));
     const paidButton = item.querySelector('.paid-invoice-button');
@@ -956,7 +959,9 @@ function printInvoice(id) {
       </thead>
       <tbody>${rows}</tbody>
       <tfoot>
-        <tr><td colspan="3">Total</td><td>${escapeHtml(formatMoney(invoice.total))}</td></tr>
+        <tr><td colspan="3">Subtotal</td><td>${escapeHtml(formatMoney(invoice.subtotal))}</td></tr>
+        <tr><td colspan="3">GST 10%</td><td>${escapeHtml(formatMoney(invoice.gstAmount))}</td></tr>
+        <tr><td colspan="3">Total incl. GST</td><td>${escapeHtml(formatMoney(invoice.total))}</td></tr>
       </tfoot>
     </table>
     <p class="print-note">${escapeHtml(invoice.notes || 'Generated from internal booking.')}</p>

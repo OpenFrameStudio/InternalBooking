@@ -97,6 +97,7 @@ const invoiceServicePrices = {
   Floorplan: 50,
   Drone: 50
 };
+const invoiceGstRate = 0.1;
 const invoiceCurrency = "AUD";
 const larkImportDays = Number(process.env.LARK_IMPORT_DAYS || 120);
 const defaultPhotographers = [
@@ -827,6 +828,10 @@ function normalizeMoney(value) {
   return Number.isFinite(number) ? Math.round(number * 100) / 100 : 0;
 }
 
+function calculateGst(subtotal) {
+  return normalizeMoney(subtotal * invoiceGstRate);
+}
+
 function normalizeInvoice(invoice) {
   const items = Array.isArray(invoice?.items)
     ? invoice.items.map((item) => ({
@@ -837,7 +842,10 @@ function normalizeInvoice(invoice) {
       }))
     : [];
   const subtotal = normalizeMoney(invoice?.subtotal ?? items.reduce((sum, item) => sum + item.amount, 0));
-  const total = normalizeMoney(invoice?.total ?? subtotal);
+  const gstRate = Number.isFinite(Number(invoice?.gstRate)) ? Number(invoice.gstRate) : invoiceGstRate;
+  const gstAmount = normalizeMoney(invoice?.gstAmount ?? subtotal * gstRate);
+  const hasStoredGst = invoice?.gstAmount !== undefined || invoice?.gstRate !== undefined;
+  const total = normalizeMoney(hasStoredGst && invoice?.total !== undefined ? invoice.total : subtotal + gstAmount);
 
   return {
     id: invoice?.id || crypto.randomUUID(),
@@ -853,6 +861,8 @@ function normalizeInvoice(invoice) {
     bookingEndAt: invoice?.bookingEndAt || "",
     items,
     subtotal,
+    gstRate,
+    gstAmount,
     total,
     currency: invoice?.currency || invoiceCurrency,
     status: normalizeInvoiceStatus(invoice?.status),
@@ -911,6 +921,7 @@ function invoiceFromBooking(booking, invoices, existing = null) {
   const existingItems = Array.isArray(existing?.items) ? existing.items : [];
   const items = isPaid ? existingItems : bookingInvoiceItems(booking);
   const subtotal = normalizeMoney(items.reduce((sum, item) => sum + item.amount, 0));
+  const gstAmount = calculateGst(subtotal);
   const status = booking.status === "cancelled"
     ? (isPaid ? "paid" : "void")
     : (isPaid ? "paid" : "draft");
@@ -930,7 +941,9 @@ function invoiceFromBooking(booking, invoices, existing = null) {
     bookingEndAt: booking.endAt || "",
     items,
     subtotal,
-    total: subtotal,
+    gstRate: invoiceGstRate,
+    gstAmount,
+    total: normalizeMoney(subtotal + gstAmount),
     currency: invoiceCurrency,
     status,
     issuedAt: existing?.issuedAt || now,

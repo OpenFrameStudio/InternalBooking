@@ -37,6 +37,8 @@ Invoices are created automatically from confirmed bookings. The default draft in
 - Floorplan: `$50`
 - Drone: `$50`
 
+Invoices always add 10% GST to the service subtotal.
+
 ## Deploy to internalbooking.openframe.studio
 
 This repo includes `render.yaml` for deploying the app as a Render web service.
