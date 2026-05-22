@@ -23,6 +23,10 @@ const el = {
   time: $('#timeInput'),
   duration: $('#durationInput'),
   serviceInputs: $$('input[name=services]'),
+  clientDropdown: $('#clientDropdown'),
+  clientDropdownButton: $('#clientDropdownButton'),
+  clientDropdownLabel: $('#clientDropdownLabel'),
+  clientDropdownMenu: $('#clientDropdownMenu'),
   clientSearch: $('#clientSearchInput'),
   clientSearchResults: $('#clientSearchResults'),
   clientSelect: $('#clientSelect'),
@@ -30,6 +34,10 @@ const el = {
   clientEmail: $('#clientEmailInput'),
   agentName: $('#agentNameInput'),
   agentPhone: $('#agentPhoneInput'),
+  photographerDropdown: $('#photographerDropdown'),
+  photographerDropdownButton: $('#photographerDropdownButton'),
+  photographerDropdownLabel: $('#photographerDropdownLabel'),
+  photographerDropdownMenu: $('#photographerDropdownMenu'),
   photographerSelect: $('#photographerSelect'),
   photographerName: $('#photographerNameInput'),
   photographerEmail: $('#photographerEmailInput'),
@@ -178,7 +186,7 @@ function hydrateCachedData() {
   if (cachedPhotographers.length) {
     state.photographers = mergeDirectoryRecords(state.photographers, cachedPhotographers);
   }
-  renderOptions(el.photographerSelect, state.photographers, 'New photographer');
+  renderPhotographerOptions();
   renderPhotographerList();
 
   const cachedInvoices = userCanAccess('invoices')
@@ -554,6 +562,16 @@ function clientOptionLabel(client) {
   return [client.name, client.agentName].filter(Boolean).join(' - ');
 }
 
+function selectedClientLabel() {
+  const client = state.clients.find((item) => item.id === el.clientSelect.value);
+  return client ? clientOptionLabel(client) : 'New client / enter manually';
+}
+
+function selectedPhotographerLabel() {
+  const photographer = state.photographers.find((item) => item.id === el.photographerSelect.value);
+  return photographer ? photographer.name : 'New photographer';
+}
+
 function clientSearchText(client) {
   return [
     client.name,
@@ -572,7 +590,115 @@ function filteredClients() {
 
 function renderClientOptions(selectedId = el.clientSelect.value) {
   renderOptions(el.clientSelect, state.clients, 'New client / enter manually', selectedId);
+  renderClientDropdown();
   renderClientSearchResults();
+}
+
+function setClientDropdownOpen(isOpen) {
+  el.clientDropdownMenu.hidden = !isOpen;
+  el.clientDropdownButton.setAttribute('aria-expanded', String(isOpen));
+  el.clientDropdown.classList.toggle('open', isOpen);
+}
+
+function closeClientDropdown() {
+  setClientDropdownOpen(false);
+}
+
+function selectClient(clientId) {
+  el.clientSelect.value = clientId || '';
+  applySelectedClient();
+  closeClientDropdown();
+  renderClientDropdown();
+}
+
+function renderClientDropdown() {
+  el.clientDropdownLabel.textContent = selectedClientLabel();
+  el.clientDropdownMenu.innerHTML = '';
+
+  const options = [
+    { id: '', title: 'New client / enter manually', meta: 'Clear the saved client fields' },
+    ...[...state.clients]
+      .sort((a, b) => clientOptionLabel(a).localeCompare(clientOptionLabel(b)))
+      .map((client) => ({
+        id: client.id,
+        title: clientOptionLabel(client) || client.name,
+        meta: [client.email, client.agentPhone].filter(Boolean).join(' · ')
+      }))
+  ];
+
+  for (const option of options) {
+    const button = document.createElement('button');
+    const isSelected = option.id === el.clientSelect.value;
+    button.className = `client-dropdown-option${isSelected ? ' selected' : ''}`;
+    button.type = 'button';
+    button.role = 'option';
+    button.setAttribute('aria-selected', String(isSelected));
+    button.dataset.clientId = option.id;
+
+    const title = document.createElement('strong');
+    title.textContent = option.title;
+    const meta = document.createElement('span');
+    meta.textContent = option.meta;
+    button.append(title, meta);
+    button.addEventListener('click', () => selectClient(option.id));
+    el.clientDropdownMenu.append(button);
+  }
+}
+
+function renderPhotographerOptions(selectedId = el.photographerSelect.value) {
+  renderOptions(el.photographerSelect, state.photographers, 'New photographer', selectedId);
+  renderPhotographerDropdown();
+}
+
+function setPhotographerDropdownOpen(isOpen) {
+  el.photographerDropdownMenu.hidden = !isOpen;
+  el.photographerDropdownButton.setAttribute('aria-expanded', String(isOpen));
+  el.photographerDropdown.classList.toggle('open', isOpen);
+}
+
+function closePhotographerDropdown() {
+  setPhotographerDropdownOpen(false);
+}
+
+function selectPhotographer(photographerId) {
+  el.photographerSelect.value = photographerId || '';
+  applySelectedPhotographer();
+  closePhotographerDropdown();
+  renderPhotographerDropdown();
+}
+
+function renderPhotographerDropdown() {
+  el.photographerDropdownLabel.textContent = selectedPhotographerLabel();
+  el.photographerDropdownMenu.innerHTML = '';
+
+  const options = [
+    { id: '', title: 'New photographer', meta: 'Enter photographer details manually' },
+    ...[...state.photographers]
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((photographer) => ({
+        id: photographer.id,
+        title: photographer.name,
+        meta: [photographer.email, photographer.phone].filter(Boolean).join(' · ')
+      }))
+  ];
+
+  for (const option of options) {
+    const button = document.createElement('button');
+    const isSelected = option.id === el.photographerSelect.value;
+    button.className = `client-dropdown-option${isSelected ? ' selected' : ''}`;
+    button.type = 'button';
+    button.role = 'option';
+    button.setAttribute('aria-selected', String(isSelected));
+    button.dataset.photographerId = option.id;
+
+    const title = document.createElement('strong');
+    title.textContent = option.title;
+    const meta = document.createElement('span');
+    meta.textContent = option.meta;
+    button.append(title, meta);
+    button.addEventListener('click', () => selectPhotographer(option.id));
+    el.photographerDropdownMenu.append(button);
+  }
 }
 
 function renderClientSearchResults() {
@@ -606,8 +732,7 @@ function renderClientSearchResults() {
 
     button.append(title, meta);
     button.addEventListener('click', () => {
-      el.clientSelect.value = client.id;
-      applySelectedClient();
+      selectClient(client.id);
     });
     el.clientSearchResults.append(button);
   }
@@ -674,15 +799,20 @@ function applySelectedClient() {
   el.agentName.value = client.agentName || '';
   el.agentPhone.value = client.agentPhone || '';
   syncManagedGuestEmail(el.clientEmail, 'syncedClientEmail');
+  renderClientDropdown();
 }
 
 function applySelectedPhotographer() {
   const photographer = state.photographers.find((item) => item.id === el.photographerSelect.value);
-  if (!photographer) return;
+  if (!photographer) {
+    renderPhotographerDropdown();
+    return;
+  }
   el.photographerName.value = photographer.name || '';
   el.photographerEmail.value = photographer.email || '';
   el.photographerPhone.value = photographer.phone || '';
   syncManagedGuestEmail(el.photographerEmail, 'syncedPhotographerEmail');
+  renderPhotographerDropdown();
 }
 
 function getDraft() {
@@ -748,11 +878,13 @@ function fillBookingForm(booking) {
 
   el.propertyAddress.value = booking.propertyAddress || '';
   el.clientSelect.value = matchingClient?.id || '';
+  renderClientDropdown();
   el.clientName.value = booking.clientName || '';
   el.clientEmail.value = booking.clientEmail || '';
   el.agentName.value = booking.agentName || '';
   el.agentPhone.value = booking.agentPhone || '';
   el.photographerSelect.value = matchingPhotographer?.id || '';
+  renderPhotographerDropdown();
   el.photographerName.value = booking.photographerName || matchingPhotographer?.name || 'Barry';
   el.photographerEmail.value = booking.photographerEmail || matchingPhotographer?.email || '';
   el.photographerPhone.value = booking.photographerPhone || matchingPhotographer?.phone || '0403 007 853';
@@ -781,7 +913,9 @@ function resetBookingForm(message = '') {
   el.clientSearch.value = '';
   el.clientSearchResults.hidden = true;
   el.clientSelect.value = '';
+  renderClientDropdown();
   el.photographerSelect.value = '';
+  renderPhotographerDropdown();
   state.syncedClientEmail = [];
   state.syncedPhotographerEmail = [];
   setInitialDateTime();
@@ -1187,7 +1321,7 @@ async function loadPhotographers() {
   const cached = readStored(storageKeys.photographers, []).filter((photographer) => photographer?.name);
   if (cached.length) {
     state.photographers = mergeDirectoryRecords(state.photographers, cached);
-    renderOptions(el.photographerSelect, state.photographers, 'New photographer', el.photographerSelect.value);
+    renderPhotographerOptions(el.photographerSelect.value);
     renderPhotographerList();
   }
 
@@ -1199,7 +1333,7 @@ async function loadPhotographers() {
     if (!state.photographers.length) state.photographers = cached;
   }
   writeStored(storageKeys.photographers, state.photographers);
-  renderOptions(el.photographerSelect, state.photographers, 'New photographer', el.photographerSelect.value);
+  renderPhotographerOptions(el.photographerSelect.value);
   renderPhotographerList();
 }
 
@@ -1374,7 +1508,7 @@ async function saveDirectoryPhotographer(event) {
     }
     state.photographers = data.photographers || state.photographers;
     writeStored(storageKeys.photographers, state.photographers);
-    renderOptions(el.photographerSelect, state.photographers, 'New photographer', data.photographer.id);
+    renderPhotographerOptions(data.photographer.id);
     renderPhotographerList();
     applySelectedPhotographer();
     el.photographerForm.reset();
@@ -1458,7 +1592,7 @@ async function deletePhotographer(id) {
       el.photographerForm.reset();
       el.directoryPhotographerId.value = '';
     }
-    renderOptions(el.photographerSelect, state.photographers, 'New photographer', el.photographerSelect.value);
+    renderPhotographerOptions(el.photographerSelect.value);
     renderPhotographerList();
     setMessage(el.photographerMessage, 'Photographer deleted.', 'success');
   } catch {
@@ -1609,13 +1743,36 @@ el.testLarkButton.addEventListener('click', testLark);
 el.previewLarkButton.addEventListener('click', previewLarkEvent);
 el.cancelEditButton.addEventListener('click', cancelBookingEdit);
 el.logoutButton.addEventListener('click', logout);
+el.clientDropdownButton.addEventListener('click', () => {
+  setClientDropdownOpen(el.clientDropdownMenu.hidden);
+});
+el.photographerDropdownButton.addEventListener('click', () => {
+  setPhotographerDropdownOpen(el.photographerDropdownMenu.hidden);
+});
 el.clientSearch.addEventListener('input', () => {
   el.clientSelect.value = '';
+  renderClientDropdown();
   renderClientSearchResults();
 });
 el.clientSearch.addEventListener('focus', renderClientSearchResults);
-el.clientSelect.addEventListener('change', applySelectedClient);
-el.photographerSelect.addEventListener('change', applySelectedPhotographer);
+el.clientSelect.addEventListener('change', () => {
+  applySelectedClient();
+  renderClientDropdown();
+});
+el.photographerSelect.addEventListener('change', () => {
+  applySelectedPhotographer();
+  renderPhotographerDropdown();
+});
+document.addEventListener('click', (event) => {
+  if (!el.clientDropdown.contains(event.target)) closeClientDropdown();
+  if (!el.photographerDropdown.contains(event.target)) closePhotographerDropdown();
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    closeClientDropdown();
+    closePhotographerDropdown();
+  }
+});
 el.clientEmail.addEventListener('input', () => syncManagedGuestEmail(el.clientEmail, 'syncedClientEmail'));
 el.clientEmail.addEventListener('change', () => syncManagedGuestEmail(el.clientEmail, 'syncedClientEmail'));
 el.clientEmail.addEventListener('blur', () => syncManagedGuestEmail(el.clientEmail, 'syncedClientEmail'));

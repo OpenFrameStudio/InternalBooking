@@ -533,6 +533,105 @@ button:disabled {
   display: none;
 }
 
+.saved-client-field {
+  display: grid;
+  gap: 8px;
+}
+
+.client-dropdown {
+  position: relative;
+}
+
+.client-dropdown-button {
+  width: 100%;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--field);
+  color: var(--ink);
+  padding: 11px 12px;
+  text-align: left;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.9) inset;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.client-dropdown-button:hover,
+.client-dropdown.open .client-dropdown-button {
+  border-color: var(--line-strong);
+  background: #fff;
+}
+
+.client-dropdown.open .client-dropdown-button {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 4px rgba(55, 103, 143, 0.14);
+}
+
+.client-dropdown-button span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.client-dropdown-chevron {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 1rem;
+}
+
+.client-dropdown-menu {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  max-height: min(320px, 46vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: #fff;
+  padding: 6px;
+  box-shadow: 0 18px 38px rgba(30, 36, 34, 0.18);
+}
+
+.client-dropdown-option {
+  width: 100%;
+  display: grid;
+  gap: 3px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  padding: 10px;
+  text-align: left;
+}
+
+.client-dropdown-option:hover,
+.client-dropdown-option.selected {
+  background: var(--soft);
+}
+
+.client-dropdown-option strong {
+  font-size: 0.94rem;
+}
+
+.client-dropdown-option span {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+  min-height: 1em;
+}
+
 .client-search-results {
   display: grid;
   gap: 8px;
@@ -726,7 +825,8 @@ label {
   gap: 8px;
 }
 
-label span {
+label span,
+.saved-client-field > span {
   color: #5d6662;
   font-size: 0.82rem;
   font-weight: 800;
