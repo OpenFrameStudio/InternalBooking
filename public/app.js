@@ -982,7 +982,7 @@ function renderInvoices() {
     paidButton.hidden = invoice.status !== 'draft';
     paidButton.addEventListener('click', () => updateInvoiceStatus(invoice.id, 'paid'));
     const voidButton = item.querySelector('.void-invoice-button');
-    voidButton.hidden = invoice.status !== 'draft';
+    voidButton.hidden = invoice.status === 'void';
     voidButton.addEventListener('click', () => updateInvoiceStatus(invoice.id, 'void'));
     el.invoiceList.append(item);
   }
