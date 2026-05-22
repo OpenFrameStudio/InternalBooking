@@ -1137,39 +1137,43 @@ function escapeHtmlForEmail(value) {
 }
 
 function drawPdfCell(doc, text, x, y, width, height, options = {}) {
+  const paddingX = options.paddingX ?? 8;
+  const paddingY = options.paddingY ?? 7;
   const textHeight = doc.heightOfString(text, {
-    width: width - 16,
+    width: width - paddingX * 2,
     align: options.align || "left"
   });
-  const textY = y + Math.max(8, (height - textHeight) / 2);
-  doc.text(text, x + 8, textY, {
-    width: width - 16,
-    align: options.align || "left"
+  const textY = y + Math.max(paddingY, (height - textHeight) / 2);
+  doc.text(text, x + paddingX, textY, {
+    width: width - paddingX * 2,
+    height: height - paddingY * 2,
+    align: options.align || "left",
+    ellipsis: true
   });
 }
 
 function drawInvoicePdf(doc, invoice) {
   const pageWidth = doc.page.width;
-  const margin = 58;
+  const margin = 52;
   const logoPath = path.join(publicDir, "openframe-logo.png");
 
   doc.rect(0, 0, pageWidth, 8).fill("#2ecad3");
 
-  doc.fillColor("#000").font("Helvetica-Bold").fontSize(38).text("Tax Invoice", margin, 66);
+  doc.fillColor("#000").font("Helvetica-Bold").fontSize(34).text("Tax Invoice", margin, 54);
   try {
-    doc.image(logoPath, pageWidth - margin - 105, 58, { width: 105, height: 105, fit: [105, 105] });
+    doc.image(logoPath, pageWidth - margin - 88, 48, { width: 88, height: 88, fit: [88, 88] });
   } catch {
-    doc.fontSize(12).text("OPENFRAME\nSTUDIO", pageWidth - margin - 105, 70, { width: 105, align: "center" });
+    doc.fontSize(11).text("OPENFRAME\nSTUDIO", pageWidth - margin - 88, 62, { width: 88, align: "center" });
   }
 
-  doc.font("Helvetica").fontSize(12);
-  doc.text("Invoice Number", margin, 184);
-  doc.text(invoice.invoiceNumber || "", 210, 184);
-  doc.text("Invoice Date", margin, 210);
-  doc.text(formatInvoiceDocumentDate(invoice.issuedAt), 210, 210);
+  doc.font("Helvetica").fontSize(11);
+  doc.text("Invoice Number", margin, 158);
+  doc.text(invoice.invoiceNumber || "", 198, 158);
+  doc.text("Invoice Date", margin, 181);
+  doc.text(formatInvoiceDocumentDate(invoice.issuedAt), 198, 181);
 
-  doc.font("Helvetica-Bold").fontSize(15).text("OUR INFORMATION", margin, 282);
-  doc.font("Helvetica").fontSize(12);
+  doc.font("Helvetica-Bold").fontSize(13).text("OUR INFORMATION", margin, 242);
+  doc.font("Helvetica").fontSize(10.5);
   const infoLines = [
     "OpenFrame Studio Pty Ltd",
     "23 Selborne St",
@@ -1178,32 +1182,34 @@ function drawInvoicePdf(doc, invoice) {
     "ABN: 35 687 073 114",
     "Email: openframeau@gmail.com"
   ];
-  infoLines.forEach((line, index) => doc.text(line, margin, 312 + index * 20));
+  infoLines.forEach((line, index) => doc.text(line, margin, 269 + index * 17));
 
-  const billingX = 330;
-  doc.font("Helvetica-Bold").fontSize(15).text("BILLING TO", billingX, 282);
-  doc.font("Helvetica").fontSize(12).text(invoice.propertyAddress || invoice.clientName || "Client", billingX, 312, {
-    width: pageWidth - margin - billingX
+  const billingX = 324;
+  doc.font("Helvetica-Bold").fontSize(13).text("BILLING TO", billingX, 242);
+  doc.font("Helvetica").fontSize(10.5).text(invoice.propertyAddress || invoice.clientName || "Client", billingX, 269, {
+    width: pageWidth - margin - billingX,
+    height: 82,
+    ellipsis: true
   });
 
   const tableX = margin;
-  const tableY = 450;
-  const columnWidths = [172, 92, 108, 108];
-  const rowHeight = 60;
-  const headerHeight = 40;
+  const tableY = 392;
+  const columnWidths = [182, 82, 112, 115];
+  const rowHeight = 58;
+  const headerHeight = 34;
   const tableWidth = columnWidths.reduce((sum, width) => sum + width, 0);
   const headers = ["PRODUCT", "QUANTITY", "PRICE", "SUBTOTAL"];
   const product = invoiceProductDescription(invoice);
 
   doc.rect(tableX, tableY, tableWidth, headerHeight).fill("#e7e7e7");
-  doc.fillColor("#000").font("Helvetica-Bold").fontSize(11);
+  doc.fillColor("#000").font("Helvetica-Bold").fontSize(10);
   let cursorX = tableX;
   headers.forEach((header, index) => {
     drawPdfCell(doc, header, cursorX, tableY, columnWidths[index], headerHeight, { align: "center" });
     cursorX += columnWidths[index];
   });
 
-  doc.font("Helvetica").fontSize(11);
+  doc.font("Helvetica").fontSize(10);
   cursorX = tableX;
   const rowY = tableY + headerHeight;
   drawPdfCell(doc, product, cursorX, rowY, columnWidths[0], rowHeight, { align: "center" });
@@ -1216,22 +1222,22 @@ function drawInvoicePdf(doc, invoice) {
   doc.moveTo(tableX, rowY + rowHeight).lineTo(tableX + tableWidth, rowY + rowHeight).lineWidth(1.2).stroke("#000");
 
   doc.save();
-  doc.rotate(-10, { origin: [150, 630] });
-  doc.rect(118, 612, 102, 32).lineWidth(2).stroke("#f5a623");
-  doc.fillColor("#f5a623").font("Helvetica-Bold").fontSize(20).text(invoice.status === "paid" ? "PAID" : invoice.status === "void" ? "VOID" : "UNPAID", 125, 619);
+  doc.rotate(-10, { origin: [140, 575] });
+  doc.rect(110, 559, 96, 30).lineWidth(2).stroke("#f5a623");
+  doc.fillColor("#f5a623").font("Helvetica-Bold").fontSize(18).text(invoice.status === "paid" ? "PAID" : invoice.status === "void" ? "VOID" : "UNPAID", 118, 565);
   doc.restore();
 
-  const totalX = 330;
-  const totalY = 590;
-  const totalW = 208;
-  const totalRowH = 38;
+  const totalX = 324;
+  const totalY = 524;
+  const totalW = 219;
+  const totalRowH = 33;
   const totalRows = [
     ["Total", formatInvoiceMoney(invoice.subtotal)],
     ["GST (10%)", formatInvoiceMoney(invoice.gstAmount)],
     ["Total Due", formatInvoiceMoney(invoice.total)]
   ];
   doc.lineWidth(1.4).strokeColor("#000").rect(totalX, totalY, totalW, totalRowH * totalRows.length).stroke();
-  doc.font("Helvetica-Bold").fontSize(11).fillColor("#000");
+  doc.font("Helvetica-Bold").fontSize(10).fillColor("#000");
   totalRows.forEach(([label, value], index) => {
     const y = totalY + index * totalRowH;
     if (index > 0) doc.moveTo(totalX, y).lineTo(totalX + totalW, y).stroke();
@@ -1240,15 +1246,19 @@ function drawInvoicePdf(doc, invoice) {
     drawPdfCell(doc, value, totalX + totalW / 2, y, totalW / 2, totalRowH, { align: "center" });
   });
 
-  doc.font("Helvetica-Bold").fontSize(15).fillColor("#000").text("PAYMENT INFORMATION", margin, 718);
-  doc.font("Helvetica").fontSize(12).fillColor("#787878");
+  doc.font("Helvetica-Bold").fontSize(13).fillColor("#000").text("PAYMENT INFORMATION", margin, 676);
+  doc.font("Helvetica").fontSize(10.5).fillColor("#787878");
   [
     "Bank Transfer:",
     "Name: Openframe Studio Pty Ltd",
     "BSB: 062-128",
     "Account: 11440602",
     `Please reference ${invoice.invoiceNumber} for the payment`
-  ].forEach((line, index) => doc.text(line, margin, 750 + index * 20));
+  ].forEach((line, index) => doc.text(line, margin, 704 + index * 17, {
+    width: pageWidth - margin * 2,
+    height: 16,
+    ellipsis: true
+  }));
 }
 
 async function createInvoicePdfBuffer(invoice) {

@@ -1486,7 +1486,7 @@ dialog::backdrop {
   background: #fff;
   color: #000;
   font-family: Arial, Helvetica, sans-serif;
-  padding: 78px 58px 64px;
+  padding: 62px 52px 52px;
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.16);
 }
 
@@ -1502,29 +1502,29 @@ dialog::backdrop {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 36px;
+  gap: 28px;
 }
 
 .tax-invoice-header h1 {
   margin: 0;
-  font-size: 3.25rem;
+  font-size: 2.75rem;
   font-weight: 900;
   letter-spacing: 0;
   line-height: 1.05;
 }
 
 .tax-invoice-header img {
-  width: 150px;
-  height: 150px;
+  width: 118px;
+  height: 118px;
   object-fit: contain;
 }
 
 .tax-invoice-meta {
   display: grid;
-  grid-template-columns: 176px 160px;
-  gap: 14px 18px;
-  margin-top: 34px;
-  font-size: 1.15rem;
+  grid-template-columns: 160px 150px;
+  gap: 11px 16px;
+  margin-top: 26px;
+  font-size: 1rem;
 }
 
 .tax-invoice-meta strong {
@@ -1534,45 +1534,45 @@ dialog::backdrop {
 .tax-info-grid {
   display: grid;
   grid-template-columns: minmax(0, 0.45fr) minmax(0, 0.55fr);
-  gap: 64px;
-  margin-top: 74px;
+  gap: 56px;
+  margin-top: 54px;
 }
 
 .tax-info-grid h2,
 .payment-info h2 {
-  margin: 0 0 20px;
-  font-size: 1.25rem;
+  margin: 0 0 15px;
+  font-size: 1.05rem;
   font-weight: 900;
   letter-spacing: 0;
 }
 
 .tax-info-grid p,
 .payment-info p {
-  margin: 0 0 13px;
-  font-size: 1rem;
-  line-height: 1.15;
+  margin: 0 0 9px;
+  font-size: 0.92rem;
+  line-height: 1.13;
 }
 
 .tax-invoice-table {
   width: 100%;
   border-collapse: collapse;
-  margin-top: 84px;
+  margin-top: 58px;
   border-bottom: 1.5px solid #000;
 }
 
 .tax-invoice-table th {
   background: #e7e7e7;
-  padding: 18px 16px;
-  font-size: 1rem;
+  padding: 14px 12px;
+  font-size: 0.9rem;
   font-weight: 900;
   text-align: center;
 }
 
 .tax-invoice-table td {
-  min-height: 64px;
-  padding: 16px;
-  font-size: 1rem;
-  line-height: 1.5;
+  min-height: 58px;
+  padding: 13px 12px;
+  font-size: 0.92rem;
+  line-height: 1.35;
   vertical-align: middle;
 }
 
@@ -1598,20 +1598,20 @@ dialog::backdrop {
 .tax-invoice-lower {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 306px;
-  gap: 38px;
+  gap: 34px;
   align-items: center;
-  margin-top: 58px;
+  margin-top: 42px;
 }
 
 .invoice-stamp {
   display: inline-flex;
   width: max-content;
-  margin-left: 94px;
+  margin-left: 78px;
   transform: rotate(-10deg);
   border: 3px solid #f5a623;
   color: #f5a623;
-  padding: 5px 13px;
-  font-size: 1.6rem;
+  padding: 4px 12px;
+  font-size: 1.35rem;
   font-weight: 900;
   letter-spacing: 0.03em;
 }
@@ -1636,8 +1636,8 @@ dialog::backdrop {
 .tax-total-table td {
   width: 50%;
   border: 2px solid #000;
-  padding: 15px 18px;
-  font-size: 1rem;
+  padding: 12px 16px;
+  font-size: 0.92rem;
   font-weight: 900;
   text-align: center;
 }
@@ -1647,15 +1647,20 @@ dialog::backdrop {
 }
 
 .payment-info {
-  margin-top: 78px;
+  margin-top: 48px;
 }
 
 .payment-info p {
   color: #787878;
-  font-size: 1rem;
+  font-size: 0.92rem;
 }
 
 @media print {
+  @page {
+    size: A4;
+    margin: 0;
+  }
+
   body.printing-invoice {
     background: #fff;
   }
@@ -1667,9 +1672,11 @@ dialog::backdrop {
   body.printing-invoice .invoice-print-sheet {
     display: block !important;
     width: 210mm;
-    min-height: 297mm;
+    height: 297mm;
+    min-height: 0;
     margin: 0;
-    padding: 20mm 15mm 17mm;
+    padding: 16mm 14mm 12mm;
+    overflow: hidden;
     box-shadow: none;
   }
 }
