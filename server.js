@@ -80,6 +80,14 @@ const workInviteEmailConfig = {
   subjectPrefix: process.env.WORK_INVITE_EMAIL_SUBJECT_PREFIX || "Work invite",
   timeoutMs: Number.isFinite(invoiceEmailTimeoutMs) ? invoiceEmailTimeoutMs : 15_000
 };
+const calendarInviteEmailConfig = {
+  enabled: normalizeEnvBoolean(process.env.CALENDAR_INVITE_EMAIL_ENABLED, true),
+  from: process.env.CALENDAR_INVITE_EMAIL_FROM || invoiceEmailConfig.from,
+  replyTo: process.env.CALENDAR_INVITE_EMAIL_REPLY_TO || invoiceEmailConfig.replyTo,
+  bcc: process.env.CALENDAR_INVITE_EMAIL_BCC || "",
+  subjectPrefix: process.env.CALENDAR_INVITE_EMAIL_SUBJECT_PREFIX || "Booking invitation",
+  timeoutMs: Number.isFinite(invoiceEmailTimeoutMs) ? invoiceEmailTimeoutMs : 15_000
+};
 const authConfig = {
   username: process.env.ADMIN_USERNAME || "ShuhanGao",
   password: process.env.ADMIN_PASSWORD || "Sg1654723576"
@@ -1642,6 +1650,279 @@ function workInviteMessage(summary) {
   return "";
 }
 
+function calendarInviteEmailSetupMissingSettings() {
+  const missing = [];
+  if (!calendarInviteEmailConfig.enabled) missing.push("CALENDAR_INVITE_EMAIL_ENABLED");
+  if (!resendConfig.apiKey) missing.push("RESEND_API_KEY");
+  if (!calendarInviteEmailConfig.from) missing.push("CALENDAR_INVITE_EMAIL_FROM");
+  return missing;
+}
+
+function isCalendarInviteEmailConfigured() {
+  return calendarInviteEmailSetupMissingSettings().length === 0;
+}
+
+function calendarInviteRecipients(booking, recipientsOverride = null) {
+  const source = recipientsOverride || booking?.guestEmails || [];
+  const emails = Array.isArray(source) ? source : parseGuestEmails(source);
+  return uniqueEmails(emails).filter(isValidEmail);
+}
+
+function calendarInviteEmailMissingSettings(booking, recipientsOverride = null) {
+  const missing = calendarInviteEmailSetupMissingSettings();
+  if (!calendarInviteRecipients(booking, recipientsOverride).length) {
+    missing.push("GUEST_EMAILS");
+  }
+  return missing;
+}
+
+function shouldUseLarkCalendarNotifications() {
+  const explicitValue = process.env.LARK_CALENDAR_NOTIFICATIONS_ENABLED;
+  if (explicitValue !== undefined && explicitValue !== "") {
+    return normalizeEnvBoolean(explicitValue, false);
+  }
+
+  return !isCalendarInviteEmailConfigured();
+}
+
+function emailAddressFromSender(sender) {
+  const value = String(sender || "").trim();
+  const match = value.match(/<([^>]+)>/);
+  const email = (match ? match[1] : value).trim();
+  return isValidEmail(email) ? email : invoiceEmailUser;
+}
+
+function displayNameFromSender(sender) {
+  const value = String(sender || "").replace(/<[^>]+>/, "").replace(/^"|"$/g, "").trim();
+  return value || "OpenFrame Studio";
+}
+
+function escapeIcsText(value) {
+  return String(value || "")
+    .replace(/\\/g, "\\\\")
+    .replace(/;/g, "\\;")
+    .replace(/,/g, "\\,")
+    .replace(/\r?\n/g, "\\n");
+}
+
+function escapeIcsParameter(value) {
+  return String(value || "")
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, "\\\"")
+    .replace(/\r?\n/g, " ");
+}
+
+function foldIcsLine(line) {
+  const lines = [];
+  let value = String(line);
+
+  while (Buffer.byteLength(value, "utf8") > 73) {
+    let take = Math.min(73, value.length);
+    while (take > 1 && Buffer.byteLength(value.slice(0, take), "utf8") > 73) {
+      take -= 1;
+    }
+    lines.push(value.slice(0, take));
+    value = ` ${value.slice(take)}`;
+  }
+
+  lines.push(value);
+  return lines.join("\r\n");
+}
+
+function formatIcsDateTime(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  return date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+}
+
+function formatCalendarInviteDateTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Time not set";
+
+  return new Intl.DateTimeFormat("en-AU", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: larkConfig.timezone
+  }).format(date);
+}
+
+function formatCalendarInviteWindow(booking) {
+  return `${formatCalendarInviteDateTime(booking.startAt)} - ${formatCalendarInviteDateTime(booking.endAt)} (${larkConfig.timezone})`;
+}
+
+function calendarInviteUid(booking) {
+  if (booking?.id) {
+    return `${booking.id}@openframe.studio`;
+  }
+
+  const stableHash = crypto
+    .createHash("sha256")
+    .update(`${booking?.propertyAddress || ""}|${booking?.startAt || ""}`)
+    .digest("hex")
+    .slice(0, 24);
+  return `${stableHash}@openframe.studio`;
+}
+
+function buildBookingCalendarInviteDescription(booking) {
+  return [
+    buildLarkDescription(booking),
+    "",
+    "Created by OpenFrame Studio internal booking system."
+  ].join("\n").trim();
+}
+
+function buildBookingCalendarInviteIcs(booking, method = "REQUEST", recipients = calendarInviteRecipients(booking)) {
+  const methodValue = method === "CANCEL" ? "CANCEL" : "REQUEST";
+  const senderEmail = emailAddressFromSender(calendarInviteEmailConfig.from);
+  const senderName = displayNameFromSender(calendarInviteEmailConfig.from);
+  const status = methodValue === "CANCEL" ? "CANCELLED" : "CONFIRMED";
+  const sequence = Math.max(0, Number(booking.calendarInviteSequence || 0));
+  const location = booking.locationAddress || booking.locationName || booking.propertyAddress || "";
+  const lines = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//OpenFrame Studio//Internal Booking//EN",
+    "CALSCALE:GREGORIAN",
+    `METHOD:${methodValue}`,
+    "BEGIN:VEVENT",
+    `UID:${calendarInviteUid(booking)}`,
+    `DTSTAMP:${formatIcsDateTime(new Date())}`,
+    `DTSTART:${formatIcsDateTime(booking.startAt)}`,
+    `DTEND:${formatIcsDateTime(booking.endAt)}`,
+    `SUMMARY:${escapeIcsText(booking.propertyAddress || "OpenFrame Studio booking")}`,
+    `LOCATION:${escapeIcsText(location)}`,
+    `DESCRIPTION:${escapeIcsText(buildBookingCalendarInviteDescription(booking))}`,
+    `ORGANIZER;CN="${escapeIcsParameter(senderName)}":mailto:${senderEmail}`,
+    ...recipients.map((email) =>
+      `ATTENDEE;CN="${escapeIcsParameter(email)}";ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:${email}`
+    ),
+    `STATUS:${status}`,
+    `SEQUENCE:${sequence}`,
+    "TRANSP:OPAQUE",
+    "END:VEVENT",
+    "END:VCALENDAR"
+  ];
+
+  return `${lines.map(foldIcsLine).join("\r\n")}\r\n`;
+}
+
+function buildBookingCalendarInviteSubject(booking, method = "REQUEST") {
+  const prefix = method === "CANCEL" ? "Booking cancelled" : calendarInviteEmailConfig.subjectPrefix;
+  return `${prefix}: ${booking.propertyAddress || "OpenFrame Studio booking"}`;
+}
+
+function buildBookingCalendarInviteEmailText(booking, method = "REQUEST") {
+  const isCancel = method === "CANCEL";
+  const lines = [
+    isCancel ? "This booking has been cancelled." : "Your calendar invitation is attached.",
+    "",
+    `Booking: ${booking.propertyAddress || "OpenFrame Studio booking"}`,
+    `Time: ${formatCalendarInviteWindow(booking)}`,
+    `Address: ${booking.locationAddress || booking.propertyAddress || ""}`,
+    booking.service ? `Services: ${booking.service}` : "",
+    booking.agentName || booking.agentPhone ? `Agent: ${formatContact(booking.agentName, booking.agentPhone)}` : "",
+    booking.photographerName || booking.photographerPhone ? `Photographer: ${formatContact(booking.photographerName, booking.photographerPhone)}` : "",
+    "",
+    "OpenFrame Studio"
+  ];
+
+  return lines.filter((line) => line !== "").join("\n");
+}
+
+function buildBookingCalendarInviteEmailHtml(booking, method = "REQUEST") {
+  const isCancel = method === "CANCEL";
+  const intro = isCancel ? "This booking has been cancelled." : "Your calendar invitation is attached.";
+
+  return `
+    <div style="font-family:Arial,sans-serif;color:#111611;line-height:1.5">
+      <p>${escapeHtmlForEmail(intro)}</p>
+      <p><strong>Booking:</strong> ${escapeHtmlForEmail(booking.propertyAddress || "OpenFrame Studio booking")}</p>
+      <p><strong>Time:</strong> ${escapeHtmlForEmail(formatCalendarInviteWindow(booking))}</p>
+      <p><strong>Address:</strong> ${escapeHtmlForEmail(booking.locationAddress || booking.propertyAddress || "")}</p>
+      ${booking.service ? `<p><strong>Services:</strong> ${escapeHtmlForEmail(booking.service)}</p>` : ""}
+      ${booking.agentName || booking.agentPhone ? `<p><strong>Agent:</strong> ${escapeHtmlForEmail(formatContact(booking.agentName, booking.agentPhone))}</p>` : ""}
+      ${booking.photographerName || booking.photographerPhone ? `<p><strong>Photographer:</strong> ${escapeHtmlForEmail(formatContact(booking.photographerName, booking.photographerPhone))}</p>` : ""}
+      <p>OpenFrame Studio</p>
+    </div>
+  `;
+}
+
+async function trySendBookingCalendarInviteEmail(booking, method = "REQUEST", recipientsOverride = null) {
+  const recipients = calendarInviteRecipients(booking, recipientsOverride);
+  const shouldTrack = !recipientsOverride;
+  const now = new Date().toISOString();
+
+  if (shouldTrack) {
+    booking.calendarInviteEmailFrom = calendarInviteEmailConfig.from;
+    booking.calendarInviteTo = recipients.join(", ");
+  }
+
+  if (!recipients.length) {
+    if (shouldTrack) {
+      booking.calendarInviteStatus = "not_needed";
+      booking.calendarInviteError = null;
+    }
+    return { sent: false, skipped: true, missing: ["GUEST_EMAILS"] };
+  }
+
+  const missing = calendarInviteEmailMissingSettings(booking, recipients);
+  if (missing.length) {
+    if (shouldTrack) {
+      booking.calendarInviteStatus = "not_configured";
+      booking.calendarInviteError = `Missing ${missing.join(", ")}`;
+    }
+    return { sent: false, skipped: true, missing };
+  }
+
+  booking.calendarInviteSequence = Math.max(0, Number(booking.calendarInviteSequence || 0)) + 1;
+  const ics = buildBookingCalendarInviteIcs(booking, method, recipients);
+  const methodValue = method === "CANCEL" ? "CANCEL" : "REQUEST";
+  const bcc = uniqueEmails(parseGuestEmails(calendarInviteEmailConfig.bcc)).filter(isValidEmail);
+  const payload = {
+    from: calendarInviteEmailConfig.from,
+    to: recipients,
+    subject: buildBookingCalendarInviteSubject(booking, methodValue),
+    text: buildBookingCalendarInviteEmailText(booking, methodValue),
+    html: buildBookingCalendarInviteEmailHtml(booking, methodValue),
+    reply_to: calendarInviteEmailConfig.replyTo,
+    attachments: [
+      {
+        filename: `openframe-booking-${methodValue.toLowerCase()}-${booking.id || "invite"}.ics`,
+        content: Buffer.from(ics, "utf8").toString("base64")
+      }
+    ],
+    headers: {
+      "Content-Class": "urn:content-classes:calendarmessage"
+    }
+  };
+
+  if (bcc.length) {
+    payload.bcc = bcc;
+  }
+
+  try {
+    await sendResendEmail(payload, calendarInviteEmailConfig.timeoutMs, "Calendar invite email request timed out.");
+    if (shouldTrack) {
+      booking.calendarInviteStatus = methodValue === "CANCEL" ? "cancelled" : "sent";
+      booking.calendarInviteSentAt = now;
+      booking.calendarInviteTo = recipients.join(", ");
+      booking.calendarInviteEmailFrom = calendarInviteEmailConfig.from;
+      booking.calendarInviteError = null;
+    }
+    return { sent: true, recipients };
+  } catch (error) {
+    if (shouldTrack) {
+      booking.calendarInviteStatus = "failed";
+      booking.calendarInviteEmailFrom = calendarInviteEmailConfig.from;
+      booking.calendarInviteError = error.message || "Could not send calendar invite email.";
+    }
+    return { sent: false, failed: true, error: error.message || "Could not send calendar invite email." };
+  }
+}
+
 function isLarkConfigured() {
   return Boolean(larkConfig.appId && larkConfig.appSecret && effectiveLarkCalendarId());
 }
@@ -2082,7 +2363,7 @@ function buildLarkEventPayload(booking) {
   const payload = {
     summary: booking.propertyAddress,
     description: buildLarkDescription(booking),
-    need_notification: true,
+    need_notification: shouldUseLarkCalendarNotifications(),
     start_time: {
       timestamp: startTime,
       timezone: larkConfig.timezone
@@ -2121,7 +2402,7 @@ function buildLarkAttendeesPayload(booking, emails = booking.guestEmails || []) 
   }
 
   return {
-    need_notification: true,
+    need_notification: shouldUseLarkCalendarNotifications(),
     attendees: emails.map((email) => ({
       type: "third_party",
       third_party_email: email
@@ -2142,6 +2423,9 @@ function buildLarkPreview(booking) {
     description: eventPayload.description,
     senderEmail: larkConfig.senderEmail,
     senderName: larkConfig.senderName,
+    calendarInviteEmailFrom: calendarInviteEmailConfig.from,
+    calendarInviteEmailConfigured: isCalendarInviteEmailConfigured(),
+    larkNotificationsEnabled: shouldUseLarkCalendarNotifications(),
     calendarId: effectiveLarkCalendarId(),
     guestEmails: booking.guestEmails,
     eventPayload,
@@ -2379,7 +2663,7 @@ async function deleteLarkEvent(booking) {
   const token = await getTenantAccessToken();
   const calendarId = encodeURIComponent(effectiveLarkCalendarId());
   const eventId = encodeURIComponent(booking.larkEventId);
-  const params = new URLSearchParams({ need_notification: "true" });
+  const params = new URLSearchParams({ need_notification: String(shouldUseLarkCalendarNotifications()) });
 
   const response = await fetch(`${larkConfig.apiBase}/calendar/v4/calendars/${calendarId}/events/${eventId}?${params}`, {
     method: "DELETE",
@@ -2441,6 +2725,8 @@ async function syncBookingToLark(booking, previousBooking = null) {
     booking.larkError = null;
     booking.larkAttendeeStatus = "not_configured";
     booking.larkAttendeeError = null;
+    booking.calendarInviteStatus = booking.guestEmails?.length ? "not_sent" : "not_needed";
+    booking.calendarInviteError = booking.guestEmails?.length ? "Lark is not configured, so the calendar invite email was not sent." : null;
     return booking;
   }
 
@@ -2484,11 +2770,18 @@ async function syncBookingToLark(booking, previousBooking = null) {
     if (removedGuestEmails.length) {
       booking.larkAttendeeStatus = "needs_review";
       booking.larkAttendeeError = "Guest list changed. Remove old guests from Lark manually if needed.";
+      await trySendBookingCalendarInviteEmail(previousBooking || booking, "CANCEL", removedGuestEmails);
+    }
+
+    if (booking.larkStatus === "synced" || booking.larkStatus === "attendees_failed") {
+      await trySendBookingCalendarInviteEmail(booking, "REQUEST");
     }
   } catch (error) {
     booking.larkStatus = "failed";
     booking.larkError = error.message;
     booking.larkAttendeeStatus = booking.guestEmails.length ? "not_sent" : "not_needed";
+    booking.calendarInviteStatus = booking.guestEmails.length ? "not_sent" : "not_needed";
+    booking.calendarInviteError = booking.guestEmails.length ? "Lark did not sync, so the calendar invite email was not sent." : null;
   }
 
   return booking;
@@ -2568,6 +2861,9 @@ async function handleApi(req, res, url) {
       invoiceEmailProvider,
       workInviteEmailConfigured: isWorkInviteEmailConfigured(),
       workInviteEmailFrom: workInviteEmailConfig.from,
+      calendarInviteEmailConfigured: isCalendarInviteEmailConfigured(),
+      calendarInviteEmailFrom: calendarInviteEmailConfig.from,
+      larkNotificationsEnabled: shouldUseLarkCalendarNotifications(),
       timezone: larkConfig.timezone,
       persistentStorage: storageBackend !== "app",
       storageBackend
@@ -3107,6 +3403,12 @@ async function handleApi(req, res, url) {
       larkError: null,
       larkAttendeeStatus: isLarkConfigured() ? (value.guestEmails.length ? "pending" : "not_needed") : "not_configured",
       larkAttendeeError: null,
+      calendarInviteStatus: value.guestEmails.length ? "pending" : "not_needed",
+      calendarInviteSentAt: "",
+      calendarInviteTo: value.guestEmails.join(", "),
+      calendarInviteEmailFrom: calendarInviteEmailConfig.from,
+      calendarInviteError: null,
+      calendarInviteSequence: 0,
       createdAt: new Date().toISOString()
     };
 
@@ -3171,6 +3473,12 @@ async function handleApi(req, res, url) {
       larkAttendeeStatus:
         existingBooking.larkAttendeeStatus || (isLarkConfigured() ? (value.guestEmails.length ? "pending" : "not_needed") : "not_configured"),
       larkAttendeeError: existingBooking.larkAttendeeError || null,
+      calendarInviteStatus: existingBooking.calendarInviteStatus || (value.guestEmails.length ? "pending" : "not_needed"),
+      calendarInviteSentAt: existingBooking.calendarInviteSentAt || "",
+      calendarInviteTo: value.guestEmails.join(", "),
+      calendarInviteEmailFrom: existingBooking.calendarInviteEmailFrom || calendarInviteEmailConfig.from,
+      calendarInviteError: existingBooking.calendarInviteError || null,
+      calendarInviteSequence: Number(existingBooking.calendarInviteSequence || 0),
       createdAt: existingBooking.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
@@ -3204,6 +3512,7 @@ async function handleApi(req, res, url) {
     booking.status = "cancelled";
     booking.cancelledAt = new Date().toISOString();
     await cancelBookingInLark(booking);
+    await trySendBookingCalendarInviteEmail(booking, "CANCEL");
     await saveBookings(bookings);
     const invoices = await loadInvoices();
     const invoiceResult = upsertInvoiceForBooking(invoices, booking);
@@ -3247,6 +3556,10 @@ async function handleApi(req, res, url) {
         });
         return;
       }
+    }
+
+    if (booking.calendarInviteStatus !== "cancelled") {
+      await trySendBookingCalendarInviteEmail(booking, "CANCEL");
     }
 
     bookings.splice(bookingIndex, 1);

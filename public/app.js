@@ -1611,8 +1611,11 @@ async function deletePhotographer(id) {
 }
 
 function bookingSavedMessage(booking, action) {
+  if (booking.calendarInviteStatus === 'sent') return `Booking ${action}. Calendar invite sent from admin@openframe.studio.`;
+  if (booking.calendarInviteStatus === 'failed') return `Booking ${action}, but the admin invite email could not send.`;
+  if (booking.calendarInviteStatus === 'not_configured') return `Booking ${action}. Add Resend settings to send invites from admin@openframe.studio.`;
   if (booking.larkAttendeeStatus === 'needs_review') return `Booking ${action}. Check guest removals in Lark.`;
-  if (booking.larkStatus === 'synced') return `Booking ${action} and sent to Lark.`;
+  if (booking.larkStatus === 'synced') return `Booking ${action} and synced to Lark.`;
   if (booking.larkStatus === 'attendees_failed') return `Booking ${action}, but Lark guest invitations need checking.`;
   if (booking.larkStatus === 'failed') return `Booking ${action} locally, but Lark did not update.`;
   return `Booking ${action} locally. Add Lark settings when ready.`;
