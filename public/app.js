@@ -1016,13 +1016,23 @@ function renderBookings() {
     editButton.addEventListener('click', () => startBookingEdit(booking.id));
     const cancelButton = item.querySelector('.cancel-button');
     const canRetryCalendarCancel = booking.status === 'cancelled' && booking.larkEventId && booking.larkStatus !== 'cancelled';
-    cancelButton.disabled = (!canRetryCalendarCancel && booking.status === 'cancelled') || booking.larkOnly;
+    const canRemoveCancelledBooking = booking.status === 'cancelled' && !canRetryCalendarCancel && !booking.larkOnly;
+    cancelButton.disabled = (booking.status === 'cancelled' && !canRetryCalendarCancel && !canRemoveCancelledBooking) || booking.larkOnly;
+    cancelButton.setAttribute('aria-label', canRemoveCancelledBooking ? 'Remove cancelled booking' : 'Cancel booking');
     cancelButton.title = booking.larkOnly
       ? 'Cancel this in Lark.'
-      : canRetryCalendarCancel
-        ? 'Send calendar cancellation again.'
-        : '';
-    cancelButton.addEventListener('click', () => cancelBooking(booking.id));
+      : canRemoveCancelledBooking
+        ? 'Remove this cancelled booking from the system.'
+        : canRetryCalendarCancel
+          ? 'Send calendar cancellation again.'
+          : 'Cancel booking';
+    cancelButton.addEventListener('click', () => {
+      if (canRemoveCancelledBooking) {
+        removeCancelledBooking(booking.id);
+        return;
+      }
+      cancelBooking(booking.id);
+    });
     el.bookingList.append(item);
   }
   updateStats();
@@ -1696,6 +1706,26 @@ async function cancelBooking(id) {
   cacheBookings();
   if (state.editingBookingId === id) resetBookingForm('Edit cancelled because the booking was cancelled.');
   renderBookings();
+}
+
+async function removeCancelledBooking(id) {
+  const { response, data } = await fetchJson(`/api/bookings/${id}`, { method: 'DELETE' });
+  if (!response.ok) {
+    if (data.booking) {
+      state.bookings = state.bookings.map((booking) => booking.id === id ? data.booking : booking);
+      renderBookings();
+    }
+    setMessage(el.formMessage, (data.errors || ['Could not remove this booking.']).join(' '), 'error');
+    return;
+  }
+
+  state.bookings = Array.isArray(data.bookings)
+    ? data.bookings
+    : state.bookings.filter((booking) => booking.id !== id);
+  cacheBookings();
+  if (state.editingBookingId === id) resetBookingForm('Removed cancelled booking.');
+  renderBookings();
+  setMessage(el.formMessage, 'Cancelled booking removed. That time can be booked again.', 'success');
 }
 
 function cancelBookingEdit() {

@@ -35,6 +35,9 @@ const storageBackend = githubStorage.token && githubStorage.repo ? "github" : (p
 
 const port = Number(process.env.PORT || 4180);
 const host = process.env.HOST || (process.env.PORT ? "0.0.0.0" : "127.0.0.1");
+const cancelledBookingRetentionHours = Number(process.env.CANCELLED_BOOKING_RETENTION_HOURS || 12);
+const cancelledBookingRetentionMs =
+  (Number.isFinite(cancelledBookingRetentionHours) && cancelledBookingRetentionHours > 0 ? cancelledBookingRetentionHours : 12) * 60 * 60 * 1000;
 const publicAppUrl = (process.env.APP_PUBLIC_URL || "https://system.openframe.studio").replace(/\/$/, "");
 const larkConfig = {
   appId: process.env.LARK_APP_ID || "",
@@ -629,7 +632,12 @@ async function prepareDataStorage() {
 
 async function loadBookings() {
   try {
-    return await readStoredJson(dataFiles.bookings);
+    const bookings = await readStoredJson(dataFiles.bookings);
+    const prunedBookings = pruneExpiredCancelledBookings(bookings);
+    if (prunedBookings.length !== bookings.length) {
+      await saveBookings(prunedBookings);
+    }
+    return prunedBookings;
   } catch (error) {
     throw error;
   }
@@ -637,6 +645,19 @@ async function loadBookings() {
 
 async function saveBookings(bookings) {
   await writeStoredJson(dataFiles.bookings, bookings);
+}
+
+function canAutoRemoveCancelledBooking(booking, now = Date.now()) {
+  if (booking?.status !== "cancelled") return false;
+  if (booking.larkEventId && booking.larkStatus !== "cancelled") return false;
+
+  const referenceTime = new Date(booking.cancelledAt || booking.updatedAt || booking.createdAt || booking.endAt || booking.startAt).getTime();
+  return Number.isFinite(referenceTime) && now - referenceTime >= cancelledBookingRetentionMs;
+}
+
+function pruneExpiredCancelledBookings(bookings) {
+  const now = Date.now();
+  return bookings.filter((booking) => !canAutoRemoveCancelledBooking(booking, now));
 }
 
 async function loadClients() {
@@ -3188,6 +3209,49 @@ async function handleApi(req, res, url) {
     const invoiceResult = upsertInvoiceForBooking(invoices, booking);
     await saveInvoices(invoices);
     sendJson(res, 200, { booking, invoice: invoiceResult.invoice });
+    return;
+  }
+
+  if (req.method === "DELETE" && url.pathname.startsWith("/api/bookings/")) {
+    if (!canAccessApp(req, "bookings")) {
+      sendForbidden(res);
+      return;
+    }
+
+    const [, apiPart, bookingsPart, id, extra] = url.pathname.split("/");
+    if (apiPart !== "api" || bookingsPart !== "bookings" || !id || extra) {
+      sendJson(res, 404, { errors: ["Booking not found."] });
+      return;
+    }
+
+    const bookings = await loadBookings();
+    const bookingIndex = bookings.findIndex((item) => item.id === id);
+    if (bookingIndex === -1) {
+      sendJson(res, 404, { errors: ["Booking not found."] });
+      return;
+    }
+
+    const booking = bookings[bookingIndex];
+    if (booking.status !== "cancelled") {
+      sendJson(res, 400, { errors: ["Cancel the booking before removing it from the system."] });
+      return;
+    }
+
+    if (booking.larkEventId && booking.larkStatus !== "cancelled") {
+      await cancelBookingInLark(booking);
+      if (booking.larkStatus === "delete_failed") {
+        await saveBookings(bookings);
+        sendJson(res, 502, {
+          booking,
+          errors: [booking.larkError || "Calendar cancellation failed. Try removing again after the calendar cancellation succeeds."]
+        });
+        return;
+      }
+    }
+
+    bookings.splice(bookingIndex, 1);
+    await saveBookings(bookings);
+    sendJson(res, 200, { removedBookingId: id, bookings });
     return;
   }
 
