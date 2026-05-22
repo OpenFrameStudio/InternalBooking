@@ -46,6 +46,18 @@ const larkConfig = {
   timezone: process.env.LARK_TIMEZONE || "Australia/Sydney",
   apiBase: (process.env.LARK_API_BASE || "https://open.larksuite.com/open-apis").replace(/\/$/, "")
 };
+const invoiceEmailPort = Number(process.env.INVOICE_EMAIL_PORT || process.env.SMTP_PORT || 587);
+const invoiceEmailConfig = {
+  host: process.env.INVOICE_EMAIL_HOST || process.env.SMTP_HOST || "",
+  port: Number.isFinite(invoiceEmailPort) ? invoiceEmailPort : 587,
+  secure: normalizeEnvBoolean(process.env.INVOICE_EMAIL_SECURE || process.env.SMTP_SECURE, invoiceEmailPort === 465),
+  user: process.env.INVOICE_EMAIL_USER || process.env.SMTP_USER || "",
+  pass: process.env.INVOICE_EMAIL_PASSWORD || process.env.SMTP_PASSWORD || "",
+  from: process.env.INVOICE_EMAIL_FROM || `OpenFrame Studio <${process.env.INVOICE_EMAIL_USER || process.env.SMTP_USER || "admin@openframe.studio"}>`,
+  replyTo: process.env.INVOICE_EMAIL_REPLY_TO || "admin@openframe.studio",
+  bcc: process.env.INVOICE_EMAIL_BCC || "",
+  subjectPrefix: process.env.INVOICE_EMAIL_SUBJECT_PREFIX || "Tax Invoice"
+};
 const authConfig = {
   username: process.env.ADMIN_USERNAME || "ShuhanGao",
   password: process.env.ADMIN_PASSWORD || "Sg1654723576"
@@ -186,6 +198,14 @@ function loadLocalEnv() {
       console.warn(`Could not load .env: ${error.message}`);
     }
   }
+}
+
+function normalizeEnvBoolean(value, fallback = false) {
+  if (value === undefined || value === null || value === "") {
+    return fallback;
+  }
+
+  return ["1", "true", "yes", "on"].includes(String(value).trim().toLowerCase());
 }
 
 function sendJson(res, status, payload, headers = {}) {
@@ -874,6 +894,8 @@ function normalizeInvoice(invoice) {
     dueAt: invoice?.dueAt || addDays(new Date(), 7).toISOString(),
     paidAt: invoice?.paidAt || "",
     voidedAt: invoice?.voidedAt || "",
+    sentAt: invoice?.sentAt || "",
+    sentTo: uniqueEmails(Array.isArray(invoice?.sentTo) ? invoice.sentTo : parseGuestEmails(invoice?.sentTo || "")),
     notes: String(invoice?.notes || ""),
     createdAt: invoice?.createdAt || new Date().toISOString(),
     updatedAt: invoice?.updatedAt || invoice?.createdAt || new Date().toISOString()
@@ -995,6 +1017,298 @@ function syncInvoicesFromBookings(invoices, bookings) {
   }
 
   return { created, updated, total: invoices.length };
+}
+
+function invoiceEmailMissingSettings() {
+  const missing = [];
+  if (!invoiceEmailConfig.host) missing.push("INVOICE_EMAIL_HOST");
+  if (!invoiceEmailConfig.user) missing.push("INVOICE_EMAIL_USER");
+  if (!invoiceEmailConfig.pass) missing.push("INVOICE_EMAIL_PASSWORD");
+  return missing;
+}
+
+function isInvoiceEmailConfigured() {
+  return invoiceEmailMissingSettings().length === 0;
+}
+
+function formatInvoiceMoney(value) {
+  return new Intl.NumberFormat("en-AU", {
+    style: "currency",
+    currency: invoiceCurrency
+  }).format(Number(value || 0));
+}
+
+function formatInvoiceDocumentDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  return date.toISOString().slice(0, 10);
+}
+
+function invoiceProductDescription(invoice) {
+  const serviceNames = (invoice.items || []).map((item) => item.name).filter(Boolean).join(" + ");
+  return [invoice.propertyAddress || "Booking", serviceNames].filter(Boolean).join("\n");
+}
+
+function invoiceFileName(invoice) {
+  const base = [invoice.invoiceNumber || "invoice", invoice.propertyAddress || ""]
+    .filter(Boolean)
+    .join("-")
+    .replace(/[^a-z0-9._-]+/gi, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 96);
+
+  return `${base || "invoice"}.pdf`;
+}
+
+function invoiceEmailRecipients(invoice, input = {}) {
+  const requestedRecipients = Array.isArray(input.to || input.recipients)
+    ? (input.to || input.recipients)
+    : parseGuestEmails(input.to || input.recipients || "");
+  const fallbackRecipients = parseGuestEmails(invoice.clientEmail || "");
+  return uniqueEmails(requestedRecipients.length ? requestedRecipients : fallbackRecipients).filter(isValidEmail);
+}
+
+function buildInvoiceEmailSubject(invoice) {
+  return `${invoiceEmailConfig.subjectPrefix} ${invoice.invoiceNumber} - ${invoice.propertyAddress || "OpenFrame Studio"}`;
+}
+
+function buildInvoiceEmailText(invoice) {
+  return [
+    "Hi,",
+    "",
+    `Please find attached tax invoice ${invoice.invoiceNumber} for ${invoice.propertyAddress || "your booking"}.`,
+    `Total due: ${formatInvoiceMoney(invoice.total)} including GST.`,
+    "",
+    "Payment information:",
+    "Name: Openframe Studio Pty Ltd",
+    "BSB: 062-128",
+    "Account: 11440602",
+    `Please reference ${invoice.invoiceNumber} for the payment.`,
+    "",
+    "Thank you,",
+    "OpenFrame Studio"
+  ].join("\n");
+}
+
+function buildInvoiceEmailHtml(invoice) {
+  return `
+    <div style="font-family:Arial,sans-serif;color:#111611;line-height:1.5">
+      <p>Hi,</p>
+      <p>Please find attached tax invoice <strong>${escapeHtmlForEmail(invoice.invoiceNumber)}</strong> for ${escapeHtmlForEmail(invoice.propertyAddress || "your booking")}.</p>
+      <p><strong>Total due: ${escapeHtmlForEmail(formatInvoiceMoney(invoice.total))} including GST.</strong></p>
+      <p>Payment information:</p>
+      <ul>
+        <li>Name: Openframe Studio Pty Ltd</li>
+        <li>BSB: 062-128</li>
+        <li>Account: 11440602</li>
+        <li>Please reference ${escapeHtmlForEmail(invoice.invoiceNumber)} for the payment.</li>
+      </ul>
+      <p>Thank you,<br />OpenFrame Studio</p>
+    </div>
+  `;
+}
+
+function escapeHtmlForEmail(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  }[char]));
+}
+
+function drawPdfCell(doc, text, x, y, width, height, options = {}) {
+  const textHeight = doc.heightOfString(text, {
+    width: width - 16,
+    align: options.align || "left"
+  });
+  const textY = y + Math.max(8, (height - textHeight) / 2);
+  doc.text(text, x + 8, textY, {
+    width: width - 16,
+    align: options.align || "left"
+  });
+}
+
+function drawInvoicePdf(doc, invoice) {
+  const pageWidth = doc.page.width;
+  const margin = 58;
+  const logoPath = path.join(publicDir, "openframe-logo.png");
+
+  doc.rect(0, 0, pageWidth, 8).fill("#2ecad3");
+
+  doc.fillColor("#000").font("Helvetica-Bold").fontSize(38).text("Tax Invoice", margin, 66);
+  try {
+    doc.image(logoPath, pageWidth - margin - 105, 58, { width: 105, height: 105, fit: [105, 105] });
+  } catch {
+    doc.fontSize(12).text("OPENFRAME\nSTUDIO", pageWidth - margin - 105, 70, { width: 105, align: "center" });
+  }
+
+  doc.font("Helvetica").fontSize(12);
+  doc.text("Invoice Number", margin, 184);
+  doc.text(invoice.invoiceNumber || "", 210, 184);
+  doc.text("Invoice Date", margin, 210);
+  doc.text(formatInvoiceDocumentDate(invoice.issuedAt), 210, 210);
+
+  doc.font("Helvetica-Bold").fontSize(15).text("OUR INFORMATION", margin, 282);
+  doc.font("Helvetica").fontSize(12);
+  const infoLines = [
+    "OpenFrame Studio Pty Ltd",
+    "23 Selborne St",
+    "Burwood",
+    "NSW 2134",
+    "ABN: 35 687 073 114",
+    "Email: openframeau@gmail.com"
+  ];
+  infoLines.forEach((line, index) => doc.text(line, margin, 312 + index * 20));
+
+  const billingX = 330;
+  doc.font("Helvetica-Bold").fontSize(15).text("BILLING TO", billingX, 282);
+  doc.font("Helvetica").fontSize(12).text(invoice.propertyAddress || invoice.clientName || "Client", billingX, 312, {
+    width: pageWidth - margin - billingX
+  });
+
+  const tableX = margin;
+  const tableY = 450;
+  const columnWidths = [172, 92, 108, 108];
+  const rowHeight = 60;
+  const headerHeight = 40;
+  const tableWidth = columnWidths.reduce((sum, width) => sum + width, 0);
+  const headers = ["PRODUCT", "QUANTITY", "PRICE", "SUBTOTAL"];
+  const product = invoiceProductDescription(invoice);
+
+  doc.rect(tableX, tableY, tableWidth, headerHeight).fill("#e7e7e7");
+  doc.fillColor("#000").font("Helvetica-Bold").fontSize(11);
+  let cursorX = tableX;
+  headers.forEach((header, index) => {
+    drawPdfCell(doc, header, cursorX, tableY, columnWidths[index], headerHeight, { align: "center" });
+    cursorX += columnWidths[index];
+  });
+
+  doc.font("Helvetica").fontSize(11);
+  cursorX = tableX;
+  const rowY = tableY + headerHeight;
+  drawPdfCell(doc, product, cursorX, rowY, columnWidths[0], rowHeight, { align: "center" });
+  cursorX += columnWidths[0];
+  drawPdfCell(doc, "1", cursorX, rowY, columnWidths[1], rowHeight, { align: "center" });
+  cursorX += columnWidths[1];
+  drawPdfCell(doc, formatInvoiceMoney(invoice.subtotal), cursorX, rowY, columnWidths[2], rowHeight, { align: "right" });
+  cursorX += columnWidths[2];
+  drawPdfCell(doc, formatInvoiceMoney(invoice.subtotal), cursorX, rowY, columnWidths[3], rowHeight, { align: "right" });
+  doc.moveTo(tableX, rowY + rowHeight).lineTo(tableX + tableWidth, rowY + rowHeight).lineWidth(1.2).stroke("#000");
+
+  doc.save();
+  doc.rotate(-10, { origin: [150, 630] });
+  doc.rect(118, 612, 102, 32).lineWidth(2).stroke("#f5a623");
+  doc.fillColor("#f5a623").font("Helvetica-Bold").fontSize(20).text(invoice.status === "paid" ? "PAID" : invoice.status === "void" ? "VOID" : "UNPAID", 125, 619);
+  doc.restore();
+
+  const totalX = 330;
+  const totalY = 590;
+  const totalW = 208;
+  const totalRowH = 38;
+  const totalRows = [
+    ["Total", formatInvoiceMoney(invoice.subtotal)],
+    ["GST (10%)", formatInvoiceMoney(invoice.gstAmount)],
+    ["Total Due", formatInvoiceMoney(invoice.total)]
+  ];
+  doc.lineWidth(1.4).strokeColor("#000").rect(totalX, totalY, totalW, totalRowH * totalRows.length).stroke();
+  doc.font("Helvetica-Bold").fontSize(11).fillColor("#000");
+  totalRows.forEach(([label, value], index) => {
+    const y = totalY + index * totalRowH;
+    if (index > 0) doc.moveTo(totalX, y).lineTo(totalX + totalW, y).stroke();
+    doc.moveTo(totalX + totalW / 2, y).lineTo(totalX + totalW / 2, y + totalRowH).stroke();
+    drawPdfCell(doc, label, totalX, y, totalW / 2, totalRowH, { align: "center" });
+    drawPdfCell(doc, value, totalX + totalW / 2, y, totalW / 2, totalRowH, { align: "center" });
+  });
+
+  doc.font("Helvetica-Bold").fontSize(15).fillColor("#000").text("PAYMENT INFORMATION", margin, 718);
+  doc.font("Helvetica").fontSize(12).fillColor("#787878");
+  [
+    "Bank Transfer:",
+    "Name: Openframe Studio Pty Ltd",
+    "BSB: 062-128",
+    "Account: 11440602",
+    `Please reference ${invoice.invoiceNumber} for the payment`
+  ].forEach((line, index) => doc.text(line, margin, 750 + index * 20));
+}
+
+async function createInvoicePdfBuffer(invoice) {
+  let PDFDocument;
+  try {
+    ({ default: PDFDocument } = await import("pdfkit"));
+  } catch {
+    throw new Error("Invoice PDF generation is still installing. Wait for the latest deploy to finish, then try again.");
+  }
+
+  const doc = new PDFDocument({
+    size: "A4",
+    margin: 0,
+    info: {
+      Title: `${invoice.invoiceNumber} Tax Invoice`,
+      Author: "OpenFrame Studio"
+    }
+  });
+  const chunks = [];
+  const finished = new Promise((resolve, reject) => {
+    doc.on("data", (chunk) => chunks.push(chunk));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+  });
+
+  drawInvoicePdf(doc, invoice);
+  doc.end();
+  return finished;
+}
+
+async function createInvoiceTransport() {
+  let nodemailer;
+  try {
+    ({ default: nodemailer } = await import("nodemailer"));
+  } catch {
+    throw new Error("Invoice email sending is still installing. Wait for the latest deploy to finish, then try again.");
+  }
+
+  return nodemailer.createTransport({
+    host: invoiceEmailConfig.host,
+    port: invoiceEmailConfig.port,
+    secure: invoiceEmailConfig.secure,
+    auth: {
+      user: invoiceEmailConfig.user,
+      pass: invoiceEmailConfig.pass
+    }
+  });
+}
+
+async function sendInvoiceEmail(invoice, recipients) {
+  if (!isInvoiceEmailConfigured()) {
+    throw new Error(`Invoice email is not set up yet. Add ${invoiceEmailMissingSettings().join(", ")} in Render.`);
+  }
+
+  const transport = await createInvoiceTransport();
+  const pdf = await createInvoicePdfBuffer(invoice);
+  const bcc = uniqueEmails(parseGuestEmails(invoiceEmailConfig.bcc)).filter(isValidEmail);
+
+  await transport.sendMail({
+    from: invoiceEmailConfig.from,
+    to: recipients,
+    bcc,
+    replyTo: invoiceEmailConfig.replyTo,
+    subject: buildInvoiceEmailSubject(invoice),
+    text: buildInvoiceEmailText(invoice),
+    html: buildInvoiceEmailHtml(invoice),
+    attachments: [
+      {
+        filename: invoiceFileName(invoice),
+        content: pdf,
+        contentType: "application/pdf"
+      }
+    ]
+  });
 }
 
 function isLarkConfigured() {
@@ -1856,6 +2170,7 @@ async function handleApi(req, res, url) {
       senderEmail: larkConfig.senderEmail,
       senderName: larkConfig.senderName,
       organizerCalendarConfigured: Boolean(larkConfig.organizerCalendarId),
+      invoiceEmailConfigured: isInvoiceEmailConfigured(),
       timezone: larkConfig.timezone,
       persistentStorage: storageBackend !== "app",
       storageBackend
@@ -2059,6 +2374,49 @@ async function handleApi(req, res, url) {
     await saveInvoices(invoices);
     invoices.sort((a, b) => new Date(b.issuedAt) - new Date(a.issuedAt));
     sendJson(res, 200, { invoices, ...result });
+    return;
+  }
+
+  const invoiceSendMatch = url.pathname.match(/^\/api\/invoices\/([^/]+)\/send$/);
+  if (req.method === "POST" && invoiceSendMatch) {
+    if (!hasPermission(req, "manage_invoices")) {
+      sendForbidden(res, "Boss or team leader only.");
+      return;
+    }
+
+    const input = await readBody(req);
+    const invoiceId = decodeURIComponent(invoiceSendMatch[1]);
+    const invoices = await loadInvoices();
+    const invoice = invoices.find((item) => item.id === invoiceId);
+    if (!invoice) {
+      sendJson(res, 404, { errors: ["Invoice not found."] });
+      return;
+    }
+
+    if (invoice.status === "void") {
+      sendJson(res, 400, { errors: ["Voided invoices cannot be sent."] });
+      return;
+    }
+
+    const recipients = invoiceEmailRecipients(invoice, input);
+    if (!recipients.length) {
+      sendJson(res, 400, { errors: ["Add a valid client email before sending this invoice."] });
+      return;
+    }
+
+    try {
+      await sendInvoiceEmail(invoice, recipients);
+    } catch (error) {
+      sendJson(res, 502, { errors: [error.message || "Could not send invoice email."] });
+      return;
+    }
+
+    invoice.sentAt = new Date().toISOString();
+    invoice.sentTo = recipients;
+    invoice.updatedAt = invoice.sentAt;
+    await saveInvoices(invoices);
+    invoices.sort((a, b) => new Date(b.issuedAt) - new Date(a.issuedAt));
+    sendJson(res, 200, { invoice, invoices, message: `Invoice sent to ${recipients.join(", ")}.` });
     return;
   }
 

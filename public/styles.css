@@ -1050,6 +1050,11 @@ button:focus-visible {
   font-weight: 650;
 }
 
+.invoice-main .invoice-sent {
+  color: var(--accent-dark);
+  font-weight: 850;
+}
+
 .invoice-status {
   display: inline-flex;
   align-items: center;
@@ -1091,6 +1096,7 @@ button:focus-visible {
 
 .invoice-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
   gap: 8px;

@@ -30,3 +30,19 @@ services:
         value: admin@openframe.studio
       - key: LARK_SENDER_NAME
         value: admin@openframe.studio
+      - key: INVOICE_EMAIL_HOST
+        sync: false
+      - key: INVOICE_EMAIL_PORT
+        value: 587
+      - key: INVOICE_EMAIL_SECURE
+        value: false
+      - key: INVOICE_EMAIL_USER
+        sync: false
+      - key: INVOICE_EMAIL_PASSWORD
+        sync: false
+      - key: INVOICE_EMAIL_FROM
+        value: OpenFrame Studio <admin@openframe.studio>
+      - key: INVOICE_EMAIL_REPLY_TO
+        value: admin@openframe.studio
+      - key: INVOICE_EMAIL_BCC
+        sync: false

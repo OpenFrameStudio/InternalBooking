@@ -865,6 +865,10 @@ function invoicePrintTitle(invoice) {
   return [invoice.invoiceNumber, invoice.propertyAddress, 'Tax Invoice'].filter(Boolean).join(' - ');
 }
 
+function invoiceRecipientEmails(invoice) {
+  return uniqueEmails(parseEmails(invoice.clientEmail || '')).filter(isEmail);
+}
+
 function updateInvoiceStats() {
   const drafts = state.invoices.filter((invoice) => invoice.status === 'draft');
   const paid = state.invoices.filter((invoice) => invoice.status === 'paid');
@@ -902,10 +906,22 @@ function renderInvoices() {
       (invoice.items || []).map((item) => `${item.name} ${formatMoney(item.amount)}`).join(' + '),
       `GST 10% ${formatMoney(invoice.gstAmount)}`
     ].filter(Boolean).join(' - ');
+    const sentLine = item.querySelector('.invoice-sent');
+    if (invoice.sentAt) {
+      const sentTo = Array.isArray(invoice.sentTo) && invoice.sentTo.length ? ` to ${invoice.sentTo.join(', ')}` : '';
+      sentLine.textContent = `Sent ${formatInvoiceDate(invoice.sentAt)}${sentTo}`;
+      sentLine.hidden = false;
+    } else {
+      sentLine.textContent = '';
+      sentLine.hidden = true;
+    }
     item.querySelector('.invoice-total strong').textContent = formatMoney(invoice.total);
     item.querySelector('.invoice-total small').textContent = `${invoice.currency || 'AUD'} incl. GST`;
 
     item.querySelector('.print-invoice-button').addEventListener('click', () => printInvoice(invoice.id));
+    const sendButton = item.querySelector('.send-invoice-button');
+    sendButton.hidden = invoice.status === 'void';
+    sendButton.addEventListener('click', () => sendInvoice(invoice.id));
     const paidButton = item.querySelector('.paid-invoice-button');
     paidButton.hidden = invoice.status !== 'draft';
     paidButton.addEventListener('click', () => updateInvoiceStatus(invoice.id, 'paid'));
@@ -1118,6 +1134,40 @@ async function syncInvoices() {
     setMessage(el.invoiceMessage, 'Could not reach the invoice app.', 'error');
   } finally {
     el.syncInvoicesButton.disabled = false;
+  }
+}
+
+async function sendInvoice(id) {
+  const invoice = state.invoices.find((item) => item.id === id);
+  if (!invoice) return;
+
+  const recipients = invoiceRecipientEmails(invoice);
+  if (!recipients.length) {
+    setMessage(el.invoiceMessage, 'Add a client email before sending this invoice.', 'error');
+    return;
+  }
+
+  if (!window.confirm(`Send ${invoice.invoiceNumber} to ${recipients.join(', ')}?`)) {
+    return;
+  }
+
+  setMessage(el.invoiceMessage, `Sending ${invoice.invoiceNumber}...`);
+  try {
+    const { response, data } = await fetchJson(`/api/invoices/${encodeURIComponent(id)}/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to: recipients })
+    });
+    if (!response.ok) {
+      setMessage(el.invoiceMessage, (data.errors || ['Could not send invoice.']).join(' '), 'error');
+      return;
+    }
+
+    state.invoices = data.invoices || state.invoices.map((invoiceItem) => invoiceItem.id === id ? data.invoice : invoiceItem);
+    renderInvoices();
+    setMessage(el.invoiceMessage, data.message || 'Invoice sent.', 'success');
+  } catch {
+    setMessage(el.invoiceMessage, 'Could not reach the invoice email sender.', 'error');
   }
 }
 
