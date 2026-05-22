@@ -48,6 +48,7 @@ const larkConfig = {
 };
 const invoiceEmailUser = process.env.INVOICE_EMAIL_USER || process.env.SMTP_USER || "admin@openframe.studio";
 const invoiceEmailPort = Number(process.env.INVOICE_EMAIL_PORT || process.env.SMTP_PORT || 465);
+const invoiceEmailTimeoutMs = Number(process.env.INVOICE_EMAIL_TIMEOUT_MS || 15_000);
 const invoiceEmailConfig = {
   host: process.env.INVOICE_EMAIL_HOST || process.env.SMTP_HOST || "smtp.larksuite.com",
   port: Number.isFinite(invoiceEmailPort) ? invoiceEmailPort : 587,
@@ -57,7 +58,8 @@ const invoiceEmailConfig = {
   from: process.env.INVOICE_EMAIL_FROM || `OpenFrame Studio <${invoiceEmailUser}>`,
   replyTo: process.env.INVOICE_EMAIL_REPLY_TO || "admin@openframe.studio",
   bcc: process.env.INVOICE_EMAIL_BCC || "",
-  subjectPrefix: process.env.INVOICE_EMAIL_SUBJECT_PREFIX || "Tax Invoice"
+  subjectPrefix: process.env.INVOICE_EMAIL_SUBJECT_PREFIX || "Tax Invoice",
+  timeoutMs: Number.isFinite(invoiceEmailTimeoutMs) ? invoiceEmailTimeoutMs : 15_000
 };
 const authConfig = {
   username: process.env.ADMIN_USERNAME || "ShuhanGao",
@@ -1279,11 +1281,40 @@ async function createInvoiceTransport() {
     port: invoiceEmailConfig.port,
     secure: invoiceEmailConfig.secure,
     requireTLS: !invoiceEmailConfig.secure,
+    connectionTimeout: invoiceEmailConfig.timeoutMs,
+    greetingTimeout: invoiceEmailConfig.timeoutMs,
+    socketTimeout: invoiceEmailConfig.timeoutMs,
     auth: {
       user: invoiceEmailConfig.user,
       pass: invoiceEmailConfig.pass
     }
   });
+}
+
+async function withTimeout(promise, milliseconds, message) {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(message)), milliseconds);
+  });
+
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+function invoiceEmailErrorMessage(error) {
+  const message = error?.message || "";
+  const code = error?.code || "";
+  const timeoutish = /timed out|timeout|greeting never received|connection/i.test(message)
+    || ["ETIMEDOUT", "ESOCKET", "ECONNECTION", "EHOSTUNREACH", "ECONNREFUSED"].includes(code);
+
+  if (timeoutish) {
+    return "Could not connect to Lark Mail SMTP. Render free services block SMTP ports 465/587, so invoice email needs a paid Render service or an HTTP email provider.";
+  }
+
+  return message || "Could not send invoice email.";
 }
 
 async function sendInvoiceEmail(invoice, recipients) {
@@ -1295,7 +1326,7 @@ async function sendInvoiceEmail(invoice, recipients) {
   const pdf = await createInvoicePdfBuffer(invoice);
   const bcc = uniqueEmails(parseGuestEmails(invoiceEmailConfig.bcc)).filter(isValidEmail);
 
-  await transport.sendMail({
+  await withTimeout(transport.sendMail({
     from: invoiceEmailConfig.from,
     to: recipients,
     bcc,
@@ -1310,7 +1341,7 @@ async function sendInvoiceEmail(invoice, recipients) {
         contentType: "application/pdf"
       }
     ]
-  });
+  }), invoiceEmailConfig.timeoutMs + 2_000, "Invoice email timed out connecting to Lark Mail.");
 }
 
 function isLarkConfigured() {
@@ -2409,7 +2440,7 @@ async function handleApi(req, res, url) {
     try {
       await sendInvoiceEmail(invoice, recipients);
     } catch (error) {
-      sendJson(res, 502, { errors: [error.message || "Could not send invoice email."] });
+      sendJson(res, 502, { errors: [invoiceEmailErrorMessage(error)] });
       return;
     }
 

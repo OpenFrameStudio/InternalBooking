@@ -114,6 +114,10 @@ In Render, the only required secret is usually `INVOICE_EMAIL_PASSWORD`.
 The app also accepts `INVOICE_MAIL_PASSWORD` if that name was already saved in
 Render.
 
+Render free services block outbound SMTP ports such as `465` and `587`, so Lark
+Mail SMTP invoice sending needs a paid Render service or a later switch to an
+HTTP email provider.
+
 ## Files
 
 - `server.js` serves the app, validates bookings, stores data, and talks to Lark.
