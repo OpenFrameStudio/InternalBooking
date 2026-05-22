@@ -96,8 +96,10 @@ const state = {
 
 const storageKeys = {
   draft: 'openframe.bookingDraft.v2',
+  bookings: 'openframe.bookings.v1',
   clients: 'openframe.clients.v1',
   photographers: 'openframe.photographers.v1',
+  invoices: 'openframe.invoices.v1',
   addresses: 'openframe.addresses.v1'
 };
 
@@ -147,6 +149,60 @@ function removeStored(key) {
   } catch {
     // Ignore browsers that block local storage.
   }
+}
+
+function cacheBookings() {
+  writeStored(storageKeys.bookings, state.bookings);
+}
+
+function cacheInvoices() {
+  if (userCanAccess('invoices')) writeStored(storageKeys.invoices, state.invoices);
+}
+
+function hydrateCachedData() {
+  const cachedBookings = readStored(storageKeys.bookings, []).filter((booking) => booking?.id);
+  if (cachedBookings.length) {
+    state.bookings = cachedBookings;
+    updateAddressSuggestions();
+  }
+  renderBookings();
+
+  const cachedClients = readStored(storageKeys.clients, []).filter((client) => client?.name);
+  if (cachedClients.length) {
+    state.clients = mergeDirectoryRecords(state.clients, cachedClients);
+  }
+  renderClientOptions();
+  renderClientList();
+
+  const cachedPhotographers = readStored(storageKeys.photographers, []).filter((photographer) => photographer?.name);
+  if (cachedPhotographers.length) {
+    state.photographers = mergeDirectoryRecords(state.photographers, cachedPhotographers);
+  }
+  renderOptions(el.photographerSelect, state.photographers, 'New photographer');
+  renderPhotographerList();
+
+  const cachedInvoices = userCanAccess('invoices')
+    ? readStored(storageKeys.invoices, []).filter((invoice) => invoice?.id)
+    : [];
+  if (cachedInvoices.length) {
+    state.invoices = cachedInvoices;
+  }
+  if (userCanAccess('invoices')) renderInvoices();
+}
+
+function refreshLiveData() {
+  loadStatus().catch(() => {
+    el.larkDot.className = 'status-dot offline';
+    el.larkTitle.textContent = 'Connection delayed';
+    el.larkDetail.textContent = 'Showing saved data while the live calendar catches up.';
+  });
+
+  Promise.allSettled([
+    loadClients(),
+    loadPhotographers(),
+    loadBookings(),
+    loadInvoices()
+  ]);
 }
 
 async function fetchJson(url, options) {
@@ -937,6 +993,7 @@ function upsertStateInvoice(invoice) {
   const index = state.invoices.findIndex((item) => item.id === invoice.id || item.bookingId === invoice.bookingId);
   if (index >= 0) state.invoices[index] = invoice;
   else state.invoices.unshift(invoice);
+  cacheInvoices();
   renderInvoices();
 }
 
@@ -1065,45 +1122,79 @@ async function loadStatus() {
 }
 
 async function loadBookings() {
-  const { data } = await fetchJson('/api/bookings');
-  state.bookings = data.bookings || [];
-  renderBookings();
-  updateAddressSuggestions();
-  if (data.larkImportError) {
+  try {
+    const { response, data } = await fetchJson('/api/bookings');
+    if (!response.ok) {
+      el.larkDot.className = 'status-dot offline';
+      el.larkTitle.textContent = 'Bookings refresh delayed';
+      el.larkDetail.textContent = (data.errors || ['Showing saved bookings for now.']).join(' ');
+      return;
+    }
+
+    state.bookings = data.bookings || [];
+    cacheBookings();
+    renderBookings();
+    updateAddressSuggestions();
+    if (data.larkImportError) {
+      el.larkDot.className = 'status-dot offline';
+      el.larkTitle.textContent = 'Lark import needs checking';
+      el.larkDetail.textContent = data.larkImportError;
+    }
+  } catch {
     el.larkDot.className = 'status-dot offline';
-    el.larkTitle.textContent = 'Lark import needs checking';
-    el.larkDetail.textContent = data.larkImportError;
+    el.larkTitle.textContent = 'Bookings refresh delayed';
+    el.larkDetail.textContent = 'Showing saved bookings while the live calendar catches up.';
   }
 }
 
 async function loadClients() {
   const cached = readStored(storageKeys.clients, []).filter((client) => client?.name);
+  if (cached.length) {
+    state.clients = mergeDirectoryRecords(state.clients, cached);
+    renderClientOptions(el.clientSelect.value);
+    renderClientList();
+  }
+
   try {
-    const { data } = await fetchJson('/api/clients');
+    const { response, data } = await fetchJson('/api/clients');
+    if (!response.ok) return;
     state.clients = mergeDirectoryRecords(cached, data.clients || []);
   } catch {
-    state.clients = cached;
+    if (!state.clients.length) state.clients = cached;
   }
   writeStored(storageKeys.clients, state.clients);
-  renderClientOptions();
+  renderClientOptions(el.clientSelect.value);
   renderClientList();
 }
 
 async function loadPhotographers() {
   const cached = readStored(storageKeys.photographers, []).filter((photographer) => photographer?.name);
+  if (cached.length) {
+    state.photographers = mergeDirectoryRecords(state.photographers, cached);
+    renderOptions(el.photographerSelect, state.photographers, 'New photographer', el.photographerSelect.value);
+    renderPhotographerList();
+  }
+
   try {
-    const { data } = await fetchJson('/api/photographers');
+    const { response, data } = await fetchJson('/api/photographers');
+    if (!response.ok) return;
     state.photographers = mergeDirectoryRecords(cached, data.photographers || []);
   } catch {
-    state.photographers = cached;
+    if (!state.photographers.length) state.photographers = cached;
   }
   writeStored(storageKeys.photographers, state.photographers);
-  renderOptions(el.photographerSelect, state.photographers, 'New photographer');
+  renderOptions(el.photographerSelect, state.photographers, 'New photographer', el.photographerSelect.value);
   renderPhotographerList();
 }
 
 async function loadInvoices() {
   if (!userCanAccess('invoices')) return;
+  const cached = readStored(storageKeys.invoices, []).filter((invoice) => invoice?.id);
+  if (cached.length) {
+    state.invoices = cached;
+    renderInvoices();
+  }
+
   try {
     const { response, data } = await fetchJson('/api/invoices');
     if (!response.ok) {
@@ -1111,9 +1202,12 @@ async function loadInvoices() {
       return;
     }
     state.invoices = data.invoices || [];
+    cacheInvoices();
     renderInvoices();
   } catch {
-    setMessage(el.invoiceMessage, 'Could not reach the invoice app.', 'error');
+    if (!state.invoices.length) state.invoices = cached;
+    renderInvoices();
+    setMessage(el.invoiceMessage, 'Showing saved invoices while the live list catches up.', 'error');
   }
 }
 
@@ -1128,6 +1222,7 @@ async function syncInvoices() {
       return;
     }
     state.invoices = data.invoices || [];
+    cacheInvoices();
     renderInvoices();
     setMessage(el.invoiceMessage, `Invoices synced: ${data.created || 0} created, ${data.updated || 0} updated.`, 'success');
   } catch {
@@ -1164,6 +1259,7 @@ async function sendInvoice(id) {
     }
 
     state.invoices = data.invoices || state.invoices.map((invoiceItem) => invoiceItem.id === id ? data.invoice : invoiceItem);
+    cacheInvoices();
     renderInvoices();
     setMessage(el.invoiceMessage, data.message || 'Invoice sent.', 'success');
   } catch {
@@ -1181,6 +1277,7 @@ async function updateInvoiceStatus(id, status) {
       return;
     }
     state.invoices = data.invoices || state.invoices.map((invoice) => invoice.id === id ? data.invoice : invoice);
+    cacheInvoices();
     renderInvoices();
     setMessage(el.invoiceMessage, status === 'paid' ? 'Invoice marked paid.' : 'Invoice voided.', 'success');
   } catch {
@@ -1388,6 +1485,7 @@ async function submitBooking(event) {
       state.bookings.push(result.booking);
     }
     upsertStateInvoice(result.invoice);
+    cacheBookings();
     rememberAddress(result.booking.propertyAddress);
     renderBookings();
     removeStored(storageKeys.draft);
@@ -1445,6 +1543,7 @@ async function cancelBooking(id) {
   if (!response.ok) return;
   state.bookings = state.bookings.map((booking) => booking.id === id ? data.booking : booking);
   upsertStateInvoice(data.invoice);
+  cacheBookings();
   if (state.editingBookingId === id) resetBookingForm('Edit cancelled because the booking was cancelled.');
   renderBookings();
 }
@@ -1537,10 +1636,10 @@ setInitialDateTime();
 updateDurationForServices();
 applyExamplePlaceholders();
 await loadSession();
-await Promise.all([loadStatus(), loadClients(), loadPhotographers(), loadBookings()]);
-await loadInvoices();
+applyAppAccess();
+hydrateCachedData();
 restoreDraft();
 updateInvitationSummary();
 updateAddressSuggestions();
-applyAppAccess();
 setRoute(window.location.pathname, false);
+refreshLiveData();
