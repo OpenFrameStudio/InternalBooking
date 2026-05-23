@@ -1174,81 +1174,34 @@ function escapeHtml(value) {
   }[char]));
 }
 
-function printInvoice(id) {
+async function printInvoice(id) {
   const invoice = state.invoices.find((item) => item.id === id);
   if (!invoice) return;
 
-  const productLines = escapeHtml(invoiceProductDescription(invoice)).replace(/\n/g, '<br />');
-  const rows = `
-    <tr>
-      <td>${productLines}</td>
-      <td>1</td>
-      <td>${escapeHtml(formatMoney(invoice.subtotal))}</td>
-      <td>${escapeHtml(formatMoney(invoice.subtotal))}</td>
-    </tr>
-  `;
+  setMessage(el.invoiceMessage, `Preparing ${invoice.invoiceNumber} PDF...`);
+  try {
+    const response = await fetch(`/api/invoices/${encodeURIComponent(id)}/pdf`, {
+      credentials: 'same-origin'
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      setMessage(el.invoiceMessage, (data.errors || ['Could not create invoice PDF.']).join(' '), 'error');
+      return;
+    }
 
-  el.invoicePrintSheet.innerHTML = `
-    <div class="tax-invoice-header">
-      <h1>Tax Invoice</h1>
-      <img src="/openframe-logo.png" alt="OpenFrame Studio" />
-    </div>
-    <div class="tax-invoice-meta">
-      <span>Invoice Number</span>
-      <strong>${escapeHtml(invoice.invoiceNumber)}</strong>
-      <span>Invoice Date</span>
-      <strong>${escapeHtml(formatInvoiceIsoDate(invoice.issuedAt))}</strong>
-    </div>
-    <div class="tax-info-grid">
-      <section>
-        <h2>OUR INFORMATION</h2>
-        <p>OpenFrame Studio Pty Ltd</p>
-        <p>23 Selborne St</p>
-        <p>Burwood</p>
-        <p>NSW 2134</p>
-        <p>ABN: 35 687 073 114</p>
-        <p>Email: openframeau@gmail.com</p>
-      </section>
-      <section>
-        <h2>BILLING TO</h2>
-        <p>${escapeHtml(invoice.propertyAddress || invoice.clientName || 'Client')}</p>
-      </section>
-    </div>
-    <table class="tax-invoice-table">
-      <thead>
-        <tr><th>PRODUCT</th><th>QUANTITY</th><th>PRICE</th><th>SUBTOTAL</th></tr>
-      </thead>
-      <tbody>${rows}</tbody>
-    </table>
-    <div class="tax-invoice-lower">
-      <div class="invoice-stamp ${escapeHtml(invoice.status)}">${escapeHtml(invoiceStampLabel(invoice))}</div>
-      <table class="tax-total-table">
-        <tbody>
-          <tr><th>Total</th><td>${escapeHtml(formatMoney(invoice.subtotal))}</td></tr>
-          <tr><th>GST (10%)</th><td>${escapeHtml(formatMoney(invoice.gstAmount))}</td></tr>
-          <tr><th>Total Due</th><td>${escapeHtml(formatMoney(invoice.total))}</td></tr>
-        </tbody>
-      </table>
-    </div>
-    <section class="payment-info">
-      <h2>PAYMENT INFORMATION</h2>
-      <p>Bank Transfer:</p>
-      <p>Name: Openframe Studio Pty Ltd</p>
-      <p>BSB: 062-128</p>
-      <p>Account: 11440602</p>
-      <p>Please reference ${escapeHtml(invoice.invoiceNumber)} for the payment</p>
-    </section>
-  `;
-  el.invoicePrintSheet.hidden = false;
-  document.body.classList.add('printing-invoice');
-  const previousTitle = document.title;
-  document.title = invoicePrintTitle(invoice);
-  window.print();
-  window.setTimeout(() => {
-    document.title = previousTitle;
-    document.body.classList.remove('printing-invoice');
-    el.invoicePrintSheet.hidden = true;
-  }, 600);
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${invoicePrintTitle(invoice).replace(/[\\/:*?"<>|]/g, ' - ')}.pdf`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+    setMessage(el.invoiceMessage, `${invoice.invoiceNumber} PDF downloaded.`, 'success');
+  } catch {
+    setMessage(el.invoiceMessage, 'Could not reach the invoice PDF maker.', 'error');
+  }
 }
 
 function startBookingEdit(id) {

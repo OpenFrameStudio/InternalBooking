@@ -3083,6 +3083,37 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  const invoicePdfMatch = url.pathname.match(/^\/api\/invoices\/([^/]+)\/pdf$/);
+  if (req.method === "GET" && invoicePdfMatch) {
+    if (!hasPermission(req, "manage_invoices")) {
+      sendForbidden(res, "Boss or team leader only.");
+      return;
+    }
+
+    const invoiceId = decodeURIComponent(invoicePdfMatch[1]);
+    const invoices = await loadInvoices();
+    const invoice = invoices.find((item) => item.id === invoiceId);
+    if (!invoice) {
+      sendJson(res, 404, { errors: ["Invoice not found."] });
+      return;
+    }
+
+    try {
+      const pdf = await createInvoicePdfBuffer(invoice);
+      const filename = invoiceFileName(invoice).replace(/["\\\r\n]/g, "");
+      res.writeHead(200, {
+        "Content-Type": "application/pdf",
+        "Content-Length": pdf.length,
+        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Cache-Control": "no-store"
+      });
+      res.end(pdf);
+    } catch (error) {
+      sendJson(res, 500, { errors: [error.message || "Could not create invoice PDF."] });
+    }
+    return;
+  }
+
   if (req.method === "POST" && url.pathname === "/api/invoices/sync") {
     if (!hasPermission(req, "manage_invoices")) {
       sendForbidden(res, "Boss or team leader only.");
