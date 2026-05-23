@@ -133,6 +133,7 @@ const monthFormatter = new Intl.DateTimeFormat(undefined, { month: 'short' });
 const dayFormatter = new Intl.DateTimeFormat(undefined, { day: '2-digit' });
 const invoiceDateFormatter = new Intl.DateTimeFormat('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
 const currencyFormatter = new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' });
+const bookingUpcomingGraceMs = 24 * 60 * 60 * 1000;
 
 function readStored(key, fallback) {
   try {
@@ -973,9 +974,15 @@ function syncLabel(booking) {
   }[booking.larkStatus] || 'local';
 }
 
+function isVisibleOnUpcomingPage(booking) {
+  const endTime = new Date(booking.endAt).getTime();
+  if (!Number.isFinite(endTime)) return true;
+  return endTime >= Date.now() - bookingUpcomingGraceMs;
+}
+
 function renderBookings() {
   const upcoming = state.bookings
-    .filter((booking) => new Date(booking.endAt).getTime() >= Date.now() || booking.status === 'cancelled')
+    .filter(isVisibleOnUpcomingPage)
     .sort((a, b) => new Date(a.startAt) - new Date(b.startAt));
   el.bookingList.innerHTML = '';
   if (!upcoming.length) {
