@@ -2359,7 +2359,6 @@ function buildLarkDescription(booking) {
     lines.push("", booking.notes);
   }
 
-  lines.push("", `Booking ID: ${booking.id}`);
   return lines.join("\n");
 }
 
