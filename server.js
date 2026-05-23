@@ -1685,6 +1685,15 @@ function shouldUseLarkCalendarNotifications() {
   return !isCalendarInviteEmailConfigured();
 }
 
+function shouldAddLarkAttendees() {
+  const explicitValue = process.env.LARK_ATTENDEES_ENABLED;
+  if (explicitValue !== undefined && explicitValue !== "") {
+    return normalizeEnvBoolean(explicitValue, false);
+  }
+
+  return !isCalendarInviteEmailConfigured();
+}
+
 function emailAddressFromSender(sender) {
   const value = String(sender || "").trim();
   const match = value.match(/<([^>]+)>/);
@@ -2412,7 +2421,7 @@ function buildLarkAttendeesPayload(booking, emails = booking.guestEmails || []) 
 
 function buildLarkPreview(booking) {
   const eventPayload = buildLarkEventPayload(booking);
-  const attendeesPayload = buildLarkAttendeesPayload(booking);
+  const attendeesPayload = shouldAddLarkAttendees() ? buildLarkAttendeesPayload(booking) : null;
 
   return {
     title: eventPayload.summary,
@@ -2426,6 +2435,7 @@ function buildLarkPreview(booking) {
     calendarInviteEmailFrom: calendarInviteEmailConfig.from,
     calendarInviteEmailConfigured: isCalendarInviteEmailConfigured(),
     larkNotificationsEnabled: shouldUseLarkCalendarNotifications(),
+    larkAttendeesEnabled: shouldAddLarkAttendees(),
     calendarId: effectiveLarkCalendarId(),
     guestEmails: booking.guestEmails,
     eventPayload,
@@ -2693,6 +2703,10 @@ function getRemovedGuestEmails(previousEmails = [], nextEmails = []) {
 }
 
 async function createLarkAttendees(booking, emails = booking.guestEmails || []) {
+  if (!shouldAddLarkAttendees()) {
+    return null;
+  }
+
   if (!booking.larkEventId || !emails.length) {
     return null;
   }
@@ -2746,7 +2760,10 @@ async function syncBookingToLark(booking, previousBooking = null) {
     booking.larkStatus = "synced";
     booking.larkError = null;
 
-    if (addedGuestEmails.length) {
+    if (!shouldAddLarkAttendees()) {
+      booking.larkAttendeeStatus = booking.guestEmails.length ? "handled_by_admin_email" : "not_needed";
+      booking.larkAttendeeError = null;
+    } else if (addedGuestEmails.length) {
       try {
         await createLarkAttendees(booking, addedGuestEmails);
         booking.larkAttendeeStatus = "synced";
@@ -2768,8 +2785,10 @@ async function syncBookingToLark(booking, previousBooking = null) {
     }
 
     if (removedGuestEmails.length) {
-      booking.larkAttendeeStatus = "needs_review";
-      booking.larkAttendeeError = "Guest list changed. Remove old guests from Lark manually if needed.";
+      if (shouldAddLarkAttendees()) {
+        booking.larkAttendeeStatus = "needs_review";
+        booking.larkAttendeeError = "Guest list changed. Remove old guests from Lark manually if needed.";
+      }
       await trySendBookingCalendarInviteEmail(previousBooking || booking, "CANCEL", removedGuestEmails);
     }
 
@@ -2864,6 +2883,7 @@ async function handleApi(req, res, url) {
       calendarInviteEmailConfigured: isCalendarInviteEmailConfigured(),
       calendarInviteEmailFrom: calendarInviteEmailConfig.from,
       larkNotificationsEnabled: shouldUseLarkCalendarNotifications(),
+      larkAttendeesEnabled: shouldAddLarkAttendees(),
       timezone: larkConfig.timezone,
       persistentStorage: storageBackend !== "app",
       storageBackend
