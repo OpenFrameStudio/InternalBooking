@@ -24,6 +24,7 @@
         <a class="nav-link" href="/photographers" data-route="/photographers" data-app-link="photographers">Photographers</a>
         <a class="nav-link" href="/invoices" data-route="/invoices" data-app-link="invoices">Invoices</a>
         <a class="nav-link" href="/work/" data-app-link="work">Work</a>
+        <button class="nav-link nav-account-action" id="changePasswordButton" type="button">Change password</button>
         <button class="nav-link nav-action" id="logoutButton" type="button">Log out</button>
       </nav>
 
@@ -425,6 +426,43 @@
       </section>
     </main>
 
+    <dialog id="passwordDialog" aria-labelledby="passwordDialogTitle">
+      <form class="dialog-card password-form" id="passwordForm">
+        <div class="dialog-heading">
+          <div>
+            <p class="eyebrow">Account</p>
+            <h2 id="passwordDialogTitle">Change password</h2>
+          </div>
+        </div>
+
+        <label>
+          <span>Current password</span>
+          <input id="currentPasswordInput" type="password" autocomplete="current-password" required />
+        </label>
+
+        <div class="form-row two">
+          <label>
+            <span>New password</span>
+            <input id="newPasswordInput" type="password" autocomplete="new-password" minlength="4" required />
+          </label>
+          <label>
+            <span>Confirm new password</span>
+            <input id="confirmPasswordInput" type="password" autocomplete="new-password" minlength="4" required />
+          </label>
+        </div>
+
+        <p class="form-error" id="passwordMessage" role="status"></p>
+
+        <div class="dialog-actions">
+          <span></span>
+          <div>
+            <button class="ghost-button" id="cancelPasswordButton" type="button">Cancel</button>
+            <button class="primary-button" id="savePasswordButton" type="submit">Save password</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
     <template id="bookingTemplate">
       <article class="booking-item">
         <div class="date-box">
@@ -504,6 +542,6 @@
 
     <section class="invoice-print-sheet" id="invoicePrintSheet" hidden aria-label="Printable invoice"></section>
 
-    <script src="/app.js?v=stateful-booking-form" type="module"></script>
+    <script src="/app.js?v=password-change" type="module"></script>
   </body>
 </html>

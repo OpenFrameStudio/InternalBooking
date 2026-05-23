@@ -71,7 +71,16 @@ const el = {
   previewLarkButton: $('#previewLarkButton'),
   submitButton: $('#bookingSubmitButton'),
   cancelEditButton: $('#cancelEditButton'),
+  changePasswordButton: $('#changePasswordButton'),
   logoutButton: $('#logoutButton'),
+  passwordDialog: $('#passwordDialog'),
+  passwordForm: $('#passwordForm'),
+  currentPassword: $('#currentPasswordInput'),
+  newPassword: $('#newPasswordInput'),
+  confirmPassword: $('#confirmPasswordInput'),
+  passwordMessage: $('#passwordMessage'),
+  cancelPasswordButton: $('#cancelPasswordButton'),
+  savePasswordButton: $('#savePasswordButton'),
   newClientButton: $('#newClientButton'),
   newPhotographerButton: $('#newPhotographerButton'),
   larkPreview: $('#larkPreview'),
@@ -1786,6 +1795,72 @@ async function testLark() {
   }
 }
 
+function openPasswordDialog() {
+  el.passwordForm.reset();
+  setMessage(el.passwordMessage, '');
+  el.savePasswordButton.disabled = false;
+
+  if (typeof el.passwordDialog.showModal === 'function') {
+    el.passwordDialog.showModal();
+  } else {
+    el.passwordDialog.setAttribute('open', '');
+  }
+
+  requestAnimationFrame(() => el.currentPassword.focus());
+}
+
+function closePasswordDialog() {
+  el.passwordForm.reset();
+  setMessage(el.passwordMessage, '');
+
+  if (typeof el.passwordDialog.close === 'function' && el.passwordDialog.open) {
+    el.passwordDialog.close();
+  } else {
+    el.passwordDialog.removeAttribute('open');
+  }
+}
+
+async function changePassword(event) {
+  event.preventDefault();
+  const currentPassword = el.currentPassword.value;
+  const newPassword = el.newPassword.value;
+  const confirmPassword = el.confirmPassword.value;
+
+  if (newPassword.length < 4) {
+    setMessage(el.passwordMessage, 'Use at least 4 characters.', 'error');
+    return;
+  }
+
+  if (newPassword !== confirmPassword) {
+    setMessage(el.passwordMessage, 'The new passwords do not match.', 'error');
+    return;
+  }
+
+  el.savePasswordButton.disabled = true;
+  el.savePasswordButton.textContent = 'Saving';
+
+  try {
+    const { response, data } = await fetchJson('/api/change-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ currentPassword, newPassword, confirmPassword })
+    });
+
+    if (!response.ok) {
+      setMessage(el.passwordMessage, data.errors?.[0] || 'Password could not be changed.', 'error');
+      return;
+    }
+
+    setMessage(el.passwordMessage, 'Password updated.', 'success');
+    setTimeout(closePasswordDialog, 650);
+  } catch {
+    setMessage(el.passwordMessage, 'Password could not be changed.', 'error');
+  } finally {
+    el.savePasswordButton.disabled = false;
+    el.savePasswordButton.textContent = 'Save password';
+  }
+}
+
 async function logout() {
   el.logoutButton.disabled = true;
   try {
@@ -1807,6 +1882,12 @@ el.searchAddressButton.addEventListener('click', searchAddressSuggestions);
 el.testLarkButton.addEventListener('click', testLark);
 el.previewLarkButton.addEventListener('click', previewLarkEvent);
 el.cancelEditButton.addEventListener('click', cancelBookingEdit);
+el.changePasswordButton.addEventListener('click', openPasswordDialog);
+el.passwordForm.addEventListener('submit', changePassword);
+el.cancelPasswordButton.addEventListener('click', closePasswordDialog);
+el.passwordDialog.addEventListener('click', (event) => {
+  if (event.target === el.passwordDialog) closePasswordDialog();
+});
 el.logoutButton.addEventListener('click', logout);
 el.clientDropdownButton.addEventListener('click', () => {
   setClientDropdownOpen(!state.bookingForm.clientDropdownOpen);

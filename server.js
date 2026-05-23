@@ -18,12 +18,14 @@ const clientsFile = path.join(dataDir, "clients.json");
 const photographersFile = path.join(dataDir, "photographers.json");
 const workFile = path.join(dataDir, "work-assignments.json");
 const invoicesFile = path.join(dataDir, "invoices.json");
+const usersFile = path.join(dataDir, "users.json");
 const seedFiles = {
   bookings: path.join(bundledDataDir, "bookings.json"),
   clients: path.join(bundledDataDir, "clients.json"),
   photographers: path.join(bundledDataDir, "photographers.json"),
   work: path.join(bundledDataDir, "work-assignments.json"),
-  invoices: path.join(bundledDataDir, "invoices.json")
+  invoices: path.join(bundledDataDir, "invoices.json"),
+  users: path.join(bundledDataDir, "users.json")
 };
 const githubStorage = {
   token: process.env.GITHUB_STORAGE_TOKEN || "",
@@ -197,6 +199,12 @@ const dataFiles = {
     file: invoicesFile,
     seedFile: seedFiles.invoices,
     githubPath: githubDataPath("invoices.json"),
+    fallback: []
+  },
+  users: {
+    file: usersFile,
+    seedFile: seedFiles.users,
+    githubPath: githubDataPath("users.json"),
     fallback: []
   }
 };
@@ -425,10 +433,100 @@ function safeEquals(left, right) {
   return leftBuffer.length === rightBuffer.length && crypto.timingSafeEqual(leftBuffer, rightBuffer);
 }
 
-function findAuthUser(input) {
-  return authUsers.find((user) => {
-    return safeEquals(input.username, user.username) && safeEquals(input.password, user.password);
-  }) || null;
+function hashPassword(password) {
+  const passwordSalt = crypto.randomBytes(16).toString("hex");
+  const passwordHash = crypto.scryptSync(String(password || ""), passwordSalt, 64).toString("hex");
+  return { passwordHash, passwordSalt };
+}
+
+function verifyHashedPassword(password, passwordSalt, passwordHash) {
+  if (!passwordSalt || !passwordHash) return false;
+
+  const calculated = crypto.scryptSync(String(password || ""), passwordSalt, 64);
+  const saved = Buffer.from(String(passwordHash || ""), "hex");
+  return saved.length === calculated.length && crypto.timingSafeEqual(saved, calculated);
+}
+
+function verifyAuthPassword(user, password) {
+  if (user?.passwordHash && user?.passwordSalt) {
+    return verifyHashedPassword(password, user.passwordSalt, user.passwordHash);
+  }
+
+  return safeEquals(password, user?.password);
+}
+
+function normalizePasswordRecords(raw) {
+  const records = Array.isArray(raw) ? raw : (Array.isArray(raw?.users) ? raw.users : []);
+  return records
+    .map((record) => ({
+      username: String(record?.username || "").trim(),
+      passwordHash: String(record?.passwordHash || ""),
+      passwordSalt: String(record?.passwordSalt || ""),
+      updatedAt: String(record?.updatedAt || "")
+    }))
+    .filter((record) => record.username && record.passwordHash && record.passwordSalt);
+}
+
+async function loadPasswordRecords() {
+  return normalizePasswordRecords(await readStoredJson(dataFiles.users));
+}
+
+async function savePasswordRecords(records) {
+  await writeStoredJson(dataFiles.users, normalizePasswordRecords(records));
+}
+
+function baseAuthUser(username) {
+  return authUsers.find((user) => safeEquals(username, user.username)) || null;
+}
+
+function passwordRecordFor(records, username) {
+  return records.find((record) => safeEquals(record.username, username)) || null;
+}
+
+async function effectiveAuthUser(username) {
+  const user = baseAuthUser(username);
+  if (!user) return null;
+
+  const records = await loadPasswordRecords();
+  const savedPassword = passwordRecordFor(records, user.username);
+  return savedPassword ? { ...user, ...savedPassword } : user;
+}
+
+async function findAuthUser(input) {
+  const user = await effectiveAuthUser(String(input?.username || ""));
+  if (!user || !verifyAuthPassword(user, input?.password)) {
+    return null;
+  }
+
+  return user;
+}
+
+async function updateAuthUserPassword(username, newPassword) {
+  const user = baseAuthUser(username);
+  if (!user) return false;
+
+  const records = await loadPasswordRecords();
+  const nextRecord = {
+    username: user.username,
+    ...hashPassword(newPassword),
+    updatedAt: new Date().toISOString()
+  };
+  const index = records.findIndex((record) => safeEquals(record.username, user.username));
+  if (index === -1) {
+    records.push(nextRecord);
+  } else {
+    records[index] = nextRecord;
+  }
+  await savePasswordRecords(records);
+  return true;
+}
+
+function expireOtherSessionsForUser(username, currentToken) {
+  for (const [token, session] of sessions.entries()) {
+    if (token !== currentToken && safeEquals(session?.user?.username, username)) {
+      sessions.delete(token);
+    }
+  }
 }
 
 function readBody(req) {
@@ -634,7 +732,8 @@ async function prepareDataStorage() {
     seedStoredDataFile(dataFiles.clients),
     seedStoredDataFile(dataFiles.photographers),
     seedStoredDataFile(dataFiles.work),
-    seedStoredDataFile(dataFiles.invoices)
+    seedStoredDataFile(dataFiles.invoices),
+    seedStoredDataFile(dataFiles.users)
   ]);
 }
 
@@ -2847,7 +2946,7 @@ async function handleApi(req, res, url) {
 
   if (req.method === "POST" && url.pathname === "/api/login") {
     const input = await readBody(req);
-    const user = findAuthUser(input);
+    const user = await findAuthUser(input);
     if (!user) {
       sendJson(res, 401, { errors: ["Login details did not match."] });
       return;
@@ -2892,6 +2991,40 @@ async function handleApi(req, res, url) {
 
   if (!isAuthenticated(req)) {
     sendJson(res, 401, { errors: ["Log in first."] });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/change-password") {
+    const input = await readBody(req);
+    const currentPassword = String(input.currentPassword || "");
+    const newPassword = String(input.newPassword || "");
+    const confirmPassword = String(input.confirmPassword || "");
+    const user = currentUser(req);
+
+    if (!currentPassword || !newPassword) {
+      sendJson(res, 400, { errors: ["Enter your current password and your new password."] });
+      return;
+    }
+
+    if (newPassword.length < 4) {
+      sendJson(res, 400, { errors: ["Use at least 4 characters for the new password."] });
+      return;
+    }
+
+    if (confirmPassword !== newPassword) {
+      sendJson(res, 400, { errors: ["The new passwords do not match."] });
+      return;
+    }
+
+    const authUser = await effectiveAuthUser(user.username);
+    if (!authUser || !verifyAuthPassword(authUser, currentPassword)) {
+      sendJson(res, 400, { errors: ["Current password is not correct."] });
+      return;
+    }
+
+    await updateAuthUserPassword(user.username, newPassword);
+    expireOtherSessionsForUser(user.username, getSessionToken(req));
+    sendJson(res, 200, { ok: true, message: "Password updated." });
     return;
   }
 

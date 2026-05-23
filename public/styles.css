@@ -144,19 +144,30 @@ button:disabled {
   color: var(--red);
 }
 
+.nav-account-action {
+  margin-left: auto;
+  color: var(--accent-dark);
+}
+
 .nav-status {
   margin-left: auto;
   background: rgba(17, 122, 93, 0.08);
   color: var(--accent-dark);
 }
 
-.nav-status + .nav-action {
+.nav-status + .nav-action,
+.nav-account-action + .nav-action {
   margin-left: 0;
 }
 
 .nav-action:hover {
   background: rgba(166, 64, 58, 0.08);
   color: var(--red);
+}
+
+.nav-account-action:hover {
+  background: rgba(17, 122, 93, 0.08);
+  color: var(--accent-dark);
 }
 
 .login-body {
@@ -958,7 +969,8 @@ button:focus-visible {
 #formMessage,
 #clientMessage,
 #photographerMessage,
-#loginMessage {
+#loginMessage,
+#passwordMessage {
   min-height: 22px;
   margin: 0;
   color: var(--muted);
@@ -968,14 +980,16 @@ button:focus-visible {
 #formMessage.error,
 #clientMessage.error,
 #photographerMessage.error,
-#loginMessage.error {
+#loginMessage.error,
+#passwordMessage.error {
   color: var(--red);
 }
 
 #formMessage.success,
 #clientMessage.success,
 #photographerMessage.success,
-#loginMessage.success {
+#loginMessage.success,
+#passwordMessage.success {
   color: var(--accent-dark);
 }
 
@@ -1536,6 +1550,11 @@ dialog::backdrop {
   font-weight: 800;
 }
 
+.password-form {
+  display: grid;
+  gap: 14px;
+}
+
 .dialog-actions {
   justify-content: space-between;
   gap: 14px;
@@ -1804,6 +1823,10 @@ dialog::backdrop {
   }
 
   .nav-action {
+    margin-left: 0;
+  }
+
+  .nav-account-action {
     margin-left: 0;
   }
 
