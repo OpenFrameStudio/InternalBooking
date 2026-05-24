@@ -145,9 +145,9 @@ const contentTypes = {
 const serviceCatalog = new Set(["Photography", "Floorplan", "Drone", "Siteplan"]);
 const invoiceServicePrices = {
   Photography: 150,
-  Floorplan: 50,
-  Drone: 50,
-  Siteplan: 0
+  Floorplan: 75,
+  Drone: 100,
+  Siteplan: 25
 };
 const invoiceGstRate = 0.1;
 const invoiceCurrency = "AUD";
@@ -159,6 +159,7 @@ const defaultPhotographers = [
     name: "Barry",
     email: process.env.DEFAULT_PHOTOGRAPHER_EMAIL || "",
     phone: "0403 007 853",
+    gstIncluded: false,
     createdAt: "2026-05-16T00:00:00.000+10:00",
     updatedAt: "2026-05-16T00:00:00.000+10:00"
   }
@@ -791,16 +792,35 @@ async function saveClients(clients) {
   await writeStoredJson(dataFiles.clients, clients);
 }
 
+function normalizePhotographer(photographer) {
+  return {
+    id: String(photographer?.id || crypto.randomUUID()),
+    name: String(photographer?.name || photographer?.photographerName || "").trim(),
+    email: String(photographer?.email || photographer?.photographerEmail || "").trim(),
+    phone: String(photographer?.phone || photographer?.photographerPhone || "").trim(),
+    gstIncluded: normalizeEnvBoolean(photographer?.gstIncluded ?? photographer?.photographerGstIncluded, false),
+    createdAt: photographer?.createdAt || new Date().toISOString(),
+    updatedAt: photographer?.updatedAt || photographer?.createdAt || new Date().toISOString()
+  };
+}
+
+function normalizePhotographers(photographers) {
+  return Array.isArray(photographers)
+    ? photographers.map(normalizePhotographer).filter((photographer) => photographer.name)
+    : [];
+}
+
 async function loadPhotographers() {
   try {
-    return await readStoredJson(dataFiles.photographers);
+    const photographers = await readStoredJson(dataFiles.photographers);
+    return normalizePhotographers(photographers);
   } catch (error) {
     throw error;
   }
 }
 
 async function savePhotographers(photographers) {
-  await writeStoredJson(dataFiles.photographers, photographers);
+  await writeStoredJson(dataFiles.photographers, normalizePhotographers(photographers));
 }
 
 async function loadInvoices() {
@@ -1620,6 +1640,20 @@ function normalizeWage(wage) {
       }))
     : [];
   const total = normalizeMoney(wage?.total ?? items.reduce((sum, item) => sum + item.amount, 0));
+  const rawGstIncluded = wage?.photographerGstIncluded ?? wage?.gstIncluded;
+  const photographerGstIncluded = rawGstIncluded === undefined || rawGstIncluded === null || rawGstIncluded === ""
+    ? Number(wage?.gstAmount || 0) > 0
+    : normalizeEnvBoolean(rawGstIncluded, false);
+  const gstRate = photographerGstIncluded ? invoiceGstRate : 0;
+  const calculatedGstAmount = photographerGstIncluded
+    ? normalizeMoney(total - (total / (1 + invoiceGstRate)))
+    : 0;
+  const gstAmount = photographerGstIncluded
+    ? normalizeMoney(wage?.gstAmount ?? calculatedGstAmount)
+    : 0;
+  const subtotal = photographerGstIncluded
+    ? normalizeMoney(wage?.subtotal ?? total - gstAmount)
+    : total;
 
   return {
     id: wage?.id || crypto.randomUUID(),
@@ -1635,8 +1669,12 @@ function normalizeWage(wage) {
     bookingEndAt: wage?.bookingEndAt || "",
     services: Array.isArray(wage?.services) ? wage.services.map(String).filter(Boolean) : [],
     items,
+    subtotal,
+    gstRate,
+    gstAmount,
     total,
     currency: wage?.currency || wageCurrency,
+    photographerGstIncluded,
     status: normalizeWageStatus(wage?.status),
     issuedAt: wage?.issuedAt || new Date().toISOString(),
     dueAt: wage?.dueAt || addDays(new Date(), 7).toISOString(),
@@ -1682,8 +1720,8 @@ function photographerWageItems(booking) {
     items.push({
       name: "Photography",
       quantity: 1,
-      unitPrice: 80,
-      amount: 80
+      unitPrice: 90,
+      amount: 90
     });
   }
 
@@ -1714,6 +1752,9 @@ function wageFromBooking(booking, wages, existing = null) {
   const existingItems = Array.isArray(existing?.items) ? existing.items : [];
   const items = isPaid ? existingItems : photographerWageItems(booking);
   const total = normalizeMoney(items.reduce((sum, item) => sum + item.amount, 0));
+  const photographerGstIncluded = isPaid
+    ? normalizeEnvBoolean(existing?.photographerGstIncluded ?? existing?.gstIncluded, false)
+    : normalizeEnvBoolean(booking.photographerGstIncluded, false);
   const status = booking.status === "cancelled"
     ? (isPaid ? "paid" : "void")
     : (isPaid ? "paid" : "draft");
@@ -1729,10 +1770,14 @@ function wageFromBooking(booking, wages, existing = null) {
     photographerName: booking.photographerName || "",
     photographerEmail: booking.photographerEmail || "",
     photographerPhone: booking.photographerPhone || "",
+    photographerGstIncluded,
     bookingStartAt: booking.startAt || "",
     bookingEndAt: booking.endAt || "",
     services: bookingServiceNames(booking),
     items,
+    subtotal: undefined,
+    gstRate: undefined,
+    gstAmount: undefined,
     total,
     currency: wageCurrency,
     status,
@@ -1809,11 +1854,16 @@ function buildWageEmailSubject(wage) {
 }
 
 function buildWageEmailText(wage) {
+  const gstLine = wage.photographerGstIncluded
+    ? `GST included in total: ${formatInvoiceMoney(wage.gstAmount)}.`
+    : "GST: not included.";
+
   return [
     `Hi ${wage.photographerName || "there"},`,
     "",
     `Please find attached proforma ${wage.wageNumber} for ${wage.propertyAddress || "your booking"}.`,
     `Amount: ${formatInvoiceMoney(wage.total)}.`,
+    gstLine,
     "",
     "Thank you,",
     "OpenFrame Studio"
@@ -1821,11 +1871,16 @@ function buildWageEmailText(wage) {
 }
 
 function buildWageEmailHtml(wage) {
+  const gstLine = wage.photographerGstIncluded
+    ? `GST included in total: ${formatInvoiceMoney(wage.gstAmount)}.`
+    : "GST: not included.";
+
   return `
     <div style="font-family:Arial,sans-serif;color:#111611;line-height:1.5">
       <p>Hi ${escapeHtmlForEmail(wage.photographerName || "there")},</p>
       <p>Please find attached proforma <strong>${escapeHtmlForEmail(wage.wageNumber)}</strong> for ${escapeHtmlForEmail(wage.propertyAddress || "your booking")}.</p>
       <p><strong>Amount: ${escapeHtmlForEmail(formatInvoiceMoney(wage.total))}.</strong></p>
+      <p>${escapeHtmlForEmail(gstLine)}</p>
       <p>Thank you,<br />OpenFrame Studio</p>
     </div>
   `;
@@ -1913,12 +1968,34 @@ function drawWagePdf(doc, wage) {
     rowY += rowHeight;
   }
 
-  const totalX = 356;
-  const totalY = Math.max(rowY + 36, 560);
-  doc.lineWidth(1.4).strokeColor("#000").rect(totalX, totalY, 187, 42).stroke();
-  doc.font("Helvetica-Bold").fontSize(11).fillColor("#000");
-  drawPdfCell(doc, "Total Payable", totalX, totalY, 98, 42, { align: "center" });
-  drawPdfCell(doc, formatInvoiceMoney(wage.total), totalX + 98, totalY, 89, 42, { align: "center" });
+  const totalX = 332;
+  const totalY = Math.max(rowY + 32, 540);
+  const totalRowHeight = 24;
+  const totalRows = [
+    {
+      label: wage.photographerGstIncluded ? "Subtotal ex GST" : "Subtotal",
+      amount: formatInvoiceMoney(wage.subtotal ?? wage.total),
+      bold: false
+    },
+    {
+      label: "GST",
+      amount: wage.photographerGstIncluded ? formatInvoiceMoney(wage.gstAmount) : "No GST",
+      bold: false
+    },
+    {
+      label: "Total Payable",
+      amount: formatInvoiceMoney(wage.total),
+      bold: true
+    }
+  ];
+  doc.lineWidth(1.4).strokeColor("#000").rect(totalX, totalY, 211, totalRowHeight * totalRows.length).stroke();
+  totalRows.forEach((row, index) => {
+    const y = totalY + index * totalRowHeight;
+    if (index > 0) doc.moveTo(totalX, y).lineTo(totalX + 211, y).lineWidth(1).stroke("#d3ddd8");
+    doc.font(row.bold ? "Helvetica-Bold" : "Helvetica").fontSize(10.5).fillColor("#000");
+    drawPdfCell(doc, row.label, totalX, y, 112, totalRowHeight, { align: "left", paddingY: 4 });
+    drawPdfCell(doc, row.amount, totalX + 112, y, 99, totalRowHeight, { align: "right", paddingY: 4 });
+  });
 
   doc.save();
   doc.rotate(-10, { origin: [144, 620] });
@@ -2740,7 +2817,8 @@ function validatePhotographer(input) {
     id: String(input.id || "").trim(),
     name: String(input.name || input.photographerName || "").trim(),
     email: String(input.email || input.photographerEmail || "").trim(),
-    phone: String(input.phone || input.photographerPhone || "").trim()
+    phone: String(input.phone || input.photographerPhone || "").trim(),
+    gstIncluded: normalizeEnvBoolean(input.gstIncluded ?? input.photographerGstIncluded, false)
   };
 
   if (!photographer.name) {
@@ -2768,6 +2846,7 @@ function validateBooking(input) {
   const photographerName = String(input.photographerName || "Barry").trim();
   const photographerEmail = String(input.photographerEmail || "").trim();
   const photographerPhone = String(input.photographerPhone || "").trim();
+  const photographerGstIncluded = normalizeEnvBoolean(input.photographerGstIncluded ?? input.gstIncluded, false);
   const agentName = String(input.agentName || "").trim();
   const agentPhone = String(input.agentPhone || "").trim();
   const rawGuestEmails = parseGuestEmails(input.guestEmails);
@@ -2830,6 +2909,7 @@ function validateBooking(input) {
       photographerName,
       photographerEmail,
       photographerPhone,
+      photographerGstIncluded,
       agentName,
       agentPhone,
       guestEmails,
@@ -4054,6 +4134,7 @@ async function handleApi(req, res, url) {
         name: photographer.name,
         email: photographer.email,
         phone: photographer.phone,
+        gstIncluded: photographer.gstIncluded,
         updatedAt: now
       };
     } else {
@@ -4062,6 +4143,7 @@ async function handleApi(req, res, url) {
         name: photographer.name,
         email: photographer.email,
         phone: photographer.phone,
+        gstIncluded: photographer.gstIncluded,
         createdAt: now,
         updatedAt: now
       });
@@ -4069,7 +4151,9 @@ async function handleApi(req, res, url) {
 
     photographers.sort((a, b) => a.name.localeCompare(b.name));
     await savePhotographers(photographers);
-    const savedPhotographer = photographers.find((item) => item.name.toLowerCase() === photographer.name.toLowerCase());
+    const savedPhotographer = photographer.id
+      ? photographers.find((item) => item.id === photographer.id)
+      : photographers.find((item) => item.name.toLowerCase() === photographer.name.toLowerCase());
     sendJson(res, 200, { photographer: savedPhotographer, photographers });
     return;
   }

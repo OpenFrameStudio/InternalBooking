@@ -880,6 +880,34 @@ textarea:focus {
   box-shadow: 0 0 0 4px rgba(55, 103, 143, 0.14);
 }
 
+.toggle-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 36px;
+  color: var(--muted);
+  font-weight: 850;
+}
+
+.toggle-field input {
+  width: 18px;
+  min-height: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  padding: 0;
+  border-radius: 4px;
+  box-shadow: none;
+  accent-color: var(--accent);
+}
+
+.toggle-field span {
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 850;
+}
+
 button:focus-visible {
   border-color: var(--blue);
   box-shadow: 0 0 0 4px rgba(55, 103, 143, 0.14);

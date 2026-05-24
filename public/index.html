@@ -219,6 +219,10 @@
                     <input name="photographerPhone" id="photographerPhoneInput" autocomplete="tel" value="0403 007 853" />
                   </label>
                 </div>
+                <label class="toggle-field">
+                  <input name="photographerGstIncluded" id="photographerGstIncludedInput" type="checkbox" value="true" />
+                  <span>Photographer wage includes GST</span>
+                </label>
 
                 <p class="helper-text">Photographer email is included in guest emails automatically, and the phone number goes into the Lark description.</p>
               </section>
@@ -366,6 +370,10 @@
                 <input id="directoryPhotographerPhone" placeholder="0416 208 771" />
               </label>
             </div>
+            <label class="toggle-field">
+              <input id="directoryPhotographerGstIncluded" type="checkbox" />
+              <span>Wage includes GST for this photographer</span>
+            </label>
 
             <div class="actions">
               <button class="primary-button" type="submit">Save photographer</button>
@@ -619,6 +627,6 @@
 
     <section class="invoice-print-sheet" id="invoicePrintSheet" hidden aria-label="Printable invoice"></section>
 
-    <script src="/app.js?v=wage-proforma" type="module"></script>
+    <script src="/app.js?v=pricing-gst-wages" type="module"></script>
   </body>
 </html>

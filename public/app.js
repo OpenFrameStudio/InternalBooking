@@ -44,6 +44,7 @@ const el = {
   photographerName: $('#photographerNameInput'),
   photographerEmail: $('#photographerEmailInput'),
   photographerPhone: $('#photographerPhoneInput'),
+  photographerGstIncluded: $('#photographerGstIncludedInput'),
   guestEmails: $('#guestEmailsInput'),
   invitationEmails: $('#invitationEmails'),
   clientForm: $('#clientForm'),
@@ -59,6 +60,7 @@ const el = {
   directoryPhotographerName: $('#directoryPhotographerName'),
   directoryPhotographerEmail: $('#directoryPhotographerEmail'),
   directoryPhotographerPhone: $('#directoryPhotographerPhone'),
+  directoryPhotographerGstIncluded: $('#directoryPhotographerGstIncluded'),
   invoiceList: $('#invoiceList'),
   invoiceMessage: $('#invoiceMessage'),
   invoiceDraftCount: $('#invoiceDraftCount'),
@@ -162,6 +164,14 @@ const dayFormatter = new Intl.DateTimeFormat(undefined, { day: '2-digit' });
 const invoiceDateFormatter = new Intl.DateTimeFormat('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
 const currencyFormatter = new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' });
 const bookingUpcomingGraceMs = 24 * 60 * 60 * 1000;
+
+function isTruthy(value) {
+  return value === true || ['1', 'true', 'yes', 'on'].includes(String(value || '').trim().toLowerCase());
+}
+
+function wageGstLabel(value) {
+  return isTruthy(value) ? 'GST included' : 'No GST';
+}
 
 function readStored(key, fallback) {
   try {
@@ -758,7 +768,7 @@ function renderPhotographerDropdown() {
       .map((photographer) => ({
         id: photographer.id,
         title: photographer.name,
-        meta: [photographer.email, photographer.phone].filter(Boolean).join(' · ')
+        meta: [photographer.email, photographer.phone, wageGstLabel(photographer.gstIncluded)].filter(Boolean).join(' · ')
       }))
   ];
 
@@ -857,7 +867,7 @@ function renderPhotographerList() {
     const item = el.photographerTemplate.content.firstElementChild.cloneNode(true);
     item.querySelector('h3').textContent = photographer.name;
     item.querySelector('.photographer-email').textContent = photographer.email || '';
-    item.querySelector('.photographer-phone').textContent = photographer.phone ? `Phone: ${photographer.phone}` : '';
+    item.querySelector('.photographer-phone').textContent = [photographer.phone ? `Phone: ${photographer.phone}` : '', wageGstLabel(photographer.gstIncluded)].filter(Boolean).join(' · ');
     item.querySelector('.edit-photographer-button').addEventListener('click', () => editPhotographer(photographer.id));
     item.querySelector('.delete-photographer-button').addEventListener('click', () => deletePhotographer(photographer.id));
     el.photographerList.append(item);
@@ -897,6 +907,7 @@ function applySelectedPhotographer() {
   el.photographerName.value = photographer.name || '';
   el.photographerEmail.value = photographer.email || '';
   el.photographerPhone.value = photographer.phone || '';
+  el.photographerGstIncluded.checked = isTruthy(photographer.gstIncluded);
   syncManagedGuestEmail(el.photographerEmail, 'syncedPhotographerEmail');
   renderPhotographerDropdown();
 }
@@ -918,6 +929,7 @@ function getDraft() {
     photographerName: el.photographerName.value,
     photographerEmail: el.photographerEmail.value,
     photographerPhone: el.photographerPhone.value,
+    photographerGstIncluded: el.photographerGstIncluded.checked,
     guestEmails: el.guestEmails.value,
     notes: data.notes || ''
   };
@@ -980,6 +992,11 @@ function fillBookingForm(booking) {
   el.photographerName.value = booking.photographerName || matchingPhotographer?.name || 'Barry';
   el.photographerEmail.value = booking.photographerEmail || matchingPhotographer?.email || '';
   el.photographerPhone.value = booking.photographerPhone || matchingPhotographer?.phone || '0403 007 853';
+  el.photographerGstIncluded.checked = isTruthy(
+    booking.photographerGstIncluded !== undefined
+      ? booking.photographerGstIncluded
+      : matchingPhotographer?.gstIncluded
+  );
   setSelectedServices(booking);
 
   const start = new Date(booking.startAt);
@@ -1013,6 +1030,7 @@ function resetBookingForm(message = '') {
   });
   state.syncedClientEmail = [];
   state.syncedPhotographerEmail = [];
+  el.photographerGstIncluded.checked = false;
   setInitialDateTime();
   updateDurationForServices();
   applyExamplePlaceholders();
@@ -1046,6 +1064,7 @@ function buildBookingPayload() {
   data.photographerName = el.photographerName.value.trim();
   data.photographerEmail = el.photographerEmail.value.trim();
   data.photographerPhone = el.photographerPhone.value.trim();
+  data.photographerGstIncluded = el.photographerGstIncluded.checked;
   data.guestEmails = el.guestEmails.value;
   data.services = selectedServices();
   data.durationMinutes = Number(el.duration.value);
@@ -1233,7 +1252,10 @@ function renderWages() {
     item.querySelector('.invoice-status').classList.toggle('void', wage.status === 'void');
     item.querySelector('.wage-photographer').textContent = [wage.photographerName, wage.photographerEmail].filter(Boolean).join(' - ') || 'No photographer email';
     item.querySelector('.wage-booking').textContent = `Issued ${formatInvoiceDate(wage.issuedAt)} - ${invoiceBookingLabel(wage)}`;
-    item.querySelector('.wage-services').textContent = (wage.items || []).map((item) => `${item.name} ${formatMoney(item.amount)}`).join(' + ') || 'No wage items';
+    item.querySelector('.wage-services').textContent = [
+      (wage.items || []).map((item) => `${item.name} ${formatMoney(item.amount)}`).join(' + '),
+      isTruthy(wage.photographerGstIncluded) ? `GST included ${formatMoney(wage.gstAmount || 0)}` : 'No GST'
+    ].filter(Boolean).join(' - ') || 'No wage items';
     const sentLine = item.querySelector('.wage-sent');
     if (wage.sentAt) {
       const sentTo = Array.isArray(wage.sentTo) && wage.sentTo.length ? ` to ${wage.sentTo.join(', ')}` : '';
@@ -1244,7 +1266,7 @@ function renderWages() {
       sentLine.hidden = true;
     }
     item.querySelector('.invoice-total strong').textContent = formatMoney(wage.total);
-    item.querySelector('.invoice-total small').textContent = `${wage.currency || 'AUD'} wage`;
+    item.querySelector('.invoice-total small').textContent = `${wage.currency || 'AUD'} ${wageGstLabel(wage.photographerGstIncluded).toLowerCase()}`;
 
     item.querySelector('.print-wage-button').addEventListener('click', () => printWage(wage.id));
     const sendButton = item.querySelector('.send-wage-button');
@@ -1757,7 +1779,8 @@ async function saveDirectoryPhotographer(event) {
     id: el.directoryPhotographerId.value || undefined,
     name: el.directoryPhotographerName.value.trim(),
     email: el.directoryPhotographerEmail.value.trim(),
-    phone: el.directoryPhotographerPhone.value.trim()
+    phone: el.directoryPhotographerPhone.value.trim(),
+    gstIncluded: el.directoryPhotographerGstIncluded.checked
   };
   if (!payload.name) {
     setMessage(el.photographerMessage, 'Enter the photographer name before saving.', 'error');
@@ -1785,6 +1808,7 @@ async function saveDirectoryPhotographer(event) {
     applySelectedPhotographer();
     el.photographerForm.reset();
     el.directoryPhotographerId.value = '';
+    el.directoryPhotographerGstIncluded.checked = false;
     applyExamplePlaceholders();
     setMessage(el.photographerMessage, 'Photographer saved for bookings.', 'success');
   } catch {
@@ -1813,6 +1837,7 @@ function editPhotographer(id) {
   el.directoryPhotographerName.value = photographer.name || '';
   el.directoryPhotographerEmail.value = photographer.email || '';
   el.directoryPhotographerPhone.value = photographer.phone || '';
+  el.directoryPhotographerGstIncluded.checked = isTruthy(photographer.gstIncluded);
   setMessage(el.photographerMessage, 'Editing saved photographer.');
 }
 
@@ -1873,6 +1898,7 @@ async function deletePhotographer(id) {
     if (el.directoryPhotographerId.value === id) {
       el.photographerForm.reset();
       el.directoryPhotographerId.value = '';
+      el.directoryPhotographerGstIncluded.checked = false;
     }
     renderPhotographerOptions();
     renderPhotographerList();
@@ -2176,6 +2202,7 @@ el.newClientButton.addEventListener('click', () => {
 el.newPhotographerButton.addEventListener('click', () => {
   el.photographerForm.reset();
   el.directoryPhotographerId.value = '';
+  el.directoryPhotographerGstIncluded.checked = false;
   applyExamplePlaceholders();
   setMessage(el.photographerMessage, '');
 });
