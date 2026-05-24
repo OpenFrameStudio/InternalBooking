@@ -1242,6 +1242,57 @@ function syncInvoicesFromBookings(invoices, bookings) {
   return { created, updated, total: invoices.length };
 }
 
+function bookingHasPassed(booking, now = Date.now()) {
+  const endSource = booking?.endAt || (
+    booking?.startAt && booking?.durationMinutes
+      ? getEndAt(booking.startAt, Number(booking.durationMinutes))
+      : ""
+  );
+  const endDate = new Date(endSource);
+  return !Number.isNaN(endDate.getTime()) && endDate.getTime() < now;
+}
+
+function invoiceIsForPastBooking(invoice, pastBookingIds, now = Date.now()) {
+  if (invoice?.bookingId && pastBookingIds.has(invoice.bookingId)) {
+    return true;
+  }
+
+  const endDate = new Date(invoice?.bookingEndAt || "");
+  return !Number.isNaN(endDate.getTime()) && endDate.getTime() < now;
+}
+
+async function deletePastBookingsAndInvoices() {
+  const now = Date.now();
+  const bookings = await loadBookings();
+  const pastBookingIds = new Set(
+    bookings
+      .filter((booking) => bookingHasPassed(booking, now))
+      .map((booking) => booking.id)
+      .filter(Boolean)
+  );
+  const nextBookings = bookings.filter((booking) => !pastBookingIds.has(booking.id));
+
+  const invoices = await loadInvoices();
+  const nextInvoices = invoices.filter((invoice) => !invoiceIsForPastBooking(invoice, pastBookingIds, now));
+
+  if (nextBookings.length !== bookings.length) {
+    await saveBookings(nextBookings);
+  }
+
+  if (nextInvoices.length !== invoices.length) {
+    await saveInvoices(nextInvoices);
+  }
+
+  return {
+    cutoff: new Date(now).toISOString(),
+    removedBookingIds: [...pastBookingIds],
+    removedBookings: bookings.length - nextBookings.length,
+    removedInvoices: invoices.length - nextInvoices.length,
+    remainingBookings: nextBookings.length,
+    remainingInvoices: nextInvoices.length
+  };
+}
+
 function invoiceEmailMissingSettings() {
   const missing = [];
   if (invoiceEmailProvider === "resend") {
@@ -3540,6 +3591,17 @@ async function handleApi(req, res, url) {
     await updateAuthUserPassword(user.username, newPassword);
     expireOtherSessionsForUser(user.username, getSessionToken(req));
     sendJson(res, 200, { ok: true, message: "Password updated." });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/cleanup/past-bookings-invoices") {
+    if (!hasPermission(req, "manage_bookings") || !hasPermission(req, "manage_invoices")) {
+      sendForbidden(res, "Boss only.");
+      return;
+    }
+
+    const result = await deletePastBookingsAndInvoices();
+    sendJson(res, 200, result);
     return;
   }
 
