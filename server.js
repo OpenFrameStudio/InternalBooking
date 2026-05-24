@@ -1,15 +1,18 @@
 import http from "node:http";
-import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
-import { createReadStream, readFileSync } from "node:fs";
+import { stat } from "node:fs/promises";
+import { createReadStream } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import crypto from "node:crypto";
+import { loadLocalEnv, normalizeEnvBoolean } from "./src/env.js";
+import { parseCookies, readBody, redirect, sendJson, sendNoContent } from "./src/http.js";
+import { createStorage } from "./src/storage.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const publicDir = path.join(__dirname, "public");
 
-loadLocalEnv();
+loadLocalEnv(__dirname);
 
 const bundledDataDir = path.join(__dirname, "data");
 const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : bundledDataDir;
@@ -219,59 +222,12 @@ const dataFiles = {
   }
 };
 
-function loadLocalEnv() {
-  try {
-    const raw = readFileSync(path.join(__dirname, ".env"), "utf8");
-    for (const line of raw.split(/\r?\n/)) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) {
-        continue;
-      }
-
-      const equalsAt = trimmed.indexOf("=");
-      if (equalsAt === -1) {
-        continue;
-      }
-
-      const key = trimmed.slice(0, equalsAt).trim();
-      let value = trimmed.slice(equalsAt + 1).trim();
-      if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-        value = value.slice(1, -1);
-      }
-
-      if (key && process.env[key] === undefined) {
-        process.env[key] = value;
-      }
-    }
-  } catch (error) {
-    if (error.code !== "ENOENT") {
-      console.warn(`Could not load .env: ${error.message}`);
-    }
-  }
-}
-
-function normalizeEnvBoolean(value, fallback = false) {
-  if (value === undefined || value === null || value === "") {
-    return fallback;
-  }
-
-  return ["1", "true", "yes", "on"].includes(String(value).trim().toLowerCase());
-}
-
-function sendJson(res, status, payload, headers = {}) {
-  const body = JSON.stringify(payload);
-  res.writeHead(status, {
-    "Content-Type": "application/json; charset=utf-8",
-    "Content-Length": Buffer.byteLength(body),
-    ...headers
-  });
-  res.end(body);
-}
-
-function sendNoContent(res) {
-  res.writeHead(204);
-  res.end();
-}
+const { prepareDataStorage, readStoredJson, writeStoredJson } = createStorage({
+  dataDir,
+  dataFiles,
+  storageBackend,
+  supabaseStorage
+});
 
 function applyCorsHeaders(req, res) {
   const origin = req.headers.origin || "";
@@ -284,33 +240,6 @@ function applyCorsHeaders(req, res) {
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type,Accept");
   res.setHeader("Vary", "Origin");
-}
-
-function redirect(res, location) {
-  res.writeHead(302, {
-    Location: location,
-    "Cache-Control": "no-store"
-  });
-  res.end();
-}
-
-function parseCookies(header = "") {
-  const cookies = {};
-
-  for (const part of header.split(";")) {
-    const [rawKey, ...rawValue] = part.trim().split("=");
-    if (!rawKey) {
-      continue;
-    }
-
-    try {
-      cookies[rawKey] = decodeURIComponent(rawValue.join("="));
-    } catch {
-      cookies[rawKey] = rawValue.join("=");
-    }
-  }
-
-  return cookies;
 }
 
 function isSecureRequest(req) {
@@ -538,177 +467,6 @@ function expireOtherSessionsForUser(username, currentToken) {
       sessions.delete(token);
     }
   }
-}
-
-function readBody(req) {
-  return new Promise((resolve, reject) => {
-    let data = "";
-    req.on("data", (chunk) => {
-      data += chunk;
-      if (data.length > 1_000_000) {
-        reject(new Error("Request body is too large."));
-        req.destroy();
-      }
-    });
-    req.on("end", () => {
-      if (!data) {
-        resolve({});
-        return;
-      }
-
-      try {
-        resolve(JSON.parse(data));
-      } catch {
-        reject(new Error("Request body must be valid JSON."));
-      }
-    });
-    req.on("error", reject);
-  });
-}
-
-async function readJsonFile(filePath, fallback) {
-  try {
-    const raw = await readFile(filePath, "utf8");
-    return JSON.parse(raw);
-  } catch (error) {
-    if (error.code === "ENOENT") {
-      return fallback;
-    }
-    throw error;
-  }
-}
-
-async function writeJsonFile(filePath, value) {
-  await mkdir(path.dirname(filePath), { recursive: true });
-  const tempFile = `${filePath}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(tempFile, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-  await rename(tempFile, filePath);
-}
-
-function supabaseTableUrl(query = "") {
-  const tableName = encodeURIComponent(supabaseStorage.table);
-  return `${supabaseStorage.url}/rest/v1/${tableName}${query}`;
-}
-
-function supabaseHeaders(extra = {}) {
-  return {
-    apikey: supabaseStorage.key,
-    Authorization: `Bearer ${supabaseStorage.key}`,
-    "Content-Type": "application/json",
-    ...extra
-  };
-}
-
-async function parseSupabaseError(response) {
-  const data = await response.json().catch(() => ({}));
-  return data.message || data.details || `Supabase storage request failed with ${response.status}.`;
-}
-
-function supabaseKey(dataFile) {
-  return dataFile.supabaseKey || path.basename(dataFile.file, ".json");
-}
-
-async function readSupabaseJson(key, fallback) {
-  const response = await fetch(supabaseTableUrl(`?namespace=eq.${encodeURIComponent(key)}&select=payload&limit=1`), {
-    headers: supabaseHeaders()
-  });
-
-  if (!response.ok) {
-    throw new Error(await parseSupabaseError(response));
-  }
-
-  const rows = await response.json();
-  return rows[0]?.payload ?? fallback;
-}
-
-async function writeSupabaseJson(key, value) {
-  const response = await fetch(supabaseTableUrl("?on_conflict=namespace"), {
-    method: "POST",
-    headers: supabaseHeaders({ Prefer: "resolution=merge-duplicates,return=minimal" }),
-    body: JSON.stringify([{
-      namespace: key,
-      payload: value,
-      updated_at: new Date().toISOString()
-    }])
-  });
-
-  if (!response.ok) {
-    throw new Error(await parseSupabaseError(response));
-  }
-}
-
-async function seedSupabaseDataFile(dataFile) {
-  const key = supabaseKey(dataFile);
-  const existing = await readSupabaseJson(key, undefined);
-  if (existing !== undefined) {
-    return;
-  }
-
-  const seed = await readJsonFile(dataFile.seedFile, dataFile.fallback);
-  await writeSupabaseJson(key, seed);
-}
-
-async function fileExists(filePath) {
-  try {
-    await stat(filePath);
-    return true;
-  } catch (error) {
-    if (error.code === "ENOENT") {
-      return false;
-    }
-    throw error;
-  }
-}
-
-async function seedDataFile(targetFile, seedFile, fallback) {
-  if (await fileExists(targetFile)) {
-    return;
-  }
-
-  const seed = await readJsonFile(seedFile, fallback);
-  await writeJsonFile(targetFile, seed);
-}
-
-async function readStoredJson(dataFile) {
-  if (storageBackend === "supabase") {
-    return readSupabaseJson(supabaseKey(dataFile), dataFile.fallback);
-  }
-
-  return readJsonFile(dataFile.file, dataFile.fallback);
-}
-
-async function writeStoredJson(dataFile, value) {
-  if (storageBackend === "supabase") {
-    await writeSupabaseJson(supabaseKey(dataFile), value);
-    return;
-  }
-
-  await writeJsonFile(dataFile.file, value);
-}
-
-async function seedStoredDataFile(dataFile) {
-  if (storageBackend === "supabase") {
-    await seedSupabaseDataFile(dataFile);
-    return;
-  }
-
-  await seedDataFile(dataFile.file, dataFile.seedFile, dataFile.fallback);
-}
-
-async function prepareDataStorage() {
-  if (storageBackend !== "supabase") {
-    await mkdir(dataDir, { recursive: true });
-  }
-
-  await Promise.all([
-    seedStoredDataFile(dataFiles.bookings),
-    seedStoredDataFile(dataFiles.clients),
-    seedStoredDataFile(dataFiles.photographers),
-    seedStoredDataFile(dataFiles.work),
-    seedStoredDataFile(dataFiles.invoices),
-    seedStoredDataFile(dataFiles.wages),
-    seedStoredDataFile(dataFiles.users)
-  ]);
 }
 
 async function loadBookings() {
