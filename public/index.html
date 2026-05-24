@@ -23,6 +23,7 @@
         <a class="nav-link" href="/clients" data-route="/clients" data-app-link="clients">Clients</a>
         <a class="nav-link" href="/photographers" data-route="/photographers" data-app-link="photographers">Photographers</a>
         <a class="nav-link" href="/invoices" data-route="/invoices" data-app-link="invoices">Invoices</a>
+        <a class="nav-link" href="/wages" data-route="/wages" data-app-link="wages">Wages</a>
         <a class="nav-link" href="/work/" data-app-link="work">Work</a>
         <button class="nav-link nav-account-action" id="changePasswordButton" type="button">Change password</button>
         <button class="nav-link nav-action" id="logoutButton" type="button">Log out</button>
@@ -154,6 +155,12 @@
                   <input name="services" type="checkbox" value="Drone" />
                   <span>
                     <strong>Drone</strong>
+                  </span>
+                </label>
+                <label class="service-option">
+                  <input name="services" type="checkbox" value="Siteplan" />
+                  <span>
+                    <strong>Siteplan</strong>
                   </span>
                 </label>
               </fieldset>
@@ -424,6 +431,51 @@
           <div class="invoice-list" id="invoiceList"></div>
         </section>
       </section>
+
+      <section class="app-page" id="wagesPage" hidden>
+        <section class="directory-surface invoice-summary-surface">
+          <div class="surface-header">
+            <div>
+              <p class="eyebrow">Wage desk</p>
+              <h2>Photographer wages</h2>
+              <p class="surface-subtitle">Draft wage proformas are created from confirmed bookings.</p>
+            </div>
+            <a class="ghost-button nav-button" href="/bookings" data-route="/bookings">Back to bookings</a>
+          </div>
+
+          <div class="invoice-stats">
+            <div>
+              <span id="wageDraftCount">0</span>
+              <small>draft</small>
+            </div>
+            <div>
+              <span id="wagePaidCount">0</span>
+              <small>paid</small>
+            </div>
+            <div>
+              <span id="wageTotalValue">$0</span>
+              <small>draft total</small>
+            </div>
+          </div>
+
+          <div class="actions">
+            <button class="primary-button" id="syncWagesButton" type="button">Create missing wages</button>
+            <button class="ghost-button" id="refreshWagesButton" type="button">Refresh wages</button>
+            <p id="wageMessage" role="status"></p>
+          </div>
+        </section>
+
+        <section class="list-section" aria-label="Photographer wages">
+          <div class="section-header">
+            <div>
+              <p class="eyebrow">Proformas</p>
+              <h2>Wages</h2>
+            </div>
+          </div>
+
+          <div class="invoice-list wage-list" id="wageList"></div>
+        </section>
+      </section>
     </main>
 
     <dialog id="passwordDialog" aria-labelledby="passwordDialogTitle">
@@ -540,8 +592,33 @@
       </article>
     </template>
 
+    <template id="wageTemplate">
+      <article class="invoice-item wage-item">
+        <div class="invoice-main">
+          <div class="booking-title-row">
+            <h3></h3>
+            <span class="invoice-status"></span>
+          </div>
+          <p class="wage-photographer"></p>
+          <p class="wage-booking"></p>
+          <p class="wage-services"></p>
+          <p class="wage-sent"></p>
+        </div>
+        <div class="invoice-total">
+          <strong></strong>
+          <small></small>
+        </div>
+        <div class="invoice-actions">
+          <button class="ghost-button print-wage-button" type="button">Download PDF</button>
+          <button class="ghost-button send-wage-button" type="button">Send proforma</button>
+          <button class="ghost-button paid-wage-button" type="button">Mark paid</button>
+          <button class="icon-button void-wage-button" type="button" title="Void wage" aria-label="Void wage">×</button>
+        </div>
+      </article>
+    </template>
+
     <section class="invoice-print-sheet" id="invoicePrintSheet" hidden aria-label="Printable invoice"></section>
 
-    <script src="/app.js?v=password-change" type="module"></script>
+    <script src="/app.js?v=wage-proforma" type="module"></script>
   </body>
 </html>

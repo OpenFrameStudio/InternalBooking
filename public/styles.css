@@ -776,7 +776,7 @@ legend {
 
 .service-picker {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -969,6 +969,8 @@ button:focus-visible {
 #formMessage,
 #clientMessage,
 #photographerMessage,
+#invoiceMessage,
+#wageMessage,
 #loginMessage,
 #passwordMessage {
   min-height: 22px;
@@ -980,6 +982,8 @@ button:focus-visible {
 #formMessage.error,
 #clientMessage.error,
 #photographerMessage.error,
+#invoiceMessage.error,
+#wageMessage.error,
 #loginMessage.error,
 #passwordMessage.error {
   color: var(--red);
@@ -988,6 +992,8 @@ button:focus-visible {
 #formMessage.success,
 #clientMessage.success,
 #photographerMessage.success,
+#invoiceMessage.success,
+#wageMessage.success,
 #loginMessage.success,
 #passwordMessage.success {
   color: var(--accent-dark);
@@ -1074,7 +1080,8 @@ button:focus-visible {
 .booking-list,
 .client-list,
 .photographer-list,
-.invoice-list {
+.invoice-list,
+.wage-list {
   display: grid;
   gap: 10px;
 }

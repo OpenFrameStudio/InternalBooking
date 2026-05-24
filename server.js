@@ -18,6 +18,7 @@ const clientsFile = path.join(dataDir, "clients.json");
 const photographersFile = path.join(dataDir, "photographers.json");
 const workFile = path.join(dataDir, "work-assignments.json");
 const invoicesFile = path.join(dataDir, "invoices.json");
+const wagesFile = path.join(dataDir, "wages.json");
 const usersFile = path.join(dataDir, "users.json");
 const seedFiles = {
   bookings: path.join(bundledDataDir, "bookings.json"),
@@ -25,6 +26,7 @@ const seedFiles = {
   photographers: path.join(bundledDataDir, "photographers.json"),
   work: path.join(bundledDataDir, "work-assignments.json"),
   invoices: path.join(bundledDataDir, "invoices.json"),
+  wages: path.join(bundledDataDir, "wages.json"),
   users: path.join(bundledDataDir, "users.json")
 };
 const githubStorage = {
@@ -101,8 +103,8 @@ const authUsers = [
     role: "boss",
     label: "Boss / Team Leader",
     name: "Boss",
-    apps: ["bookings", "clients", "photographers", "work", "invoices"],
-    permissions: ["manage_bookings", "manage_directory", "manage_work", "sync_work_bookings", "view_work_messages", "manage_invoices"]
+    apps: ["bookings", "clients", "photographers", "work", "invoices", "wages"],
+    permissions: ["manage_bookings", "manage_directory", "manage_work", "sync_work_bookings", "view_work_messages", "manage_invoices", "manage_wages"]
   },
   {
     username: process.env.EMPLOYEE_USERNAME || "Faye",
@@ -140,14 +142,16 @@ const contentTypes = {
   ".ico": "image/x-icon"
 };
 
-const serviceCatalog = new Set(["Photography", "Floorplan", "Drone"]);
+const serviceCatalog = new Set(["Photography", "Floorplan", "Drone", "Siteplan"]);
 const invoiceServicePrices = {
   Photography: 150,
   Floorplan: 50,
-  Drone: 50
+  Drone: 50,
+  Siteplan: 0
 };
 const invoiceGstRate = 0.1;
 const invoiceCurrency = "AUD";
+const wageCurrency = "AUD";
 const larkImportDays = Number(process.env.LARK_IMPORT_DAYS || 120);
 const defaultPhotographers = [
   {
@@ -199,6 +203,12 @@ const dataFiles = {
     file: invoicesFile,
     seedFile: seedFiles.invoices,
     githubPath: githubDataPath("invoices.json"),
+    fallback: []
+  },
+  wages: {
+    file: wagesFile,
+    seedFile: seedFiles.wages,
+    githubPath: githubDataPath("wages.json"),
     fallback: []
   },
   users: {
@@ -424,6 +434,7 @@ function appForRoute(pathname) {
   if (pathname === "/photographers") return "photographers";
   if (pathname === "/work" || pathname === "/work/") return "work";
   if (pathname === "/invoices") return "invoices";
+  if (pathname === "/wages") return "wages";
   return "";
 }
 
@@ -733,6 +744,7 @@ async function prepareDataStorage() {
     seedStoredDataFile(dataFiles.photographers),
     seedStoredDataFile(dataFiles.work),
     seedStoredDataFile(dataFiles.invoices),
+    seedStoredDataFile(dataFiles.wages),
     seedStoredDataFile(dataFiles.users)
   ]);
 }
@@ -798,6 +810,15 @@ async function loadInvoices() {
 
 async function saveInvoices(invoices) {
   await writeStoredJson(dataFiles.invoices, normalizeInvoices(invoices));
+}
+
+async function loadWages() {
+  const wages = await readStoredJson(dataFiles.wages);
+  return normalizeWages(wages);
+}
+
+async function saveWages(wages) {
+  await writeStoredJson(dataFiles.wages, normalizeWages(wages));
 }
 
 function normalizeWorkState(raw) {
@@ -1094,13 +1115,15 @@ function addDays(date, days) {
   return next;
 }
 
-function bookingInvoiceItems(booking) {
-  const services = Array.isArray(booking.services) && booking.services.length
+function bookingServiceNames(booking) {
+  const services = Array.isArray(booking?.services) && booking.services.length
     ? booking.services.map((service) => service?.name || service).filter(Boolean)
-    : String(booking.service || "").split("+").map((service) => service.trim()).filter(Boolean);
-  const uniqueServices = [...new Set(services)];
+    : String(booking?.service || "").split("+").map((service) => service.trim()).filter(Boolean);
+  return [...new Set(services)];
+}
 
-  return uniqueServices.map((name) => {
+function bookingInvoiceItems(booking) {
+  return bookingServiceNames(booking).map((name) => {
     const unitPrice = normalizeMoney(invoiceServicePrices[name] ?? 0);
     return {
       name,
@@ -1581,6 +1604,417 @@ async function sendInvoiceEmail(invoice, recipients) {
       }
     ]
   }), invoiceEmailConfig.timeoutMs + 2_000, "Invoice email timed out connecting to Lark Mail.");
+}
+
+function normalizeWageStatus(status) {
+  return ["draft", "paid", "void"].includes(status) ? status : "draft";
+}
+
+function normalizeWage(wage) {
+  const items = Array.isArray(wage?.items)
+    ? wage.items.map((item) => ({
+        name: String(item.name || "Wage").trim() || "Wage",
+        quantity: Math.max(1, Number(item.quantity || 1)),
+        unitPrice: normalizeMoney(item.unitPrice),
+        amount: normalizeMoney(item.amount ?? Number(item.quantity || 1) * Number(item.unitPrice || 0))
+      }))
+    : [];
+  const total = normalizeMoney(wage?.total ?? items.reduce((sum, item) => sum + item.amount, 0));
+
+  return {
+    id: wage?.id || crypto.randomUUID(),
+    wageNumber: String(wage?.wageNumber || "").trim(),
+    bookingId: String(wage?.bookingId || ""),
+    propertyAddress: String(wage?.propertyAddress || ""),
+    clientName: String(wage?.clientName || ""),
+    agentName: String(wage?.agentName || ""),
+    photographerName: String(wage?.photographerName || ""),
+    photographerEmail: String(wage?.photographerEmail || ""),
+    photographerPhone: String(wage?.photographerPhone || ""),
+    bookingStartAt: wage?.bookingStartAt || "",
+    bookingEndAt: wage?.bookingEndAt || "",
+    services: Array.isArray(wage?.services) ? wage.services.map(String).filter(Boolean) : [],
+    items,
+    total,
+    currency: wage?.currency || wageCurrency,
+    status: normalizeWageStatus(wage?.status),
+    issuedAt: wage?.issuedAt || new Date().toISOString(),
+    dueAt: wage?.dueAt || addDays(new Date(), 7).toISOString(),
+    paidAt: wage?.paidAt || "",
+    voidedAt: wage?.voidedAt || "",
+    sentAt: wage?.sentAt || "",
+    sentTo: uniqueEmails(Array.isArray(wage?.sentTo) ? wage.sentTo : parseGuestEmails(wage?.sentTo || "")),
+    notes: String(wage?.notes || ""),
+    createdAt: wage?.createdAt || new Date().toISOString(),
+    updatedAt: wage?.updatedAt || wage?.createdAt || new Date().toISOString()
+  };
+}
+
+function normalizeWages(wages) {
+  return Array.isArray(wages)
+    ? wages.map(normalizeWage).filter((wage) => wage.bookingId || wage.wageNumber)
+    : [];
+}
+
+function photographerWageItems(booking) {
+  const serviceSet = new Set(bookingServiceNames(booking));
+  const hasPhotography = serviceSet.has("Photography");
+  const hasFloorplan = serviceSet.has("Floorplan");
+  const hasDrone = serviceSet.has("Drone");
+  const hasSiteplan = serviceSet.has("Siteplan");
+  const items = [];
+
+  if (hasDrone) {
+    items.push({
+      name: hasFloorplan ? "Photography + Floorplan + Drone" : "Photography + Drone",
+      quantity: 1,
+      unitPrice: 170,
+      amount: 170
+    });
+  } else if (hasFloorplan) {
+    items.push({
+      name: hasPhotography ? "Photography + Floorplan" : "Floorplan package",
+      quantity: 1,
+      unitPrice: 120,
+      amount: 120
+    });
+  } else if (hasPhotography) {
+    items.push({
+      name: "Photography",
+      quantity: 1,
+      unitPrice: 80,
+      amount: 80
+    });
+  }
+
+  if (hasSiteplan) {
+    items.push({
+      name: "Siteplan add-on",
+      quantity: 1,
+      unitPrice: 30,
+      amount: 30
+    });
+  }
+
+  return items;
+}
+
+function nextWageNumber(wages) {
+  const maxNumber = wages.reduce((max, wage) => {
+    const value = String(wage.wageNumber || "");
+    const match = value.match(/^W(\d+)$/);
+    return match ? Math.max(max, Number(match[1])) : max;
+  }, 0);
+  return `W${String(maxNumber + 1).padStart(3, "0")}`;
+}
+
+function wageFromBooking(booking, wages, existing = null) {
+  const now = new Date().toISOString();
+  const isPaid = existing?.status === "paid";
+  const existingItems = Array.isArray(existing?.items) ? existing.items : [];
+  const items = isPaid ? existingItems : photographerWageItems(booking);
+  const total = normalizeMoney(items.reduce((sum, item) => sum + item.amount, 0));
+  const status = booking.status === "cancelled"
+    ? (isPaid ? "paid" : "void")
+    : (isPaid ? "paid" : "draft");
+
+  return normalizeWage({
+    ...(existing || {}),
+    id: existing?.id || crypto.randomUUID(),
+    wageNumber: existing?.wageNumber || nextWageNumber(wages),
+    bookingId: booking.id,
+    propertyAddress: booking.propertyAddress || "",
+    clientName: booking.clientName || "",
+    agentName: booking.agentName || "",
+    photographerName: booking.photographerName || "",
+    photographerEmail: booking.photographerEmail || "",
+    photographerPhone: booking.photographerPhone || "",
+    bookingStartAt: booking.startAt || "",
+    bookingEndAt: booking.endAt || "",
+    services: bookingServiceNames(booking),
+    items,
+    total,
+    currency: wageCurrency,
+    status,
+    issuedAt: existing?.issuedAt || now,
+    dueAt: existing?.dueAt || addDays(new Date(), 7).toISOString(),
+    paidAt: existing?.paidAt || "",
+    voidedAt: status === "void" ? (existing?.voidedAt || now) : "",
+    notes: "Generated from internal booking.",
+    createdAt: existing?.createdAt || now,
+    updatedAt: now
+  });
+}
+
+function upsertWageForBooking(wages, booking) {
+  if (!booking?.id || booking.larkOnly) {
+    return { wage: null, created: false, updated: false };
+  }
+
+  const index = wages.findIndex((wage) => wage.bookingId === booking.id);
+  const existing = index >= 0 ? wages[index] : null;
+  if (booking.status === "cancelled" && !existing) {
+    return { wage: null, created: false, updated: false };
+  }
+
+  const wage = wageFromBooking(booking, wages, existing);
+  if (!wage.items.length && !existing) {
+    return { wage: null, created: false, updated: false };
+  }
+
+  if (index >= 0) {
+    wages[index] = wage;
+    return { wage, created: false, updated: true };
+  }
+
+  wages.push(wage);
+  return { wage, created: true, updated: false };
+}
+
+function syncWagesFromBookings(wages, bookings) {
+  let created = 0;
+  let updated = 0;
+
+  for (const booking of bookings.filter((item) => !item.larkOnly)) {
+    const result = upsertWageForBooking(wages, booking);
+    if (result.created) created += 1;
+    if (result.updated) updated += 1;
+  }
+
+  return { created, updated, total: wages.length };
+}
+
+function wageFileName(wage) {
+  const base = [wage.wageNumber || "wage", wage.propertyAddress || ""]
+    .filter(Boolean)
+    .join("-")
+    .replace(/[^a-z0-9._-]+/gi, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 96);
+
+  return `${base || "wage-proforma"}.pdf`;
+}
+
+function wageEmailRecipients(wage, input = {}) {
+  const requestedRecipients = Array.isArray(input.to || input.recipients)
+    ? (input.to || input.recipients)
+    : parseGuestEmails(input.to || input.recipients || "");
+  const fallbackRecipients = parseGuestEmails(wage.photographerEmail || "");
+  return uniqueEmails(requestedRecipients.length ? requestedRecipients : fallbackRecipients).filter(isValidEmail);
+}
+
+function buildWageEmailSubject(wage) {
+  return `Photographer Proforma ${wage.wageNumber} - ${wage.propertyAddress || "OpenFrame Studio"}`;
+}
+
+function buildWageEmailText(wage) {
+  return [
+    `Hi ${wage.photographerName || "there"},`,
+    "",
+    `Please find attached proforma ${wage.wageNumber} for ${wage.propertyAddress || "your booking"}.`,
+    `Amount: ${formatInvoiceMoney(wage.total)}.`,
+    "",
+    "Thank you,",
+    "OpenFrame Studio"
+  ].join("\n");
+}
+
+function buildWageEmailHtml(wage) {
+  return `
+    <div style="font-family:Arial,sans-serif;color:#111611;line-height:1.5">
+      <p>Hi ${escapeHtmlForEmail(wage.photographerName || "there")},</p>
+      <p>Please find attached proforma <strong>${escapeHtmlForEmail(wage.wageNumber)}</strong> for ${escapeHtmlForEmail(wage.propertyAddress || "your booking")}.</p>
+      <p><strong>Amount: ${escapeHtmlForEmail(formatInvoiceMoney(wage.total))}.</strong></p>
+      <p>Thank you,<br />OpenFrame Studio</p>
+    </div>
+  `;
+}
+
+function wageDescription(wage) {
+  const serviceNames = wage.services?.length
+    ? wage.services.join(" + ")
+    : (wage.items || []).map((item) => item.name).join(" + ");
+  return [wage.propertyAddress || "Booking", serviceNames].filter(Boolean).join("\n");
+}
+
+function drawWagePdf(doc, wage) {
+  const pageWidth = doc.page.width;
+  const margin = 52;
+  const logoPath = path.join(publicDir, "openframe-logo.png");
+
+  doc.rect(0, 0, pageWidth, 8).fill("#117a5d");
+  doc.fillColor("#000").font("Helvetica-Bold").fontSize(34).text("Proforma", margin, 54);
+  doc.font("Helvetica-Bold").fontSize(12).fillColor("#117a5d").text("Photographer wage", margin, 94);
+  try {
+    doc.image(logoPath, pageWidth - margin - 88, 48, { width: 88, height: 88, fit: [88, 88] });
+  } catch {
+    doc.fontSize(11).fillColor("#000").text("OPENFRAME\nSTUDIO", pageWidth - margin - 88, 62, { width: 88, align: "center" });
+  }
+
+  doc.fillColor("#000").font("Helvetica").fontSize(11);
+  doc.text("Proforma Number", margin, 158);
+  doc.text(wage.wageNumber || "", 198, 158);
+  doc.text("Issue Date", margin, 181);
+  doc.text(formatInvoiceDocumentDate(wage.issuedAt), 198, 181);
+  doc.text("Booking Date", margin, 204);
+  doc.text(formatInvoiceDocumentDate(wage.bookingStartAt), 198, 204);
+
+  doc.font("Helvetica-Bold").fontSize(13).text("OPENFRAME", margin, 260);
+  doc.font("Helvetica").fontSize(10.5);
+  [
+    "OpenFrame Studio Pty Ltd",
+    "23 Selborne St",
+    "Burwood NSW 2134",
+    "admin@openframe.studio"
+  ].forEach((line, index) => doc.text(line, margin, 286 + index * 17));
+
+  const photographerX = 324;
+  doc.font("Helvetica-Bold").fontSize(13).text("PHOTOGRAPHER", photographerX, 260);
+  doc.font("Helvetica").fontSize(10.5);
+  [
+    wage.photographerName || "Photographer",
+    wage.photographerEmail || "",
+    wage.photographerPhone || ""
+  ].filter(Boolean).forEach((line, index) => doc.text(line, photographerX, 286 + index * 17, {
+    width: pageWidth - margin - photographerX,
+    height: 16,
+    ellipsis: true
+  }));
+
+  const tableX = margin;
+  const tableY = 392;
+  const columnWidths = [250, 82, 82, 77];
+  const headerHeight = 34;
+  const rowHeight = 40;
+  const tableWidth = columnWidths.reduce((sum, width) => sum + width, 0);
+  const headers = ["BOOKING / SERVICE", "QTY", "RATE", "AMOUNT"];
+
+  doc.rect(tableX, tableY, tableWidth, headerHeight).fill("#e7f3ef");
+  doc.fillColor("#000").font("Helvetica-Bold").fontSize(10);
+  let cursorX = tableX;
+  headers.forEach((header, index) => {
+    drawPdfCell(doc, header, cursorX, tableY, columnWidths[index], headerHeight, { align: "center" });
+    cursorX += columnWidths[index];
+  });
+
+  let rowY = tableY + headerHeight;
+  doc.font("Helvetica").fontSize(10);
+  for (const item of wage.items || []) {
+    cursorX = tableX;
+    drawPdfCell(doc, `${wageDescription(wage)}\n${item.name}`, cursorX, rowY, columnWidths[0], rowHeight, { align: "left" });
+    cursorX += columnWidths[0];
+    drawPdfCell(doc, String(item.quantity || 1), cursorX, rowY, columnWidths[1], rowHeight, { align: "center" });
+    cursorX += columnWidths[1];
+    drawPdfCell(doc, formatInvoiceMoney(item.unitPrice), cursorX, rowY, columnWidths[2], rowHeight, { align: "right" });
+    cursorX += columnWidths[2];
+    drawPdfCell(doc, formatInvoiceMoney(item.amount), cursorX, rowY, columnWidths[3], rowHeight, { align: "right" });
+    doc.moveTo(tableX, rowY + rowHeight).lineTo(tableX + tableWidth, rowY + rowHeight).lineWidth(1).stroke("#d3ddd8");
+    rowY += rowHeight;
+  }
+
+  const totalX = 356;
+  const totalY = Math.max(rowY + 36, 560);
+  doc.lineWidth(1.4).strokeColor("#000").rect(totalX, totalY, 187, 42).stroke();
+  doc.font("Helvetica-Bold").fontSize(11).fillColor("#000");
+  drawPdfCell(doc, "Total Payable", totalX, totalY, 98, 42, { align: "center" });
+  drawPdfCell(doc, formatInvoiceMoney(wage.total), totalX + 98, totalY, 89, 42, { align: "center" });
+
+  doc.save();
+  doc.rotate(-10, { origin: [144, 620] });
+  doc.rect(108, 604, 108, 30).lineWidth(2).stroke(wage.status === "paid" ? "#117a5d" : wage.status === "void" ? "#a6403a" : "#f5a623");
+  doc.fillColor(wage.status === "paid" ? "#117a5d" : wage.status === "void" ? "#a6403a" : "#f5a623")
+    .font("Helvetica-Bold").fontSize(18)
+    .text(wage.status === "paid" ? "PAID" : wage.status === "void" ? "VOID" : "DRAFT", 116, 610);
+  doc.restore();
+
+  doc.font("Helvetica").fontSize(9.5).fillColor("#787878");
+  doc.text("This proforma is generated from the internal booking system for photographer wage tracking.", margin, 704, {
+    width: pageWidth - margin * 2
+  });
+}
+
+async function createWagePdfBuffer(wage) {
+  let PDFDocument;
+  try {
+    ({ default: PDFDocument } = await import("pdfkit"));
+  } catch {
+    throw new Error("Wage PDF generation is still installing. Wait for the latest deploy to finish, then try again.");
+  }
+
+  const doc = new PDFDocument({
+    size: "A4",
+    margin: 0,
+    info: {
+      Title: `${wage.wageNumber} Photographer Proforma`,
+      Author: "OpenFrame Studio"
+    }
+  });
+  const chunks = [];
+  const finished = new Promise((resolve, reject) => {
+    doc.on("data", (chunk) => chunks.push(chunk));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+  });
+
+  drawWagePdf(doc, wage);
+  doc.end();
+  return finished;
+}
+
+async function sendWageWithResend(wage, recipients, pdf, bcc = []) {
+  const payload = {
+    from: invoiceEmailConfig.from,
+    to: recipients,
+    subject: buildWageEmailSubject(wage),
+    text: buildWageEmailText(wage),
+    html: buildWageEmailHtml(wage),
+    reply_to: invoiceEmailConfig.replyTo,
+    attachments: [
+      {
+        filename: wageFileName(wage),
+        content: pdf.toString("base64")
+      }
+    ]
+  };
+
+  if (bcc.length) {
+    payload.bcc = bcc;
+  }
+
+  return sendResendEmail(payload, invoiceEmailConfig.timeoutMs, "Resend wage email request timed out.");
+}
+
+async function sendWageEmail(wage, recipients) {
+  if (!isInvoiceEmailConfigured()) {
+    throw new Error(`Wage proforma email is not set up yet. Add ${invoiceEmailMissingSettings().join(", ")} in Render.`);
+  }
+
+  const pdf = await createWagePdfBuffer(wage);
+  const bcc = uniqueEmails(parseGuestEmails(invoiceEmailConfig.bcc)).filter(isValidEmail);
+
+  if (invoiceEmailProvider === "resend") {
+    await sendWageWithResend(wage, recipients, pdf, bcc);
+    return;
+  }
+
+  const transport = await createInvoiceTransport();
+  await withTimeout(transport.sendMail({
+    from: invoiceEmailConfig.from,
+    to: recipients,
+    bcc,
+    replyTo: invoiceEmailConfig.replyTo,
+    subject: buildWageEmailSubject(wage),
+    text: buildWageEmailText(wage),
+    html: buildWageEmailHtml(wage),
+    attachments: [
+      {
+        filename: wageFileName(wage),
+        content: pdf,
+        contentType: "application/pdf"
+      }
+    ]
+  }), invoiceEmailConfig.timeoutMs + 2_000, "Wage proforma email timed out connecting to Lark Mail.");
 }
 
 function workInviteRecipients(workState = null) {
@@ -2976,6 +3410,7 @@ async function handleApi(req, res, url) {
       organizerCalendarConfigured: Boolean(larkConfig.organizerCalendarId),
       invoiceEmailConfigured: isInvoiceEmailConfigured(),
       invoiceEmailProvider,
+      wageEmailConfigured: isInvoiceEmailConfigured(),
       workInviteEmailConfigured: isWorkInviteEmailConfigured(),
       workInviteEmailFrom: workInviteEmailConfig.from,
       calendarInviteEmailConfigured: isCalendarInviteEmailConfigured(),
@@ -3034,6 +3469,11 @@ async function handleApi(req, res, url) {
   }
 
   if (url.pathname.startsWith("/api/invoices") && !canAccessApp(req, "invoices")) {
+    sendForbidden(res);
+    return;
+  }
+
+  if (url.pathname.startsWith("/api/wages") && !canAccessApp(req, "wages")) {
     sendForbidden(res);
     return;
   }
@@ -3331,6 +3771,128 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  if (req.method === "GET" && url.pathname === "/api/wages") {
+    const wages = await loadWages();
+    wages.sort((a, b) => new Date(b.issuedAt) - new Date(a.issuedAt));
+    sendJson(res, 200, { wages });
+    return;
+  }
+
+  const wagePdfMatch = url.pathname.match(/^\/api\/wages\/([^/]+)\/pdf$/);
+  if (req.method === "GET" && wagePdfMatch) {
+    if (!hasPermission(req, "manage_wages")) {
+      sendForbidden(res, "Boss or team leader only.");
+      return;
+    }
+
+    const wageId = decodeURIComponent(wagePdfMatch[1]);
+    const wages = await loadWages();
+    const wage = wages.find((item) => item.id === wageId);
+    if (!wage) {
+      sendJson(res, 404, { errors: ["Wage proforma not found."] });
+      return;
+    }
+
+    try {
+      const pdf = await createWagePdfBuffer(wage);
+      const filename = wageFileName(wage).replace(/["\\\r\n]/g, "");
+      res.writeHead(200, {
+        "Content-Type": "application/pdf",
+        "Content-Length": pdf.length,
+        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Cache-Control": "no-store"
+      });
+      res.end(pdf);
+    } catch (error) {
+      sendJson(res, 500, { errors: [error.message || "Could not create wage proforma PDF."] });
+    }
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/wages/sync") {
+    if (!hasPermission(req, "manage_wages")) {
+      sendForbidden(res, "Boss or team leader only.");
+      return;
+    }
+
+    const wages = await loadWages();
+    const bookings = await loadBookings();
+    const result = syncWagesFromBookings(wages, bookings);
+    await saveWages(wages);
+    wages.sort((a, b) => new Date(b.issuedAt) - new Date(a.issuedAt));
+    sendJson(res, 200, { wages, ...result });
+    return;
+  }
+
+  const wageSendMatch = url.pathname.match(/^\/api\/wages\/([^/]+)\/send$/);
+  if (req.method === "POST" && wageSendMatch) {
+    if (!hasPermission(req, "manage_wages")) {
+      sendForbidden(res, "Boss or team leader only.");
+      return;
+    }
+
+    const input = await readBody(req);
+    const wageId = decodeURIComponent(wageSendMatch[1]);
+    const wages = await loadWages();
+    const wage = wages.find((item) => item.id === wageId);
+    if (!wage) {
+      sendJson(res, 404, { errors: ["Wage proforma not found."] });
+      return;
+    }
+
+    if (wage.status === "void") {
+      sendJson(res, 400, { errors: ["Voided wage proformas cannot be sent."] });
+      return;
+    }
+
+    const recipients = wageEmailRecipients(wage, input);
+    if (!recipients.length) {
+      sendJson(res, 400, { errors: ["Add a valid photographer email before sending this proforma."] });
+      return;
+    }
+
+    try {
+      await sendWageEmail(wage, recipients);
+    } catch (error) {
+      sendJson(res, 502, { errors: [invoiceEmailErrorMessage(error)] });
+      return;
+    }
+
+    wage.sentAt = new Date().toISOString();
+    wage.sentTo = recipients;
+    wage.updatedAt = wage.sentAt;
+    await saveWages(wages);
+    wages.sort((a, b) => new Date(b.issuedAt) - new Date(a.issuedAt));
+    sendJson(res, 200, { wage, wages, message: `Proforma sent to ${recipients.join(", ")}.` });
+    return;
+  }
+
+  const wageActionMatch = url.pathname.match(/^\/api\/wages\/([^/]+)\/(paid|void|draft)$/);
+  if (req.method === "POST" && wageActionMatch) {
+    if (!hasPermission(req, "manage_wages")) {
+      sendForbidden(res, "Boss or team leader only.");
+      return;
+    }
+
+    const wageId = decodeURIComponent(wageActionMatch[1]);
+    const status = wageActionMatch[2] === "paid" ? "paid" : wageActionMatch[2];
+    const wages = await loadWages();
+    const wage = wages.find((item) => item.id === wageId);
+    if (!wage) {
+      sendJson(res, 404, { errors: ["Wage proforma not found."] });
+      return;
+    }
+
+    wage.status = normalizeWageStatus(status);
+    wage.updatedAt = new Date().toISOString();
+    wage.paidAt = wage.status === "paid" ? (wage.paidAt || wage.updatedAt) : "";
+    wage.voidedAt = wage.status === "void" ? (wage.voidedAt || wage.updatedAt) : "";
+    await saveWages(wages);
+    wages.sort((a, b) => new Date(b.issuedAt) - new Date(a.issuedAt));
+    sendJson(res, 200, { wage, wages });
+    return;
+  }
+
   if (req.method === "GET" && url.pathname === "/api/bookings") {
     if (!canAccessApp(req, "bookings")) {
       sendForbidden(res);
@@ -3602,7 +4164,10 @@ async function handleApi(req, res, url) {
     const invoices = await loadInvoices();
     const invoiceResult = upsertInvoiceForBooking(invoices, booking);
     await saveInvoices(invoices);
-    sendJson(res, 201, { booking, invoice: invoiceResult.invoice });
+    const wages = await loadWages();
+    const wageResult = upsertWageForBooking(wages, booking);
+    await saveWages(wages);
+    sendJson(res, 201, { booking, invoice: invoiceResult.invoice, wage: wageResult.wage });
     return;
   }
 
@@ -3673,7 +4238,10 @@ async function handleApi(req, res, url) {
     const invoices = await loadInvoices();
     const invoiceResult = upsertInvoiceForBooking(invoices, booking);
     await saveInvoices(invoices);
-    sendJson(res, 200, { booking, invoice: invoiceResult.invoice });
+    const wages = await loadWages();
+    const wageResult = upsertWageForBooking(wages, booking);
+    await saveWages(wages);
+    sendJson(res, 200, { booking, invoice: invoiceResult.invoice, wage: wageResult.wage });
     return;
   }
 
@@ -3700,7 +4268,10 @@ async function handleApi(req, res, url) {
     const invoices = await loadInvoices();
     const invoiceResult = upsertInvoiceForBooking(invoices, booking);
     await saveInvoices(invoices);
-    sendJson(res, 200, { booking, invoice: invoiceResult.invoice });
+    const wages = await loadWages();
+    const wageResult = upsertWageForBooking(wages, booking);
+    await saveWages(wages);
+    sendJson(res, 200, { booking, invoice: invoiceResult.invoice, wage: wageResult.wage });
     return;
   }
 
@@ -3785,6 +4356,7 @@ async function serveStatic(req, res, url) {
     routePath === "/" ? "/portal.html"
       : routePath === "/bookings" ? "/index.html"
         : routePath === "/invoices" ? "/index.html"
+          : routePath === "/wages" ? "/index.html"
         : routePath === "/work" || routePath === "/work/" ? "/work/index.html"
           : routePath;
   const requestedPath = decodeURIComponent(appPath);

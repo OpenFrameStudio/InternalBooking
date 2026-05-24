@@ -8,10 +8,12 @@ const el = {
   clientTemplate: $('#clientTemplate'),
   photographerTemplate: $('#photographerTemplate'),
   invoiceTemplate: $('#invoiceTemplate'),
+  wageTemplate: $('#wageTemplate'),
   bookingPage: $('#bookingPage'),
   clientsPage: $('#clientsPage'),
   photographersPage: $('#photographersPage'),
   invoicesPage: $('#invoicesPage'),
+  wagesPage: $('#wagesPage'),
   propertyAddress: $('#propertyAddressInput'),
   addressDatalist: $('#addressSuggestionList'),
   addressSuggestions: $('#addressSuggestions'),
@@ -64,6 +66,13 @@ const el = {
   invoiceTotalValue: $('#invoiceTotalValue'),
   syncInvoicesButton: $('#syncInvoicesButton'),
   refreshInvoicesButton: $('#refreshInvoicesButton'),
+  wageList: $('#wageList'),
+  wageMessage: $('#wageMessage'),
+  wageDraftCount: $('#wageDraftCount'),
+  wagePaidCount: $('#wagePaidCount'),
+  wageTotalValue: $('#wageTotalValue'),
+  syncWagesButton: $('#syncWagesButton'),
+  refreshWagesButton: $('#refreshWagesButton'),
   invoicePrintSheet: $('#invoicePrintSheet'),
   refreshButton: $('#refreshButton'),
   searchAddressButton: $('#searchAddressButton'),
@@ -104,6 +113,7 @@ const state = {
   clients: [],
   photographers: [],
   invoices: [],
+  wages: [],
   bookingForm: {
     selectedClientId: '',
     selectedPhotographerId: '',
@@ -125,6 +135,7 @@ const storageKeys = {
   clients: 'openframe.clients.v1',
   photographers: 'openframe.photographers.v1',
   invoices: 'openframe.invoices.v1',
+  wages: 'openframe.wages.v1',
   addresses: 'openframe.addresses.v1'
 };
 
@@ -185,6 +196,10 @@ function cacheInvoices() {
   if (userCanAccess('invoices')) writeStored(storageKeys.invoices, state.invoices);
 }
 
+function cacheWages() {
+  if (userCanAccess('wages')) writeStored(storageKeys.wages, state.wages);
+}
+
 function hydrateCachedData() {
   const cachedBookings = readStored(storageKeys.bookings, []).filter((booking) => booking?.id);
   if (cachedBookings.length) {
@@ -214,6 +229,14 @@ function hydrateCachedData() {
     state.invoices = cachedInvoices;
   }
   if (userCanAccess('invoices')) renderInvoices();
+
+  const cachedWages = userCanAccess('wages')
+    ? readStored(storageKeys.wages, []).filter((wage) => wage?.id)
+    : [];
+  if (cachedWages.length) {
+    state.wages = cachedWages;
+  }
+  if (userCanAccess('wages')) renderWages();
 }
 
 function refreshLiveData() {
@@ -227,7 +250,8 @@ function refreshLiveData() {
     loadClients(),
     loadPhotographers(),
     loadBookings(),
-    loadInvoices()
+    loadInvoices(),
+    loadWages()
   ]);
 }
 
@@ -275,6 +299,10 @@ function applyAppAccess() {
   }
 
   if (!userCanAccess('invoices') && window.location.pathname === '/invoices') {
+    setRoute('/bookings');
+  }
+
+  if (!userCanAccess('wages') && window.location.pathname === '/wages') {
     setRoute('/bookings');
   }
 }
@@ -995,16 +1023,18 @@ function resetBookingForm(message = '') {
 }
 
 function setRoute(route, push = true) {
-  const nextRoute = ['/clients', '/photographers', '/invoices'].includes(route) ? route : '/bookings';
+  const nextRoute = ['/clients', '/photographers', '/invoices', '/wages'].includes(route) ? route : '/bookings';
   el.bookingPage.hidden = nextRoute !== '/bookings';
   el.clientsPage.hidden = nextRoute !== '/clients';
   el.photographersPage.hidden = nextRoute !== '/photographers';
   el.invoicesPage.hidden = nextRoute !== '/invoices';
+  el.wagesPage.hidden = nextRoute !== '/wages';
   $$('[data-route]').forEach((link) => link.classList.toggle('active', link.dataset.route === nextRoute));
   if (push && window.location.pathname !== nextRoute) history.pushState({ route: nextRoute }, '', nextRoute);
   if (nextRoute === '/clients') renderClientList();
   if (nextRoute === '/photographers') renderPhotographerList();
   if (nextRoute === '/invoices') renderInvoices();
+  if (nextRoute === '/wages') renderWages();
 }
 
 function buildBookingPayload() {
@@ -1158,12 +1188,76 @@ function invoiceRecipientEmails(invoice) {
   return uniqueEmails(parseEmails(invoice.clientEmail || '')).filter(isEmail);
 }
 
+function wageRecipientEmails(wage) {
+  return uniqueEmails(parseEmails(wage.photographerEmail || '')).filter(isEmail);
+}
+
 function updateInvoiceStats() {
   const drafts = state.invoices.filter((invoice) => invoice.status === 'draft');
   const paid = state.invoices.filter((invoice) => invoice.status === 'paid');
   el.invoiceDraftCount.textContent = drafts.length;
   el.invoicePaidCount.textContent = paid.length;
   el.invoiceTotalValue.textContent = formatMoney(drafts.reduce((sum, invoice) => sum + Number(invoice.total || 0), 0));
+}
+
+function updateWageStats() {
+  const drafts = state.wages.filter((wage) => wage.status === 'draft');
+  const paid = state.wages.filter((wage) => wage.status === 'paid');
+  el.wageDraftCount.textContent = drafts.length;
+  el.wagePaidCount.textContent = paid.length;
+  el.wageTotalValue.textContent = formatMoney(drafts.reduce((sum, wage) => sum + Number(wage.total || 0), 0));
+}
+
+function renderWages() {
+  if (!userCanAccess('wages')) return;
+
+  el.wageList.innerHTML = '';
+  const wages = [...state.wages].sort((a, b) => new Date(b.issuedAt) - new Date(a.issuedAt));
+  updateWageStats();
+
+  if (!wages.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty-state';
+    empty.textContent = 'No wages yet. Create or sync booking wages and they will appear here.';
+    el.wageList.append(empty);
+    return;
+  }
+
+  for (const wage of wages) {
+    const item = el.wageTemplate.content.firstElementChild.cloneNode(true);
+    item.classList.toggle('paid', wage.status === 'paid');
+    item.classList.toggle('void', wage.status === 'void');
+    item.querySelector('h3').textContent = `${wage.wageNumber} - ${wage.propertyAddress || 'Photographer wage'}`;
+    item.querySelector('.invoice-status').textContent = invoiceStatusLabel(wage.status);
+    item.querySelector('.invoice-status').classList.toggle('paid', wage.status === 'paid');
+    item.querySelector('.invoice-status').classList.toggle('void', wage.status === 'void');
+    item.querySelector('.wage-photographer').textContent = [wage.photographerName, wage.photographerEmail].filter(Boolean).join(' - ') || 'No photographer email';
+    item.querySelector('.wage-booking').textContent = `Issued ${formatInvoiceDate(wage.issuedAt)} - ${invoiceBookingLabel(wage)}`;
+    item.querySelector('.wage-services').textContent = (wage.items || []).map((item) => `${item.name} ${formatMoney(item.amount)}`).join(' + ') || 'No wage items';
+    const sentLine = item.querySelector('.wage-sent');
+    if (wage.sentAt) {
+      const sentTo = Array.isArray(wage.sentTo) && wage.sentTo.length ? ` to ${wage.sentTo.join(', ')}` : '';
+      sentLine.textContent = `Sent ${formatInvoiceDate(wage.sentAt)}${sentTo}`;
+      sentLine.hidden = false;
+    } else {
+      sentLine.textContent = '';
+      sentLine.hidden = true;
+    }
+    item.querySelector('.invoice-total strong').textContent = formatMoney(wage.total);
+    item.querySelector('.invoice-total small').textContent = `${wage.currency || 'AUD'} wage`;
+
+    item.querySelector('.print-wage-button').addEventListener('click', () => printWage(wage.id));
+    const sendButton = item.querySelector('.send-wage-button');
+    sendButton.hidden = wage.status === 'void';
+    sendButton.addEventListener('click', () => sendWage(wage.id));
+    const paidButton = item.querySelector('.paid-wage-button');
+    paidButton.hidden = wage.status !== 'draft';
+    paidButton.addEventListener('click', () => updateWageStatus(wage.id, 'paid'));
+    const voidButton = item.querySelector('.void-wage-button');
+    voidButton.hidden = wage.status === 'void';
+    voidButton.addEventListener('click', () => updateWageStatus(wage.id, 'void'));
+    el.wageList.append(item);
+  }
 }
 
 function renderInvoices() {
@@ -1230,6 +1324,15 @@ function upsertStateInvoice(invoice) {
   renderInvoices();
 }
 
+function upsertStateWage(wage) {
+  if (!wage || !userCanAccess('wages')) return;
+  const index = state.wages.findIndex((item) => item.id === wage.id || item.bookingId === wage.bookingId);
+  if (index >= 0) state.wages[index] = wage;
+  else state.wages.unshift(wage);
+  cacheWages();
+  renderWages();
+}
+
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, (char) => ({
     '&': '&amp;',
@@ -1267,6 +1370,36 @@ async function printInvoice(id) {
     setMessage(el.invoiceMessage, `${invoice.invoiceNumber} PDF downloaded.`, 'success');
   } catch {
     setMessage(el.invoiceMessage, 'Could not reach the invoice PDF maker.', 'error');
+  }
+}
+
+async function printWage(id) {
+  const wage = state.wages.find((item) => item.id === id);
+  if (!wage) return;
+
+  setMessage(el.wageMessage, `Preparing ${wage.wageNumber} PDF...`);
+  try {
+    const response = await fetch(`/api/wages/${encodeURIComponent(id)}/pdf`, {
+      credentials: 'same-origin'
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      setMessage(el.wageMessage, (data.errors || ['Could not create wage PDF.']).join(' '), 'error');
+      return;
+    }
+
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${[wage.wageNumber, wage.propertyAddress, 'Photographer Proforma'].filter(Boolean).join(' - ').replace(/[\\/:*?"<>|]/g, ' - ')}.pdf`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+    setMessage(el.wageMessage, `${wage.wageNumber} PDF downloaded.`, 'success');
+  } catch {
+    setMessage(el.wageMessage, 'Could not reach the wage PDF maker.', 'error');
   }
 }
 
@@ -1418,6 +1551,51 @@ async function syncInvoices() {
   }
 }
 
+async function loadWages() {
+  if (!userCanAccess('wages')) return;
+  const cached = readStored(storageKeys.wages, []).filter((wage) => wage?.id);
+  if (cached.length) {
+    state.wages = cached;
+    renderWages();
+  }
+
+  try {
+    const { response, data } = await fetchJson('/api/wages');
+    if (!response.ok) {
+      setMessage(el.wageMessage, (data.errors || ['Could not load wages.']).join(' '), 'error');
+      return;
+    }
+    state.wages = data.wages || [];
+    cacheWages();
+    renderWages();
+  } catch {
+    if (!state.wages.length) state.wages = cached;
+    renderWages();
+    setMessage(el.wageMessage, 'Showing saved wages while the live list catches up.', 'error');
+  }
+}
+
+async function syncWages() {
+  if (!userCanAccess('wages')) return;
+  el.syncWagesButton.disabled = true;
+  setMessage(el.wageMessage, 'Creating missing wages...');
+  try {
+    const { response, data } = await fetchJson('/api/wages/sync', { method: 'POST' });
+    if (!response.ok) {
+      setMessage(el.wageMessage, (data.errors || ['Could not sync wages.']).join(' '), 'error');
+      return;
+    }
+    state.wages = data.wages || [];
+    cacheWages();
+    renderWages();
+    setMessage(el.wageMessage, `Wages synced: ${data.created || 0} created, ${data.updated || 0} updated.`, 'success');
+  } catch {
+    setMessage(el.wageMessage, 'Could not reach the wage app.', 'error');
+  } finally {
+    el.syncWagesButton.disabled = false;
+  }
+}
+
 async function sendInvoice(id) {
   const invoice = state.invoices.find((item) => item.id === id);
   if (!invoice) return;
@@ -1453,6 +1631,41 @@ async function sendInvoice(id) {
   }
 }
 
+async function sendWage(id) {
+  const wage = state.wages.find((item) => item.id === id);
+  if (!wage) return;
+
+  const recipients = wageRecipientEmails(wage);
+  if (!recipients.length) {
+    setMessage(el.wageMessage, 'Add a photographer email before sending this proforma.', 'error');
+    return;
+  }
+
+  if (!window.confirm(`Send ${wage.wageNumber} to ${recipients.join(', ')}?`)) {
+    return;
+  }
+
+  setMessage(el.wageMessage, `Sending ${wage.wageNumber}...`);
+  try {
+    const { response, data } = await fetchJson(`/api/wages/${encodeURIComponent(id)}/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to: recipients })
+    });
+    if (!response.ok) {
+      setMessage(el.wageMessage, (data.errors || ['Could not send proforma.']).join(' '), 'error');
+      return;
+    }
+
+    state.wages = data.wages || state.wages.map((wageItem) => wageItem.id === id ? data.wage : wageItem);
+    cacheWages();
+    renderWages();
+    setMessage(el.wageMessage, data.message || 'Proforma sent.', 'success');
+  } catch {
+    setMessage(el.wageMessage, 'Could not reach the wage email sender.', 'error');
+  }
+}
+
 async function updateInvoiceStatus(id, status) {
   const action = status === 'paid' ? 'Marking invoice paid...' : 'Voiding invoice...';
   setMessage(el.invoiceMessage, action);
@@ -1468,6 +1681,24 @@ async function updateInvoiceStatus(id, status) {
     setMessage(el.invoiceMessage, status === 'paid' ? 'Invoice marked paid.' : 'Invoice voided.', 'success');
   } catch {
     setMessage(el.invoiceMessage, 'Could not reach the invoice app.', 'error');
+  }
+}
+
+async function updateWageStatus(id, status) {
+  const action = status === 'paid' ? 'Marking wage paid...' : 'Voiding wage...';
+  setMessage(el.wageMessage, action);
+  try {
+    const { response, data } = await fetchJson(`/api/wages/${encodeURIComponent(id)}/${status}`, { method: 'POST' });
+    if (!response.ok) {
+      setMessage(el.wageMessage, (data.errors || ['Could not update wage.']).join(' '), 'error');
+      return;
+    }
+    state.wages = data.wages || state.wages.map((wage) => wage.id === id ? data.wage : wage);
+    cacheWages();
+    renderWages();
+    setMessage(el.wageMessage, status === 'paid' ? 'Wage marked paid.' : 'Wage voided.', 'success');
+  } catch {
+    setMessage(el.wageMessage, 'Could not reach the wage app.', 'error');
   }
 }
 
@@ -1689,6 +1920,7 @@ async function submitBooking(event) {
       state.bookings.push(result.booking);
     }
     upsertStateInvoice(result.invoice);
+    upsertStateWage(result.wage);
     cacheBookings();
     rememberAddress(result.booking.propertyAddress);
     renderBookings();
@@ -1747,6 +1979,7 @@ async function cancelBooking(id) {
   if (!response.ok) return;
   state.bookings = state.bookings.map((booking) => booking.id === id ? data.booking : booking);
   upsertStateInvoice(data.invoice);
+  upsertStateWage(data.wage);
   cacheBookings();
   if (state.editingBookingId === id) resetBookingForm('Edit cancelled because the booking was cancelled.');
   renderBookings();
@@ -1878,6 +2111,8 @@ el.photographerForm.addEventListener('submit', saveDirectoryPhotographer);
 el.refreshButton.addEventListener('click', loadBookings);
 el.refreshInvoicesButton.addEventListener('click', loadInvoices);
 el.syncInvoicesButton.addEventListener('click', syncInvoices);
+el.refreshWagesButton.addEventListener('click', loadWages);
+el.syncWagesButton.addEventListener('click', syncWages);
 el.searchAddressButton.addEventListener('click', searchAddressSuggestions);
 el.testLarkButton.addEventListener('click', testLark);
 el.previewLarkButton.addEventListener('click', previewLarkEvent);
