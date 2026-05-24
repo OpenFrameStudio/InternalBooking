@@ -7,6 +7,7 @@ Current admin-selectable services:
 - Photography
 - Floorplan
 - Drone
+- Siteplan
 
 Calendar entries use one property address for the event title, Lark location name, and Lark full address. Notes are formatted with the agency/client, photographer, agent, selected services, and any extra instructions. Guest emails are saved locally and, when Lark is configured, sent to Lark as third-party attendees.
 
@@ -35,10 +36,13 @@ You can override these with `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `EMPLOYEE_USERNA
 Invoices are created automatically from confirmed bookings. The default draft invoice prices are:
 
 - Photography: `$150`
-- Floorplan: `$50`
-- Drone: `$50`
+- Floorplan: `$75`
+- Drone: `$100`
+- Siteplan: `$25`
 
 Invoices always add 10% GST to the service subtotal.
+
+Photographer wages are created automatically as draft proformas. Photography-only is `$90`; each photographer can be marked as GST included or no GST.
 
 ## Deploy to openframe.studio
 
@@ -53,6 +57,8 @@ restarts or redeploys the service.
    - `LARK_APP_ID`
    - `LARK_APP_SECRET`
    - `LARK_CALENDAR_ID`
+   - `SUPABASE_URL`
+   - `SUPABASE_SERVICE_ROLE_KEY`
    - optional: `LARK_ORGANIZER_CALENDAR_ID` for the admin sender calendar
    - optional: `LARK_SENDER_EMAIL` (defaults to `admin@openframe.studio`)
    - optional: `LARK_SENDER_NAME` (defaults to `admin@openframe.studio`)
@@ -70,8 +76,37 @@ restarts or redeploys the service.
    `internalbooking` and `system` subdomains, then verify them in Render.
 
 The blueprint sets the app to listen on `0.0.0.0` in production and uses
-`/api/status` as the health check. Upgrade the service before using it for real
-bookings so the saved bookings and clients can be moved to permanent storage.
+`/api/status` as the health check.
+
+## Supabase storage
+
+Supabase is the preferred permanent storage for bookings, clients, photographers, invoices, wages, work items, and changed passwords.
+
+1. Create a Supabase project.
+2. Open SQL Editor and run `supabase-schema.sql`.
+3. In Render, add:
+   - `SUPABASE_URL`
+   - `SUPABASE_SERVICE_ROLE_KEY`
+   - `SUPABASE_TABLE=internal_booking_data`
+4. Deploy the app and check `/api/status`; `storageBackend` should be `supabase`.
+
+The service role key must stay server-side in Render only. Do not use the anon key for this app.
+
+### Moving off GitHub storage
+
+If the app already has data in GitHub storage, leave `GITHUB_STORAGE_TOKEN` in Render for the first Supabase deploy and keep:
+
+```text
+SUPABASE_MIGRATE_FROM_GITHUB=true
+```
+
+When Supabase has the data and `/api/status` shows `storageBackend: "supabase"`, remove `GITHUB_STORAGE_TOKEN` from Render. After you confirm the Supabase data is complete, set this once and redeploy to delete the old GitHub JSON files:
+
+```text
+SUPABASE_DELETE_GITHUB_AFTER_MIGRATION=true
+```
+
+Then remove all `GITHUB_STORAGE_*` variables from Render. At that point the live app does not read or write client data to GitHub.
 
 ## Connect Lark Calendar
 

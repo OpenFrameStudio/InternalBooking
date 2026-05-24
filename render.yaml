@@ -17,6 +17,16 @@ services:
         value: 0.0.0.0
       - key: APP_PUBLIC_URL
         value: https://system.openframe.studio
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_TABLE
+        value: internal_booking_data
+      - key: SUPABASE_MIGRATE_FROM_GITHUB
+        value: true
+      - key: SUPABASE_DELETE_GITHUB_AFTER_MIGRATION
+        value: false
       - key: LARK_TIMEZONE
         value: Australia/Sydney
       - key: LARK_API_BASE

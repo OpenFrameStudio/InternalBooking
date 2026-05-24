@@ -35,7 +35,17 @@ const githubStorage = {
   branch: process.env.GITHUB_STORAGE_BRANCH || "data-store",
   pathPrefix: (process.env.GITHUB_STORAGE_PATH || "data").replace(/^\/+|\/+$/g, "")
 };
-const storageBackend = githubStorage.token && githubStorage.repo ? "github" : (process.env.DATA_DIR ? "disk" : "app");
+const supabaseStorage = {
+  url: (process.env.SUPABASE_URL || process.env.SUPABASE_PROJECT_URL || "").replace(/\/$/, ""),
+  key: process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || "",
+  table: process.env.SUPABASE_TABLE || "internal_booking_data"
+};
+const legacyStorageBackend = githubStorage.token && githubStorage.repo ? "github" : (process.env.DATA_DIR ? "disk" : "app");
+const storageBackend = supabaseStorage.url && supabaseStorage.key ? "supabase" : legacyStorageBackend;
+const supabaseMigration = {
+  fromGithub: normalizeEnvBoolean(process.env.SUPABASE_MIGRATE_FROM_GITHUB, true),
+  deleteGithubAfterMigration: normalizeEnvBoolean(process.env.SUPABASE_DELETE_GITHUB_AFTER_MIGRATION, false)
+};
 
 const port = Number(process.env.PORT || 4180);
 const host = process.env.HOST || (process.env.PORT ? "0.0.0.0" : "127.0.0.1");
@@ -179,42 +189,49 @@ const dataFiles = {
   bookings: {
     file: bookingsFile,
     seedFile: seedFiles.bookings,
+    supabaseKey: "bookings",
     githubPath: githubDataPath("bookings.json"),
     fallback: []
   },
   clients: {
     file: clientsFile,
     seedFile: seedFiles.clients,
+    supabaseKey: "clients",
     githubPath: githubDataPath("clients.json"),
     fallback: []
   },
   photographers: {
     file: photographersFile,
     seedFile: seedFiles.photographers,
+    supabaseKey: "photographers",
     githubPath: githubDataPath("photographers.json"),
     fallback: defaultPhotographers
   },
   work: {
     file: workFile,
     seedFile: seedFiles.work,
+    supabaseKey: "work",
     githubPath: githubDataPath("work-assignments.json"),
     fallback: defaultWorkState
   },
   invoices: {
     file: invoicesFile,
     seedFile: seedFiles.invoices,
+    supabaseKey: "invoices",
     githubPath: githubDataPath("invoices.json"),
     fallback: []
   },
   wages: {
     file: wagesFile,
     seedFile: seedFiles.wages,
+    supabaseKey: "wages",
     githubPath: githubDataPath("wages.json"),
     fallback: []
   },
   users: {
     file: usersFile,
     seedFile: seedFiles.users,
+    supabaseKey: "users",
     githubPath: githubDataPath("users.json"),
     fallback: []
   }
@@ -681,6 +698,118 @@ async function writeGithubJson(filePath, value) {
   }
 }
 
+async function deleteGithubJson(filePath) {
+  const current = await getGithubContent(filePath);
+  if (!current?.sha) {
+    return false;
+  }
+
+  const response = await fetch(githubContentsUrl(filePath), {
+    method: "DELETE",
+    headers: {
+      Accept: "application/vnd.github+json",
+      Authorization: `Bearer ${githubStorage.token}`,
+      "Content-Type": "application/json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      "User-Agent": "OpenFrameInternalBooking/1.0"
+    },
+    body: JSON.stringify({
+      message: `Remove migrated ${filePath}`,
+      sha: current.sha,
+      branch: githubStorage.branch
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseGithubError(response));
+  }
+
+  return true;
+}
+
+function supabaseTableUrl(query = "") {
+  const tableName = encodeURIComponent(supabaseStorage.table);
+  return `${supabaseStorage.url}/rest/v1/${tableName}${query}`;
+}
+
+function supabaseHeaders(extra = {}) {
+  return {
+    apikey: supabaseStorage.key,
+    Authorization: `Bearer ${supabaseStorage.key}`,
+    "Content-Type": "application/json",
+    ...extra
+  };
+}
+
+async function parseSupabaseError(response) {
+  const data = await response.json().catch(() => ({}));
+  return data.message || data.details || `Supabase storage request failed with ${response.status}.`;
+}
+
+function supabaseKey(dataFile) {
+  return dataFile.supabaseKey || path.basename(dataFile.file, ".json");
+}
+
+async function readSupabaseJson(key, fallback) {
+  const response = await fetch(supabaseTableUrl(`?namespace=eq.${encodeURIComponent(key)}&select=payload&limit=1`), {
+    headers: supabaseHeaders()
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseSupabaseError(response));
+  }
+
+  const rows = await response.json();
+  return rows[0]?.payload ?? fallback;
+}
+
+async function writeSupabaseJson(key, value) {
+  const response = await fetch(supabaseTableUrl("?on_conflict=namespace"), {
+    method: "POST",
+    headers: supabaseHeaders({ Prefer: "resolution=merge-duplicates,return=minimal" }),
+    body: JSON.stringify([{
+      namespace: key,
+      payload: value,
+      updated_at: new Date().toISOString()
+    }])
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseSupabaseError(response));
+  }
+}
+
+async function seedSupabaseDataFile(dataFile) {
+  const key = supabaseKey(dataFile);
+  const existing = await readSupabaseJson(key, undefined);
+  if (existing !== undefined) {
+    if (supabaseMigration.fromGithub && supabaseMigration.deleteGithubAfterMigration && githubStorage.token && githubStorage.repo) {
+      await deleteGithubJson(dataFile.githubPath);
+    }
+    return;
+  }
+
+  let seed;
+  let migratedFromGithub = false;
+  if (supabaseMigration.fromGithub && githubStorage.token && githubStorage.repo) {
+    const githubContent = await getGithubContent(dataFile.githubPath);
+    if (githubContent) {
+      seed = await readGithubJson(dataFile.githubPath, dataFile.fallback);
+      migratedFromGithub = true;
+    }
+  }
+
+  if (seed === undefined) {
+    seed = await readJsonFile(dataFile.seedFile, dataFile.fallback);
+  }
+
+  await writeSupabaseJson(key, seed);
+
+  if (migratedFromGithub && supabaseMigration.deleteGithubAfterMigration) {
+    await deleteGithubJson(dataFile.githubPath);
+  }
+}
+
 async function fileExists(filePath) {
   try {
     await stat(filePath);
@@ -703,6 +832,10 @@ async function seedDataFile(targetFile, seedFile, fallback) {
 }
 
 async function readStoredJson(dataFile) {
+  if (storageBackend === "supabase") {
+    return readSupabaseJson(supabaseKey(dataFile), dataFile.fallback);
+  }
+
   if (storageBackend === "github") {
     return readGithubJson(dataFile.githubPath, dataFile.fallback);
   }
@@ -711,6 +844,11 @@ async function readStoredJson(dataFile) {
 }
 
 async function writeStoredJson(dataFile, value) {
+  if (storageBackend === "supabase") {
+    await writeSupabaseJson(supabaseKey(dataFile), value);
+    return;
+  }
+
   if (storageBackend === "github") {
     await writeGithubJson(dataFile.githubPath, value);
     return;
@@ -720,6 +858,11 @@ async function writeStoredJson(dataFile, value) {
 }
 
 async function seedStoredDataFile(dataFile) {
+  if (storageBackend === "supabase") {
+    await seedSupabaseDataFile(dataFile);
+    return;
+  }
+
   if (storageBackend === "github") {
     const existing = await getGithubContent(dataFile.githubPath);
     if (existing) {
@@ -735,7 +878,7 @@ async function seedStoredDataFile(dataFile) {
 }
 
 async function prepareDataStorage() {
-  if (storageBackend !== "github") {
+  if (!["github", "supabase"].includes(storageBackend)) {
     await mkdir(dataDir, { recursive: true });
   }
 
@@ -3550,7 +3693,10 @@ async function handleApi(req, res, url) {
       larkAttendeesEnabled: shouldAddLarkAttendees(),
       timezone: larkConfig.timezone,
       persistentStorage: storageBackend !== "app",
-      storageBackend
+      storageBackend,
+      supabaseConfigured: storageBackend === "supabase",
+      githubMigrationSourceConfigured: Boolean(githubStorage.token && githubStorage.repo),
+      githubDeleteAfterSupabaseMigration: supabaseMigration.deleteGithubAfterMigration
     });
     return;
   }
