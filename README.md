@@ -92,21 +92,8 @@ Supabase is the preferred permanent storage for bookings, clients, photographers
 
 The service role key must stay server-side in Render only. Do not use the anon key for this app.
 
-### Moving off GitHub storage
-
-If the app already has data in GitHub storage, leave `GITHUB_STORAGE_TOKEN` in Render for the first Supabase deploy and keep:
-
-```text
-SUPABASE_MIGRATE_FROM_GITHUB=true
-```
-
-When Supabase has the data and `/api/status` shows `storageBackend: "supabase"`, remove `GITHUB_STORAGE_TOKEN` from Render. After you confirm the Supabase data is complete, set this once and redeploy to delete the old GitHub JSON files:
-
-```text
-SUPABASE_DELETE_GITHUB_AFTER_MIGRATION=true
-```
-
-Then remove all `GITHUB_STORAGE_*` variables from Render. At that point the live app does not read or write client data to GitHub.
+GitHub storage was removed after the Supabase migration. Remove any old
+`GITHUB_STORAGE_*` variables from Render; they are no longer used by the app.
 
 ## Connect Lark Calendar
 
