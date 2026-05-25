@@ -4218,13 +4218,16 @@ async function handleApi(req, res, url) {
 
 async function serveStatic(req, res, url) {
   const routePath = url.pathname === "/login" ? "/login.html" : url.pathname;
-  const appPath =
-    routePath === "/" ? "/portal.html"
-      : routePath === "/bookings" ? "/index.html"
-        : routePath === "/invoices" ? "/index.html"
-          : routePath === "/wages" ? "/index.html"
-        : routePath === "/work" || routePath === "/work/" ? "/work/index.html"
-          : routePath;
+  const routeFiles = {
+    "/": "/portal.html",
+    "/bookings": "/index.html",
+    "/invoices": "/index.html",
+    "/wages": "/index.html",
+    "/settings": "/settings.html",
+    "/work": "/work/index.html",
+    "/work/": "/work/index.html"
+  };
+  const appPath = routeFiles[routePath] || routePath;
   const requestedPath = decodeURIComponent(appPath);
   let filePath = path.normalize(path.join(publicDir, requestedPath));
 

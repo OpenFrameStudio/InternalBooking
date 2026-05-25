@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OpenFrame Settings</title>
+    <meta name="theme-color" content="#0f5c4f" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="OpenFrame" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/settings.css" />
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
+    <script src="/install.js" defer></script>
+    <script src="/settings.js" type="module"></script>
+  </head>
+  <body class="settings-body">
+    <main class="settings-shell">
+      <nav class="settings-topbar" aria-label="Settings navigation">
+        <a class="settings-back" href="/">
+          <i data-lucide="grid-3x3"></i>
+          <span>All apps</span>
+        </a>
+        <button class="settings-logout" id="logoutButton" type="button">Log out</button>
+      </nav>
+
+      <section class="settings-hero">
+        <div>
+          <p class="eyebrow">OpenFrame Studio</p>
+          <h1>Settings</h1>
+        </div>
+        <span class="settings-hero-icon" aria-hidden="true">
+          <i data-lucide="settings-2"></i>
+        </span>
+      </section>
+
+      <section class="settings-grid" aria-label="Settings">
+        <article class="settings-panel">
+          <div class="settings-panel-heading">
+            <span class="settings-panel-icon">
+              <i data-lucide="user-round"></i>
+            </span>
+            <div>
+              <p class="eyebrow">Account</p>
+              <h2 id="accountName">Loading</h2>
+            </div>
+          </div>
+          <dl class="settings-list">
+            <div>
+              <dt>Login</dt>
+              <dd id="accountLogin">-</dd>
+            </div>
+            <div>
+              <dt>Role</dt>
+              <dd id="accountRole">-</dd>
+            </div>
+            <div>
+              <dt>Apps</dt>
+              <dd id="accountApps">-</dd>
+            </div>
+          </dl>
+        </article>
+
+        <article class="settings-panel">
+          <div class="settings-panel-heading">
+            <span class="settings-panel-icon">
+              <i data-lucide="activity"></i>
+            </span>
+            <div>
+              <p class="eyebrow">System</p>
+              <h2>Status</h2>
+            </div>
+          </div>
+          <div class="settings-status-list" id="statusList"></div>
+        </article>
+
+        <article class="settings-panel settings-password-panel">
+          <div class="settings-panel-heading">
+            <span class="settings-panel-icon">
+              <i data-lucide="lock-keyhole"></i>
+            </span>
+            <div>
+              <p class="eyebrow">Security</p>
+              <h2>Change password</h2>
+            </div>
+          </div>
+          <form class="settings-form" id="passwordForm">
+            <label>
+              <span>Current password</span>
+              <input id="currentPasswordInput" type="password" autocomplete="current-password" required />
+            </label>
+            <label>
+              <span>New password</span>
+              <input id="newPasswordInput" type="password" autocomplete="new-password" minlength="4" required />
+            </label>
+            <label>
+              <span>Confirm new password</span>
+              <input id="confirmPasswordInput" type="password" autocomplete="new-password" minlength="4" required />
+            </label>
+            <p class="settings-message" id="passwordMessage" role="status"></p>
+            <button class="settings-submit" id="savePasswordButton" type="submit">Save password</button>
+          </form>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>
