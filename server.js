@@ -86,6 +86,12 @@ const workInviteEmailConfig = {
   subjectPrefix: process.env.WORK_INVITE_EMAIL_SUBJECT_PREFIX || "Work invite",
   timeoutMs: Number.isFinite(invoiceEmailTimeoutMs) ? invoiceEmailTimeoutMs : 15_000
 };
+const workLarkNotificationConfig = {
+  enabled: normalizeEnvBoolean(process.env.WORK_LARK_NOTIFICATIONS_ENABLED, true),
+  receiveIdType: process.env.WORK_LARK_RECEIVE_ID_TYPE || "email",
+  receiveId: process.env.WORK_LARK_RECEIVE_ID || process.env.EMPLOYEE_LARK_RECEIVE_ID || "",
+  subjectPrefix: process.env.WORK_LARK_NOTIFICATION_PREFIX || "New work"
+};
 const calendarInviteEmailConfig = {
   enabled: normalizeEnvBoolean(process.env.CALENDAR_INVITE_EMAIL_ENABLED, true),
   from: process.env.CALENDAR_INVITE_EMAIL_FROM || invoiceEmailConfig.from,
@@ -125,6 +131,7 @@ const workDeskOrigins = new Set(
     .map((origin) => origin.trim())
     .filter(Boolean)
 );
+const larkMessageReceiveIdTypes = new Set(["open_id", "user_id", "union_id", "email", "chat_id"]);
 
 let tenantTokenCache = null;
 const sessions = new Map();
@@ -171,6 +178,8 @@ const defaultWorkState = {
     id: "faye",
     name: "Faye",
     email: parseGuestEmails(workInviteEmailConfig.to)[0] || "",
+    larkReceiveId: workLarkNotificationConfig.receiveId,
+    larkReceiveIdType: workLarkNotificationConfig.receiveIdType,
     role: "Editor / Admin",
     availability: "Mon-Fri, 12pm-8pm Australian time"
   },
@@ -564,7 +573,9 @@ function normalizeWorkState(raw) {
   const employee = {
     ...defaultWorkState.employee,
     ...(raw?.employee || {}),
-    email: String(raw?.employee?.email || defaultWorkState.employee.email || "").trim()
+    email: String(raw?.employee?.email || defaultWorkState.employee.email || "").trim(),
+    larkReceiveId: String(raw?.employee?.larkReceiveId || defaultWorkState.employee.larkReceiveId || "").trim(),
+    larkReceiveIdType: String(raw?.employee?.larkReceiveIdType || defaultWorkState.employee.larkReceiveIdType || "email").trim()
   };
 
   const assignments = Array.isArray(raw?.assignments)
@@ -585,6 +596,10 @@ function normalizeWorkState(raw) {
         inviteTo: uniqueEmails(parseGuestEmails(assignment.inviteTo || "")).join(", "),
         inviteEmailFrom: String(assignment.inviteEmailFrom || ""),
         inviteError: String(assignment.inviteError || ""),
+        larkNotifyStatus: ["sent", "failed", "not_configured"].includes(assignment.larkNotifyStatus) ? assignment.larkNotifyStatus : "",
+        larkNotifySentAt: assignment.larkNotifySentAt || "",
+        larkNotifyTo: String(assignment.larkNotifyTo || ""),
+        larkNotifyError: String(assignment.larkNotifyError || ""),
         completedAt: assignment.completedAt || "",
         createdAt: assignment.createdAt || new Date().toISOString(),
         updatedAt: assignment.updatedAt || assignment.createdAt || new Date().toISOString()
@@ -655,6 +670,10 @@ function validateWorkAssignment(input, existing = null) {
       inviteTo: existing?.inviteTo || "",
       inviteEmailFrom: existing?.inviteEmailFrom || "",
       inviteError: existing?.inviteError || "",
+      larkNotifyStatus: existing?.larkNotifyStatus || "",
+      larkNotifySentAt: existing?.larkNotifySentAt || "",
+      larkNotifyTo: existing?.larkNotifyTo || "",
+      larkNotifyError: existing?.larkNotifyError || "",
       completedAt: existing?.completedAt || "",
       createdAt: existing?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString()
@@ -751,6 +770,10 @@ function assignmentFromBooking(booking, existing = null) {
     inviteTo: existing?.inviteTo || "",
     inviteEmailFrom: existing?.inviteEmailFrom || "",
     inviteError: existing?.inviteError || "",
+    larkNotifyStatus: existing?.larkNotifyStatus || "",
+    larkNotifySentAt: existing?.larkNotifySentAt || "",
+    larkNotifyTo: existing?.larkNotifyTo || "",
+    larkNotifyError: existing?.larkNotifyError || "",
     completedAt: existing?.completedAt || "",
     createdAt: existing?.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString()
@@ -1883,6 +1906,46 @@ function isWorkInviteEmailConfigured() {
   return workInviteEmailMissingSettings().length === 0;
 }
 
+function normalizeLarkMessageReceiveIdType(value) {
+  const receiveIdType = String(value || "email").trim().toLowerCase();
+  return larkMessageReceiveIdTypes.has(receiveIdType) ? receiveIdType : "email";
+}
+
+function workLarkReceiveIdType(workState = null) {
+  return normalizeLarkMessageReceiveIdType(
+    workLarkNotificationConfig.receiveIdType || workState?.employee?.larkReceiveIdType
+  );
+}
+
+function workLarkReceiveId(workState = null) {
+  const configuredId = String(workLarkNotificationConfig.receiveId || "").trim();
+  if (configuredId) return configuredId;
+
+  const employeeId = String(workState?.employee?.larkReceiveId || "").trim();
+  if (employeeId) return employeeId;
+
+  if (workLarkReceiveIdType(workState) === "email") {
+    return workInviteRecipients(workState)[0] || "";
+  }
+
+  return "";
+}
+
+function workLarkNotificationMissingSettings(workState = null) {
+  const missing = [];
+  if (!workLarkNotificationConfig.enabled) missing.push("WORK_LARK_NOTIFICATIONS_ENABLED");
+  if (!larkConfig.appId) missing.push("LARK_APP_ID");
+  if (!larkConfig.appSecret) missing.push("LARK_APP_SECRET");
+  if (!workLarkReceiveId(workState)) {
+    missing.push(workLarkReceiveIdType(workState) === "email" ? "WORK_LARK_RECEIVE_ID or WORK_INVITE_EMAIL_TO" : "WORK_LARK_RECEIVE_ID");
+  }
+  return missing;
+}
+
+function isWorkLarkNotificationConfigured() {
+  return workLarkNotificationMissingSettings().length === 0;
+}
+
 function formatWorkInviteDueDate(assignment) {
   const dueDate = parseDateValue(assignment.dueDate);
   if (Number.isNaN(dueDate.getTime())) return assignment.dueDate || "Not set";
@@ -1926,6 +1989,25 @@ function buildWorkInviteEmailText(assignment, workState) {
   return lines.join("\n");
 }
 
+function buildWorkLarkNotificationText(assignment, workState) {
+  const lines = [
+    `${workLarkNotificationConfig.subjectPrefix}: ${assignment.title}`,
+    "",
+    `Hi ${workState?.employee?.name || "Faye"},`,
+    `Due: ${formatWorkInviteDueDate(assignment)}`,
+    `Priority: ${assignment.priority}`,
+    ""
+  ];
+
+  if (assignment.notes) {
+    const notes = assignment.notes.length > 900 ? `${assignment.notes.slice(0, 900)}...` : assignment.notes;
+    lines.push("Details:", notes, "");
+  }
+
+  lines.push("Open work desk:", `${publicAppUrl}/work/`);
+  return lines.join("\n");
+}
+
 function buildWorkInviteEmailHtml(assignment, workState) {
   const notes = assignment.notes
     ? `<p><strong>Details:</strong><br />${escapeHtmlForEmail(assignment.notes).replace(/\n/g, "<br />")}</p>`
@@ -1943,6 +2025,43 @@ function buildWorkInviteEmailHtml(assignment, workState) {
       <p>Thank you,<br />OpenFrame Studio</p>
     </div>
   `;
+}
+
+async function sendWorkLarkNotification(assignment, workState) {
+  const missing = workLarkNotificationMissingSettings(workState);
+  if (missing.length) {
+    return { sent: false, skipped: true, missing };
+  }
+
+  const token = await getTenantAccessToken();
+  const receiveIdType = workLarkReceiveIdType(workState);
+  const receiveId = workLarkReceiveId(workState);
+  const params = new URLSearchParams({ receive_id_type: receiveIdType });
+  const response = await fetch(`${larkConfig.apiBase}/im/v1/messages?${params}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    body: JSON.stringify({
+      receive_id: receiveId,
+      msg_type: "text",
+      content: JSON.stringify({ text: buildWorkLarkNotificationText(assignment, workState) })
+    })
+  });
+
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || (result.code !== undefined && result.code !== 0)) {
+    const message = result.msg || result.message || `Lark message failed with ${response.status}.`;
+    throw new Error(message);
+  }
+
+  return {
+    sent: true,
+    receiveId,
+    receiveIdType,
+    messageId: result.data?.message_id || result.data?.messageId || ""
+  };
 }
 
 async function sendWorkInviteEmail(assignment, workState) {
@@ -1968,6 +2087,50 @@ async function sendWorkInviteEmail(assignment, workState) {
 
   await sendResendEmail(payload, workInviteEmailConfig.timeoutMs, "Work invite email request timed out.");
   return { sent: true, recipients };
+}
+
+async function sendWorkLarkNotifications(workState, assignments) {
+  const summary = {
+    attempted: assignments.length,
+    sent: 0,
+    skipped: 0,
+    failed: 0,
+    recipients: [],
+    errors: [],
+    missing: []
+  };
+
+  for (const assignment of assignments) {
+    try {
+      const result = await sendWorkLarkNotification(assignment, workState);
+      const now = new Date().toISOString();
+
+      if (result.sent) {
+        summary.sent += 1;
+        const recipient = `${result.receiveIdType}:${result.receiveId}`;
+        summary.recipients = [...new Set([...summary.recipients, recipient])];
+        assignment.larkNotifyStatus = "sent";
+        assignment.larkNotifySentAt = now;
+        assignment.larkNotifyTo = recipient;
+        assignment.larkNotifyError = "";
+      } else {
+        summary.skipped += 1;
+        summary.missing = [...new Set([...summary.missing, ...(result.missing || [])])];
+        assignment.larkNotifyStatus = "not_configured";
+        assignment.larkNotifyError = result.missing?.length
+          ? `Missing ${result.missing.join(", ")}`
+          : "Lark work notifications are not configured.";
+      }
+    } catch (error) {
+      summary.failed += 1;
+      const message = error.message || "Could not send Lark work notification.";
+      summary.errors.push(message);
+      assignment.larkNotifyStatus = "failed";
+      assignment.larkNotifyError = message;
+    }
+  }
+
+  return summary;
 }
 
 async function sendWorkInviteEmails(workState, assignments) {
@@ -2014,6 +2177,31 @@ async function sendWorkInviteEmails(workState, assignments) {
   }
 
   return summary;
+}
+
+function workLarkNotificationMessage(summary) {
+  if (!summary?.attempted) return "";
+  if (summary.sent) {
+    return "Lark notification sent to Faye.";
+  }
+  if (summary.failed) {
+    return `Work saved, but Lark notification could not send: ${summary.errors[0] || "unknown error"}`;
+  }
+  if (summary.skipped) {
+    return "Work saved. Add WORK_LARK_RECEIVE_ID or WORK_INVITE_EMAIL_TO in Render to notify Faye in Lark.";
+  }
+  return "";
+}
+
+function workAssignmentNotificationMessage(workLarkSummary, workEmailSummary) {
+  const larkMessage = workLarkNotificationMessage(workLarkSummary);
+  const emailMessage = workInviteMessage(workEmailSummary);
+
+  if (workLarkSummary?.sent && workEmailSummary?.skipped) {
+    return larkMessage;
+  }
+
+  return [larkMessage, emailMessage].filter(Boolean).join(" ");
 }
 
 function workInviteMessage(summary) {
@@ -3263,6 +3451,9 @@ async function handleApi(req, res, url) {
       wageEmailConfigured: isInvoiceEmailConfigured(),
       workInviteEmailConfigured: isWorkInviteEmailConfigured(),
       workInviteEmailFrom: workInviteEmailConfig.from,
+      workLarkNotificationConfigured: isWorkLarkNotificationConfigured(),
+      workLarkNotificationsEnabled: workLarkNotificationConfig.enabled,
+      workLarkReceiveIdType: normalizeLarkMessageReceiveIdType(workLarkNotificationConfig.receiveIdType),
       calendarInviteEmailConfigured: isCalendarInviteEmailConfigured(),
       calendarInviteEmailFrom: calendarInviteEmailConfig.from,
       larkNotificationsEnabled: shouldUseLarkCalendarNotifications(),
@@ -3359,12 +3550,16 @@ async function handleApi(req, res, url) {
     const result = mergeBookingWorkAssignments(workState, bookings);
     const { createdAssignments, ...syncResult } = result;
     const workInvite = await sendWorkInviteEmails(workState, createdAssignments);
+    const workLarkNotification = await sendWorkLarkNotifications(workState, createdAssignments);
+    const workNotificationMessage = workAssignmentNotificationMessage(workLarkNotification, workInvite);
     await saveWorkState(workState);
     sendJson(res, 200, {
       ...visibleWorkStateForUser(workState, currentUser(req)),
       ...syncResult,
       workInvite,
-      workInviteMessage: workInviteMessage(workInvite),
+      workLarkNotification,
+      workLarkNotificationMessage: workLarkNotificationMessage(workLarkNotification),
+      workInviteMessage: workNotificationMessage,
       user: currentUser(req)
     });
     return;
@@ -3385,12 +3580,16 @@ async function handleApi(req, res, url) {
     const workState = await loadWorkState();
     workState.assignments.push(assignment);
     const workInvite = await sendWorkInviteEmails(workState, [assignment]);
+    const workLarkNotification = await sendWorkLarkNotifications(workState, [assignment]);
+    const workNotificationMessage = workAssignmentNotificationMessage(workLarkNotification, workInvite);
     await saveWorkState(workState);
     sendJson(res, 201, {
       assignment,
       ...visibleWorkStateForUser(workState, currentUser(req)),
       workInvite,
-      workInviteMessage: workInviteMessage(workInvite),
+      workLarkNotification,
+      workLarkNotificationMessage: workLarkNotificationMessage(workLarkNotification),
+      workInviteMessage: workNotificationMessage,
       user: currentUser(req)
     });
     return;

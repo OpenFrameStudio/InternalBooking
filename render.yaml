@@ -57,6 +57,12 @@ services:
         value: OpenFrame Studio <admin@openframe.studio>
       - key: WORK_INVITE_EMAIL_REPLY_TO
         value: admin@openframe.studio
+      - key: WORK_LARK_NOTIFICATIONS_ENABLED
+        value: true
+      - key: WORK_LARK_RECEIVE_ID_TYPE
+        value: email
+      - key: WORK_LARK_RECEIVE_ID
+        sync: false
       - key: INVOICE_EMAIL_HOST
         value: smtp.larksuite.com
       - key: INVOICE_EMAIL_PORT

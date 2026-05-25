@@ -68,6 +68,8 @@ restarts or redeploys the service.
    - optional: `INVOICE_EMAIL_FROM` (defaults to `OpenFrame Studio <admin@openframe.studio>`)
    - optional: `WORK_INVITE_EMAIL_TO` for Faye's work assignment invite emails
    - optional: `WORK_INVITE_EMAIL_FROM` (defaults to `OpenFrame Studio <admin@openframe.studio>`)
+   - optional: `WORK_LARK_RECEIVE_ID` for Faye's Lark work notifications
+   - optional: `WORK_LARK_RECEIVE_ID_TYPE` (defaults to `email`)
    - optional: `ADMIN_USERNAME`
    - optional: `ADMIN_PASSWORD`
 4. After the service is live, open its Custom Domains settings and verify
@@ -139,6 +141,14 @@ Verify `openframe.studio` in Resend first so emails can send from
 Work assignment invites also use Resend over HTTPS. Set
 `WORK_INVITE_EMAIL_TO` to Faye's email address; the default sender is
 `OpenFrame Studio <admin@openframe.studio>`.
+
+Work assignment Lark notifications use your existing Lark app to send a bot
+message to Faye when new work is assigned. In Lark Open Platform, enable the
+bot and grant permission to send messages as the app. If Faye's Lark login
+email is the same as `WORK_INVITE_EMAIL_TO`, leave `WORK_LARK_RECEIVE_ID`
+empty and keep `WORK_LARK_RECEIVE_ID_TYPE=email`. Otherwise set
+`WORK_LARK_RECEIVE_ID` to Faye's Lark user identifier and change
+`WORK_LARK_RECEIVE_ID_TYPE` to `user_id`, `open_id`, `union_id`, or `chat_id`.
 
 SMTP is still available if `INVOICE_EMAIL_PROVIDER=smtp`, but Render free
 services block outbound SMTP ports such as `465` and `587`.

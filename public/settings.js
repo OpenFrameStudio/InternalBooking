@@ -71,6 +71,7 @@ function statusRows() {
     ["Booking invite email", status.calendarInviteEmailConfigured],
     ["Invoice email", status.invoiceEmailConfigured],
     ["Wage proforma email", status.wageEmailConfigured],
+    ["Work Lark notifications", status.workLarkNotificationConfigured],
     ["Supabase storage", status.supabaseConfigured],
     ["Calendar notifications", status.larkNotificationsEnabled]
   ];
