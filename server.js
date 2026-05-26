@@ -2846,16 +2846,20 @@ async function sendWorkInviteEmails(workState, assignments) {
   return summary;
 }
 
-function workLarkNotificationMessage(summary) {
+function workLarkNotificationMessage(summary, context = "saved") {
   if (!summary?.attempted) return "";
   if (summary.sent) {
     return "Lark notification sent to the employee.";
   }
   if (summary.failed) {
-    return `Work saved, but Lark notification could not send: ${summary.errors[0] || "unknown error"}`;
+    return context === "manual"
+      ? `Lark notification could not send: ${summary.errors[0] || "unknown error"}`
+      : `Work saved, but Lark notification could not send: ${summary.errors[0] || "unknown error"}`;
   }
   if (summary.skipped) {
-    return "Work saved. Add the employee's Lark or email details to notify them in Lark.";
+    return context === "manual"
+      ? "Add the employee's Lark or email details to notify them in Lark."
+      : "Work saved. Add the employee's Lark or email details to notify them in Lark.";
   }
   return "";
 }
@@ -4319,6 +4323,31 @@ async function handleApi(req, res, url) {
       workLarkNotification,
       workLarkNotificationMessage: workLarkNotificationMessage(workLarkNotification),
       workInviteMessage: workNotificationMessage,
+      user: currentUser(req)
+    });
+    return;
+  }
+
+  const notifyWorkMatch = url.pathname.match(/^\/api\/work\/assignments\/([^/]+)\/notify$/);
+  if (req.method === "POST" && notifyWorkMatch) {
+    if (!requirePermission(req, res, "manage_work", "Boss or team leader only.")) {
+      return;
+    }
+
+    const assignmentId = decodeURIComponent(notifyWorkMatch[1]);
+    const workState = await loadWorkState();
+    const assignment = workState.assignments.find((item) => item.id === assignmentId);
+    if (!assignment) {
+      sendJson(res, 404, { errors: ["Work not found."] });
+      return;
+    }
+
+    const workLarkNotification = await sendWorkLarkNotifications(workState, [assignment]);
+    await saveWorkState(workState);
+    sendJson(res, 200, {
+      ...visibleWorkStateForUser(workState, currentUser(req)),
+      workLarkNotification,
+      workLarkNotificationMessage: workLarkNotificationMessage(workLarkNotification, "manual"),
       user: currentUser(req)
     });
     return;
