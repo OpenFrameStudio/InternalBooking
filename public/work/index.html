@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Faye Work Desk</title>
+    <title>OpenFrame Work Desk</title>
     <meta name="theme-color" content="#0f5c4f" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
@@ -15,7 +15,7 @@
     <link rel="stylesheet" href="/styles.css" />
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
     <script src="/install.js" defer></script>
-    <script src="/work/app.js?v=state-managed-work" type="module"></script>
+    <script src="/work/app.js?v=employee-assignee" type="module"></script>
   </head>
   <body>
     <main class="shell">
@@ -34,7 +34,7 @@
         <section class="workspace" aria-label="Work assignment workspace">
           <aside class="rail">
             <div>
-              <p class="eyebrow">Faye Work Desk</p>
+              <p class="eyebrow">Work Desk</p>
               <h1>Assign work and know when it is finished.</h1>
             </div>
 
@@ -67,7 +67,7 @@
             <div class="surface-header">
               <div>
                 <p class="eyebrow">Work assignments</p>
-                <h2>Faye's work queue</h2>
+                <h2>Team work queue</h2>
                 <p id="summaryLine"></p>
               </div>
               <div class="actions">
@@ -98,7 +98,7 @@
                 <span>Internal booking system</span>
                 <a class="ghost-button" href="/bookings">Open bookings</a>
               </div>
-              <p id="bookingSyncStatus" role="status">Sync upcoming bookings into Faye's work queue.</p>
+              <p id="bookingSyncStatus" role="status">Sync upcoming bookings into the work queue.</p>
             </section>
 
             <fieldset class="service-picker work-filter-bar" aria-label="Work filters">
@@ -127,7 +127,7 @@
       <form method="dialog" id="assignmentForm" class="dialog-card booking-form">
         <div class="surface-header dialog-heading">
           <div>
-            <p class="eyebrow">Faye</p>
+            <p class="eyebrow">Work assignment</p>
             <h2 id="assignmentDialogTitle">Assign Work</h2>
           </div>
           <button class="ghost-button icon-ghost" type="button" id="closeAssignmentDialogButton" title="Close" aria-label="Close">
@@ -136,6 +136,13 @@
         </div>
 
         <input type="hidden" id="assignmentId" />
+
+        <label>
+          <span>Assign to</span>
+          <select id="assignmentEmployee">
+            <option value="faye">Faye</option>
+          </select>
+        </label>
 
         <label>
           <span>Work</span>

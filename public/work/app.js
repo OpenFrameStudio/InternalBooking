@@ -1,11 +1,13 @@
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
+const defaultWorkEmployeeId = "faye";
 
 const el = {
   addAssignmentButton: $("#addAssignmentButton"),
   assignmentDialog: $("#assignmentDialog"),
   assignmentDialogTitle: $("#assignmentDialogTitle"),
   assignmentDueDate: $("#assignmentDueDate"),
+  assignmentEmployee: $("#assignmentEmployee"),
   assignmentError: $("#assignmentError"),
   assignmentForm: $("#assignmentForm"),
   assignmentId: $("#assignmentId"),
@@ -37,7 +39,7 @@ const el = {
   toastRegion: $("#toastRegion"),
 };
 
-const initialBookingSyncStatus = "Sync upcoming bookings into Faye's work queue.";
+const initialBookingSyncStatus = "Sync upcoming bookings into the work queue.";
 
 const state = {
   employee: {
@@ -46,6 +48,14 @@ const state = {
     role: "Editor / Admin",
     availability: "Mon-Fri, 12pm-8pm Australian time",
   },
+  employees: [
+    {
+      id: "faye",
+      name: "Faye",
+      role: "Editor / Admin",
+      availability: "Mon-Fri, 12pm-8pm Australian time",
+    },
+  ],
   assignments: [],
   messages: [],
   user: null,
@@ -65,6 +75,7 @@ const state = {
 function emptyAssignmentDraft() {
   return {
     id: "",
+    employeeId: defaultWorkEmployeeId,
     title: "",
     dueDate: toISODate(new Date()),
     priority: "normal",
@@ -72,11 +83,20 @@ function emptyAssignmentDraft() {
   };
 }
 
+function defaultEmployeeId() {
+  return state?.employees?.[0]?.id || state?.employee?.id || "faye";
+}
+
+function employeeById(employeeId) {
+  return state.employees.find((employee) => employee.id === employeeId) || state.employee;
+}
+
 function assignmentDraftFromAssignment(assignment = null) {
   if (!assignment) return emptyAssignmentDraft();
 
   return {
     id: assignment.id || "",
+    employeeId: assignment.employeeId || defaultEmployeeId(),
     title: assignment.title || "",
     dueDate: assignment.dueDate || toISODate(new Date()),
     priority: assignment.priority || "normal",
@@ -100,6 +120,7 @@ function setUiState(patch = {}) {
 function setWorkData(data, uiPatch = {}) {
   setState({
     employee: data.employee || state.employee,
+    employees: Array.isArray(data.employees) && data.employees.length ? data.employees : state.employees,
     assignments: Array.isArray(data.assignments) ? data.assignments : state.assignments,
     messages: Array.isArray(data.messages) ? data.messages : state.messages,
     user: data.user || state.user,
@@ -312,6 +333,7 @@ function renderAssignments() {
 }
 
 function renderAssignmentCard(assignment) {
+  const assignee = employeeById(assignment.employeeId);
   const card = document.createElement("article");
   card.className = `assignment-card ${assignment.status === "done" ? "done" : "open"} ${
     isOverdue(assignment) ? "overdue" : ""
@@ -337,7 +359,7 @@ function renderAssignmentCard(assignment) {
   card.querySelector(".priority-pill").textContent = assignment.priority;
   card.querySelector("h3").textContent = assignment.title;
   card.querySelector(".assignment-notes").textContent = assignment.notes || "No details added.";
-  card.querySelector(".assignment-meta strong").textContent = state.employee.name;
+  card.querySelector(".assignment-meta strong").textContent = assignee?.name || "Employee";
   card.querySelector(".assignment-meta em").textContent = `Due ${formatDate(parseISODate(assignment.dueDate), {
     weekday: "short",
     day: "numeric",
@@ -412,6 +434,7 @@ function renderAssignmentDialog() {
 
   el.assignmentDialogTitle.textContent = draft.id ? "Edit Work" : "Assign Work";
   el.assignmentId.value = draft.id;
+  renderEmployeeOptions(draft.employeeId);
   el.assignmentTitle.value = draft.title;
   el.assignmentDueDate.value = draft.dueDate;
   el.assignmentPriority.value = draft.priority;
@@ -427,6 +450,17 @@ function renderAssignmentDialog() {
   if (!state.ui.assignmentDialogOpen && wasOpen) {
     el.assignmentDialog.close();
   }
+}
+
+function renderEmployeeOptions(selectedEmployeeId) {
+  const employees = state.employees.length ? state.employees : [state.employee];
+  el.assignmentEmployee.replaceChildren(...employees.map((employee) => {
+    const option = document.createElement("option");
+    option.value = employee.id;
+    option.textContent = employee.name || "Employee";
+    option.selected = employee.id === selectedEmployeeId;
+    return option;
+  }));
 }
 
 function renderBookingSync() {
@@ -478,6 +512,7 @@ function closeAssignmentDialog() {
 
 function updateAssignmentDraft(event) {
   const fieldById = {
+    assignmentEmployee: "employeeId",
     assignmentTitle: "title",
     assignmentDueDate: "dueDate",
     assignmentPriority: "priority",
@@ -497,6 +532,7 @@ function updateAssignmentDraft(event) {
 
 function assignmentPayloadFromDraft(draft) {
   return {
+    employeeId: draft.employeeId || defaultEmployeeId(),
     title: draft.title.trim(),
     dueDate: draft.dueDate,
     priority: draft.priority,
@@ -574,7 +610,7 @@ async function syncBookings() {
   try {
     const data = await workApi.syncBookings();
     const message = data.syncable === 0
-      ? "No upcoming bookings found to assign to Faye."
+      ? "No upcoming bookings found to assign."
       : `Synced ${data.syncable} upcoming bookings: ${data.created} new, ${data.updated} updated.`;
     const fullMessage = data.workInviteMessage ? `${message} ${data.workInviteMessage}` : message;
 
@@ -594,12 +630,14 @@ async function syncBookings() {
 }
 
 function notifyCompletion(assignment) {
-  showToast(`${state.employee.name} finished: ${assignment.title}`);
+  const assignee = employeeById(assignment.employeeId);
+  const assigneeName = assignee?.name || state.employee.name;
+  showToast(`${assigneeName} finished: ${assignment.title}`);
 
   if (!("Notification" in window) || state.ui.notificationPermission !== "granted") return;
 
   try {
-    new Notification("Work finished", { body: `${state.employee.name} finished: ${assignment.title}` });
+    new Notification("Work finished", { body: `${assigneeName} finished: ${assignment.title}` });
   } catch {
     showToast("Browser message could not be shown.");
   }
