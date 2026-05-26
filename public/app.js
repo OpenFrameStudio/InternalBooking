@@ -1324,6 +1324,14 @@ function renderInvoices() {
     item.querySelector('.invoice-total small').textContent = `${invoice.currency || 'AUD'} incl. GST`;
 
     item.querySelector('.print-invoice-button').addEventListener('click', () => printInvoice(invoice.id));
+    const editButton = item.querySelector('.edit-invoice-button');
+    const sourceBooking = state.bookings.find((booking) => booking.id === invoice.bookingId);
+    const canEditSourceBooking = Boolean(invoice.bookingId) && invoice.status !== 'void' && (!sourceBooking || sourceBooking.status !== 'cancelled');
+    editButton.disabled = !canEditSourceBooking;
+    editButton.title = canEditSourceBooking
+      ? 'Edit the booking that created this invoice.'
+      : 'Refresh bookings, then edit the source booking for this invoice.';
+    editButton.addEventListener('click', () => startInvoiceEdit(invoice.id));
     const sendButton = item.querySelector('.send-invoice-button');
     sendButton.hidden = invoice.status === 'void';
     sendButton.addEventListener('click', () => sendInvoice(invoice.id));
@@ -1437,6 +1445,39 @@ function startBookingEdit(id) {
   fillBookingForm(booking);
   setMessage(el.formMessage, 'Editing booking. Update booking to save changes.');
   el.bookingForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+async function startInvoiceEdit(id) {
+  const invoice = state.invoices.find((item) => item.id === id);
+  if (!invoice) {
+    setMessage(el.invoiceMessage, 'Invoice not found.', 'error');
+    return;
+  }
+
+  if (!invoice.bookingId) {
+    setMessage(el.invoiceMessage, 'This invoice is not linked to a booking, so it cannot be edited here.', 'error');
+    return;
+  }
+
+  let booking = state.bookings.find((item) => item.id === invoice.bookingId);
+  if (!booking) {
+    setMessage(el.invoiceMessage, 'Finding the booking for this invoice...');
+    await loadBookings();
+    booking = state.bookings.find((item) => item.id === invoice.bookingId);
+  }
+
+  if (!booking) {
+    setMessage(el.invoiceMessage, 'The booking for this invoice could not be found.', 'error');
+    return;
+  }
+
+  if (booking.status === 'cancelled') {
+    setMessage(el.invoiceMessage, 'This invoice belongs to a cancelled booking, so it cannot be edited.', 'error');
+    return;
+  }
+
+  startBookingEdit(booking.id);
+  setMessage(el.formMessage, `Editing booking for ${invoice.invoiceNumber}. Save it to refresh the invoice.`, 'success');
 }
 
 function updateStats() {
