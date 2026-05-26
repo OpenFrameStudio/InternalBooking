@@ -1,0 +1,64 @@
+.assignment-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: -8px 0 18px;
+  border: 1px solid rgba(17, 122, 93, 0.24);
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, rgba(17, 122, 93, 0.13), rgba(55, 103, 143, 0.065)),
+    var(--paper);
+  padding: 15px 16px;
+  box-shadow: 0 12px 30px rgba(22, 29, 25, 0.07);
+}
+
+.assignment-notice[hidden] {
+  display: none;
+}
+
+.assignment-notice-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.assignment-notice .eyebrow {
+  margin: 0;
+  color: var(--accent-dark);
+}
+
+.assignment-notice strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-size: 1.06rem;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.assignment-notice span {
+  min-width: 0;
+}
+
+.assignment-notice-copy > span {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+:root[data-theme="dark"] .assignment-notice {
+  border-color: rgba(90, 212, 173, 0.3);
+  background:
+    linear-gradient(90deg, rgba(90, 212, 173, 0.14), rgba(156, 196, 231, 0.07)),
+    var(--paper);
+}
+
+@media (max-width: 720px) {
+  .assignment-notice {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

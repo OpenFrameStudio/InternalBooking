@@ -13,9 +13,10 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
     <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/work/styles.css?v=assignment-notice" />
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
     <script src="/install.js" defer></script>
-    <script src="/work/app.js?v=employee-assignee" type="module"></script>
+    <script src="/work/app.js?v=assignment-notice" type="module"></script>
   </head>
   <body>
     <main class="shell">
@@ -84,6 +85,18 @@
                 </button>
               </div>
             </div>
+
+            <section class="assignment-notice" id="assignmentNotice" hidden aria-live="polite">
+              <div class="assignment-notice-copy">
+                <p class="eyebrow">New assignments</p>
+                <strong id="assignmentNoticeTitle">New work waiting</strong>
+                <span id="assignmentNoticeDetail"></span>
+              </div>
+              <button class="ghost-button" id="assignmentNoticeButton" type="button">
+                <i data-lucide="list-checks"></i>
+                <span>View open</span>
+              </button>
+            </section>
 
             <section class="client-panel message-panel" id="messagePanel" hidden>
               <div class="client-panel-header">

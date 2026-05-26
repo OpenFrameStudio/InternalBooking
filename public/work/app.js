@@ -12,6 +12,10 @@ const el = {
   assignmentForm: $("#assignmentForm"),
   assignmentId: $("#assignmentId"),
   assignmentList: $("#assignmentList"),
+  assignmentNotice: $("#assignmentNotice"),
+  assignmentNoticeButton: $("#assignmentNoticeButton"),
+  assignmentNoticeDetail: $("#assignmentNoticeDetail"),
+  assignmentNoticeTitle: $("#assignmentNoticeTitle"),
   assignmentNotes: $("#assignmentNotes"),
   assignmentPriority: $("#assignmentPriority"),
   assignmentTitle: $("#assignmentTitle"),
@@ -250,6 +254,19 @@ function priorityWeight(priority) {
   return { high: 3, normal: 2, low: 1 }[priority] || 2;
 }
 
+function getOpenAssignments() {
+  return [...state.assignments]
+    .filter((assignment) => assignment.status !== "done")
+    .sort((a, b) => {
+      const overdueSort = Number(isOverdue(b)) - Number(isOverdue(a));
+      if (overdueSort) return overdueSort;
+      if (a.dueDate !== b.dueDate) return a.dueDate.localeCompare(b.dueDate);
+      const prioritySort = priorityWeight(b.priority) - priorityWeight(a.priority);
+      if (prioritySort) return prioritySort;
+      return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
+    });
+}
+
 function getNotificationPermission() {
   if (!("Notification" in window)) return "unavailable";
   return Notification.permission;
@@ -258,6 +275,7 @@ function getNotificationPermission() {
 function render() {
   renderProfile();
   renderMetrics();
+  renderAssignmentNotice();
   renderRoleAccess();
   renderFilters();
   renderMessages();
@@ -289,7 +307,7 @@ function renderRoleAccess() {
 }
 
 function renderMetrics() {
-  const open = state.assignments.filter((assignment) => assignment.status !== "done");
+  const open = getOpenAssignments();
   const done = state.assignments.filter((assignment) => assignment.status === "done");
   const dueToday = open.filter((assignment) => isToday(assignment.dueDate));
   const overdue = open.filter(isOverdue);
@@ -298,6 +316,30 @@ function renderMetrics() {
   el.doneCount.textContent = done.length;
   el.dueTodayCount.textContent = dueToday.length;
   el.summaryLine.textContent = `${open.length} open - ${dueToday.length} due today - ${overdue.length} overdue`;
+}
+
+function renderAssignmentNotice() {
+  const open = getOpenAssignments();
+  el.assignmentNotice.hidden = open.length === 0;
+
+  if (!open.length) {
+    el.assignmentNoticeTitle.textContent = "New work waiting";
+    el.assignmentNoticeDetail.textContent = "";
+    return;
+  }
+
+  const nextAssignment = open[0];
+  const countLabel = open.length === 1 ? "1 new assignment" : `${open.length} new assignments`;
+  const audienceLabel = state.user?.role === "employee" ? "assigned to you" : "in the queue";
+  const dueLabel = isOverdue(nextAssignment)
+    ? "overdue"
+    : isToday(nextAssignment.dueDate)
+      ? "due today"
+      : `due ${formatDate(parseISODate(nextAssignment.dueDate), { weekday: "short", day: "numeric", month: "short" })}`;
+  const priorityLabel = `${nextAssignment.priority.charAt(0).toUpperCase()}${nextAssignment.priority.slice(1)} priority`;
+
+  el.assignmentNoticeTitle.textContent = `${countLabel} ${audienceLabel}`;
+  el.assignmentNoticeDetail.textContent = `Next: ${nextAssignment.title} - ${dueLabel} - ${priorityLabel}`;
 }
 
 function renderFilters() {
@@ -606,6 +648,13 @@ async function clearMessages() {
   setWorkData(await workApi.clearMessages());
 }
 
+function viewOpenAssignments() {
+  setUiState({ filter: "open" });
+  window.requestAnimationFrame(() => {
+    el.assignmentList.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+}
+
 async function syncBookings() {
   if (!canSyncBookings()) return;
 
@@ -693,6 +742,7 @@ function refreshIcons() {
 function wireEvents() {
   el.logoutButton.addEventListener("click", logout);
   el.addAssignmentButton.addEventListener("click", () => openAssignmentDialog());
+  el.assignmentNoticeButton.addEventListener("click", viewOpenAssignments);
   el.syncBookingsButton.addEventListener("click", syncBookings);
   el.enableMessagesButton.addEventListener("click", enableNotifications);
   el.clearMessagesButton.addEventListener("click", clearMessages);
