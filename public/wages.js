@@ -26,7 +26,10 @@ const el = {
   wageTotalValue: $("#wageTotalValue"),
   syncWagesButton: $("#syncWagesButton"),
   refreshWagesButton: $("#refreshWagesButton"),
-  logoutButton: $("#logoutButton")
+  logoutButton: $("#logoutButton"),
+  financialYearSelect: $("#financialYearSelect"),
+  downloadFinancialYearButton: $("#downloadFinancialYearButton"),
+  financialYearExportMessage: $("#financialYearExportMessage")
 };
 
 const state = {
@@ -128,6 +131,37 @@ function setActiveSheet(sheet) {
   el.tabs.forEach((tab) => tab.classList.toggle("active", tab.dataset.sheet === sheet));
   el.employeesSheet.hidden = sheet !== "employees";
   el.contractorsSheet.hidden = sheet !== "contractors";
+}
+
+function currentAustralianFinancialYearStartYear(date = new Date()) {
+  return date.getMonth() >= 6 ? date.getFullYear() : date.getFullYear() - 1;
+}
+
+function populateFinancialYearOptions() {
+  const currentStartYear = currentAustralianFinancialYearStartYear();
+  el.financialYearSelect.innerHTML = "";
+  for (let year = currentStartYear; year >= currentStartYear - 6; year -= 1) {
+    const option = document.createElement("option");
+    option.value = String(year);
+    option.textContent = `${year}-${year + 1}`;
+    el.financialYearSelect.append(option);
+  }
+}
+
+function downloadFileNameFromResponse(response, fallback) {
+  const disposition = response.headers.get("content-disposition") || "";
+  const quoted = disposition.match(/filename="([^"]+)"/i);
+  const plain = disposition.match(/filename=([^;]+)/i);
+  return (quoted?.[1] || plain?.[1] || fallback).trim();
+}
+
+function exportCountMessage(response) {
+  const invoices = Number(response.headers.get("x-openframe-invoice-count") || 0);
+  const employees = Number(response.headers.get("x-openframe-employee-wage-count") || 0);
+  const contractors = Number(response.headers.get("x-openframe-contractor-wage-count") || 0);
+  const total = invoices + employees + contractors;
+  if (!total) return "Downloaded an empty financial year pack.";
+  return `Downloaded ${invoices} invoices, ${employees} employee wages, and ${contractors} contractor wages.`;
 }
 
 function employeePayload() {
@@ -420,6 +454,43 @@ async function updateContractorWageStatus(id, status) {
   setMessage(el.wageMessage, status === "paid" ? "Contractor wage marked paid." : "Contractor wage voided.", "success");
 }
 
+async function downloadFinancialYearExport() {
+  const startYear = el.financialYearSelect.value;
+  const label = `${startYear}-${Number(startYear) + 1}`;
+  el.downloadFinancialYearButton.disabled = true;
+  setMessage(el.financialYearExportMessage, `Preparing ${label} pack...`);
+
+  try {
+    const response = await fetch(`/api/exports/financial-year/${encodeURIComponent(startYear)}`, {
+      credentials: "include"
+    });
+
+    if (response.status === 401) {
+      window.location.href = "/login";
+      return;
+    }
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      setMessage(el.financialYearExportMessage, (data.errors || ["Could not download the financial year pack."]).join(" "), "error");
+      return;
+    }
+
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = downloadFileNameFromResponse(response, `OpenFrame Studio - FY ${label} - invoices and wages.zip`);
+    document.body.append(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+    setMessage(el.financialYearExportMessage, exportCountMessage(response), "success");
+  } finally {
+    el.downloadFinancialYearButton.disabled = false;
+  }
+}
+
 async function logout() {
   await fetch("/api/logout", { method: "POST", credentials: "include" });
   window.location.href = "/login";
@@ -431,9 +502,11 @@ function wireEvents() {
   el.newEmployeeWageButton.addEventListener("click", () => resetEmployeeForm());
   el.refreshWagesButton.addEventListener("click", loadContractorWages);
   el.syncWagesButton.addEventListener("click", syncContractorWages);
+  el.downloadFinancialYearButton.addEventListener("click", downloadFinancialYearExport);
   el.logoutButton.addEventListener("click", logout);
 }
 
+populateFinancialYearOptions();
 wireEvents();
 setActiveSheet("employees");
 await Promise.all([loadEmployeeWages(), loadContractorWages()]);

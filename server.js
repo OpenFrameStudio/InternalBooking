@@ -2124,6 +2124,226 @@ function wageFileName(wage) {
   return `${base || "wage-proforma"}.pdf`;
 }
 
+function australianFinancialYearBounds(startYearValue) {
+  const startYear = Number.parseInt(String(startYearValue || ""), 10);
+  if (!Number.isInteger(startYear) || startYear < 2000 || startYear > 2100) {
+    return null;
+  }
+
+  return {
+    startYear,
+    label: `${startYear}-${startYear + 1}`,
+    startMs: Date.UTC(startYear, 6, 1, 0, 0, 0),
+    endMs: Date.UTC(startYear + 1, 6, 1, 0, 0, 0)
+  };
+}
+
+function recordInFinancialYear(record, bounds, dateFields = ["issuedAt"]) {
+  for (const field of dateFields) {
+    const value = record?.[field];
+    if (!value) continue;
+    const time = new Date(value).getTime();
+    if (Number.isFinite(time)) {
+      if (time >= bounds.startMs && time < bounds.endMs) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+function safeArchiveName(value, fallback = "document") {
+  const name = String(value || fallback)
+    .replace(/[<>:"/\\|?*\x00-\x1f]+/g, "-")
+    .replace(/\s+/g, " ")
+    .replace(/-+/g, "-")
+    .trim()
+    .slice(0, 120);
+  return name || fallback;
+}
+
+function uniqueArchiveEntryName(folder, filename, usedNames) {
+  const safeFolder = safeArchiveName(folder, "Documents");
+  const safeFile = safeArchiveName(filename, "document.pdf");
+  const extensionIndex = safeFile.lastIndexOf(".");
+  const stem = extensionIndex > 0 ? safeFile.slice(0, extensionIndex) : safeFile;
+  const extension = extensionIndex > 0 ? safeFile.slice(extensionIndex) : "";
+  let candidate = `${safeFolder}/${safeFile}`;
+  let suffix = 2;
+
+  while (usedNames.has(candidate.toLowerCase())) {
+    candidate = `${safeFolder}/${stem}-${suffix}${extension}`;
+    suffix += 1;
+  }
+
+  usedNames.add(candidate.toLowerCase());
+  return candidate;
+}
+
+let zipCrcTable = null;
+
+function crc32(buffer) {
+  if (!zipCrcTable) {
+    zipCrcTable = Array.from({ length: 256 }, (_, index) => {
+      let crc = index;
+      for (let bit = 0; bit < 8; bit += 1) {
+        crc = crc & 1 ? (0xedb88320 ^ (crc >>> 1)) : (crc >>> 1);
+      }
+      return crc >>> 0;
+    });
+  }
+
+  let crc = 0xffffffff;
+  for (const byte of buffer) {
+    crc = zipCrcTable[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function zipDosDateTime(value) {
+  const inputDate = value instanceof Date ? value : new Date(value || Date.now());
+  const date = Number.isNaN(inputDate.getTime()) ? new Date() : inputDate;
+  const year = Math.max(1980, date.getFullYear());
+  return {
+    time: (date.getHours() << 11) | (date.getMinutes() << 5) | Math.floor(date.getSeconds() / 2),
+    date: ((year - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate()
+  };
+}
+
+function createStoredZip(entries) {
+  const localParts = [];
+  const centralParts = [];
+  let offset = 0;
+
+  for (const entry of entries) {
+    const data = Buffer.isBuffer(entry.data) ? entry.data : Buffer.from(String(entry.data || ""));
+    const nameBuffer = Buffer.from(entry.name.replace(/\\/g, "/"), "utf8");
+    const checksum = crc32(data);
+    const { time, date } = zipDosDateTime(entry.date);
+
+    const localHeader = Buffer.alloc(30);
+    localHeader.writeUInt32LE(0x04034b50, 0);
+    localHeader.writeUInt16LE(20, 4);
+    localHeader.writeUInt16LE(0, 6);
+    localHeader.writeUInt16LE(0, 8);
+    localHeader.writeUInt16LE(time, 10);
+    localHeader.writeUInt16LE(date, 12);
+    localHeader.writeUInt32LE(checksum, 14);
+    localHeader.writeUInt32LE(data.length, 18);
+    localHeader.writeUInt32LE(data.length, 22);
+    localHeader.writeUInt16LE(nameBuffer.length, 26);
+    localHeader.writeUInt16LE(0, 28);
+    localParts.push(localHeader, nameBuffer, data);
+
+    const centralHeader = Buffer.alloc(46);
+    centralHeader.writeUInt32LE(0x02014b50, 0);
+    centralHeader.writeUInt16LE(20, 4);
+    centralHeader.writeUInt16LE(20, 6);
+    centralHeader.writeUInt16LE(0, 8);
+    centralHeader.writeUInt16LE(0, 10);
+    centralHeader.writeUInt16LE(time, 12);
+    centralHeader.writeUInt16LE(date, 14);
+    centralHeader.writeUInt32LE(checksum, 16);
+    centralHeader.writeUInt32LE(data.length, 20);
+    centralHeader.writeUInt32LE(data.length, 24);
+    centralHeader.writeUInt16LE(nameBuffer.length, 28);
+    centralHeader.writeUInt16LE(0, 30);
+    centralHeader.writeUInt16LE(0, 32);
+    centralHeader.writeUInt16LE(0, 34);
+    centralHeader.writeUInt16LE(0, 36);
+    centralHeader.writeUInt32LE(0, 38);
+    centralHeader.writeUInt32LE(offset, 42);
+    centralParts.push(centralHeader, nameBuffer);
+
+    offset += localHeader.length + nameBuffer.length + data.length;
+  }
+
+  const centralDirectory = Buffer.concat(centralParts);
+  const endRecord = Buffer.alloc(22);
+  endRecord.writeUInt32LE(0x06054b50, 0);
+  endRecord.writeUInt16LE(0, 4);
+  endRecord.writeUInt16LE(0, 6);
+  endRecord.writeUInt16LE(entries.length, 8);
+  endRecord.writeUInt16LE(entries.length, 10);
+  endRecord.writeUInt32LE(centralDirectory.length, 12);
+  endRecord.writeUInt32LE(offset, 16);
+  endRecord.writeUInt16LE(0, 20);
+
+  return Buffer.concat([...localParts, centralDirectory, endRecord]);
+}
+
+function financialYearExportFileName(bounds) {
+  return safeArchiveName(`OpenFrame Studio - FY ${bounds.label} - invoices and wages.zip`, "financial-year-export.zip");
+}
+
+async function createFinancialYearExportZip(bounds) {
+  const [invoices, employeeWages, contractorWages] = await Promise.all([
+    loadInvoices(),
+    loadEmployeeWages(),
+    loadWages()
+  ]);
+  const usedNames = new Set();
+  const entries = [];
+
+  const invoiceMatches = invoices
+    .filter((invoice) => recordInFinancialYear(invoice, bounds, ["issuedAt", "createdAt"]))
+    .sort((a, b) => new Date(a.issuedAt) - new Date(b.issuedAt));
+  const employeeMatches = employeeWages
+    .filter((wage) => recordInFinancialYear(wage, bounds, ["issuedAt", "nextPaymentAt", "createdAt"]))
+    .sort((a, b) => new Date(a.issuedAt) - new Date(b.issuedAt));
+  const contractorMatches = contractorWages
+    .filter((wage) => recordInFinancialYear(wage, bounds, ["issuedAt", "bookingStartAt", "createdAt"]))
+    .sort((a, b) => new Date(a.issuedAt) - new Date(b.issuedAt));
+
+  for (const invoice of invoiceMatches) {
+    entries.push({
+      name: uniqueArchiveEntryName("Invoices", invoiceFileName(invoice), usedNames),
+      data: await createInvoicePdfBuffer(invoice),
+      date: invoice.issuedAt
+    });
+  }
+
+  for (const wage of employeeMatches) {
+    entries.push({
+      name: uniqueArchiveEntryName("Employee wages", employeeWageFileName(wage), usedNames),
+      data: await createEmployeePayslipPdfBuffer(wage),
+      date: wage.issuedAt
+    });
+  }
+
+  for (const wage of contractorMatches) {
+    entries.push({
+      name: uniqueArchiveEntryName("Contractor wages", wageFileName(wage), usedNames),
+      data: await createWagePdfBuffer(wage),
+      date: wage.issuedAt
+    });
+  }
+
+  if (!entries.length) {
+    entries.push({
+      name: "README.txt",
+      data: [
+        `OpenFrame Studio financial year export: ${bounds.label}`,
+        "",
+        "No invoices, employee wages, or contractor wages were found for this Australian financial year.",
+        "Australian financial years run from 1 July to 30 June."
+      ].join("\n"),
+      date: new Date()
+    });
+  }
+
+  return {
+    buffer: createStoredZip(entries),
+    counts: {
+      invoices: invoiceMatches.length,
+      employeeWages: employeeMatches.length,
+      contractorWages: contractorMatches.length,
+      total: invoiceMatches.length + employeeMatches.length + contractorMatches.length
+    }
+  };
+}
+
 function wageEmailRecipients(wage, input = {}) {
   const requestedRecipients = Array.isArray(input.to || input.recipients)
     ? (input.to || input.recipients)
@@ -4249,6 +4469,38 @@ async function handleApi(req, res, url) {
 
     const result = await deletePastBookingsAndInvoices();
     sendJson(res, 200, result);
+    return;
+  }
+
+  const financialYearExportMatch = url.pathname.match(/^\/api\/exports\/financial-year\/(\d{4})$/);
+  if (req.method === "GET" && financialYearExportMatch) {
+    if (!hasPermission(req, "manage_invoices") || !hasPermission(req, "manage_wages")) {
+      sendForbidden(res, "Boss only.");
+      return;
+    }
+
+    const bounds = australianFinancialYearBounds(financialYearExportMatch[1]);
+    if (!bounds) {
+      sendJson(res, 400, { errors: ["Choose a valid Australian financial year."] });
+      return;
+    }
+
+    try {
+      const { buffer, counts } = await createFinancialYearExportZip(bounds);
+      const filename = financialYearExportFileName(bounds).replace(/["\\\r\n]/g, "");
+      res.writeHead(200, {
+        "Content-Type": "application/zip",
+        "Content-Length": buffer.length,
+        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Cache-Control": "no-store",
+        "X-OpenFrame-Invoice-Count": String(counts.invoices),
+        "X-OpenFrame-Employee-Wage-Count": String(counts.employeeWages),
+        "X-OpenFrame-Contractor-Wage-Count": String(counts.contractorWages)
+      });
+      res.end(buffer);
+    } catch (error) {
+      sendJson(res, 500, { errors: [error.message || "Could not create financial year export."] });
+    }
     return;
   }
 

@@ -62,6 +62,26 @@
   gap: 20px;
 }
 
+.financial-year-export-surface {
+  margin-bottom: 20px;
+}
+
+.financial-year-export-controls {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.financial-year-export-controls label {
+  flex: 1 1 240px;
+  max-width: 360px;
+}
+
+.financial-year-export-controls .primary-button {
+  min-height: 52px;
+}
+
 .wage-total-pill {
   display: inline-flex;
   align-items: center;
@@ -79,19 +99,22 @@
 }
 
 #employeeWageMessage,
-#wageMessage {
+#wageMessage,
+#financialYearExportMessage {
   margin: 0;
   color: var(--muted);
   font-weight: 850;
 }
 
 #employeeWageMessage.error,
-#wageMessage.error {
+#wageMessage.error,
+#financialYearExportMessage.error {
   color: var(--red);
 }
 
 #employeeWageMessage.success,
-#wageMessage.success {
+#wageMessage.success,
+#financialYearExportMessage.success {
   color: var(--accent-dark);
 }
 
