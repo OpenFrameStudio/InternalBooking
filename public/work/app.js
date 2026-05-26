@@ -55,6 +55,12 @@ const state = {
       role: "Editor / Admin",
       availability: "Mon-Fri, 12pm-8pm Australian time",
     },
+    {
+      id: "test",
+      name: "Test",
+      role: "Test Employee",
+      availability: "Testing account",
+    },
   ],
   assignments: [],
   messages: [],

@@ -125,6 +125,16 @@ const authUsers = [
     employeeId: "faye",
     apps: ["bookings", "work"],
     permissions: ["complete_work"]
+  },
+  {
+    username: process.env.TEST_EMPLOYEE_USERNAME || "Test",
+    password: process.env.TEST_EMPLOYEE_PASSWORD || "1111",
+    role: "employee",
+    label: "Employee",
+    name: "Test",
+    employeeId: "test",
+    apps: ["bookings", "work"],
+    permissions: ["complete_work"]
   }
 ];
 const workDeskOrigins = new Set(
@@ -186,9 +196,19 @@ const defaultWorkEmployee = {
   role: "Editor / Admin",
   availability: "Mon-Fri, 12pm-8pm Australian time"
 };
+const testWorkEmployee = {
+  id: "test",
+  name: "Test",
+  email: "",
+  larkReceiveId: "",
+  larkReceiveIdType: "email",
+  role: "Test Employee",
+  availability: "Testing account"
+};
+const defaultWorkEmployees = [defaultWorkEmployee, testWorkEmployee];
 const defaultWorkState = {
   employee: defaultWorkEmployee,
-  employees: [defaultWorkEmployee],
+  employees: defaultWorkEmployees,
   assignments: [],
   messages: []
 };
@@ -608,7 +628,7 @@ async function saveEmployeeWages(employeeWages) {
   await writeStoredJson(dataFiles.employeeWages, normalizeEmployeeWages(employeeWages));
 }
 
-function normalizeWorkEmployee(employee = {}, fallback = defaultWorkEmployee) {
+function normalizeWorkEmployee(employee = {}, fallback = {}) {
   const id = String(employee.id || fallback.id || defaultWorkEmployee.id).trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-");
   return {
     ...fallback,
@@ -624,24 +644,24 @@ function normalizeWorkEmployee(employee = {}, fallback = defaultWorkEmployee) {
 }
 
 function normalizeWorkEmployees(raw) {
-  const employees = [
-    normalizeWorkEmployee(defaultWorkEmployee),
-    normalizeWorkEmployee(raw?.employee || defaultWorkEmployee),
-    ...(Array.isArray(raw?.employees) ? raw.employees.map((employee) => normalizeWorkEmployee(employee, defaultWorkEmployee)) : [])
-  ];
-  const seen = new Set();
-  const unique = [];
+  const employees = new Map();
+  const candidates = [
+    ...defaultWorkEmployees,
+    raw?.employee || null,
+    ...(Array.isArray(raw?.employees) ? raw.employees : [])
+  ].filter(Boolean);
 
-  for (const employee of employees) {
-    if (!employee.id || seen.has(employee.id)) {
+  for (const candidate of candidates) {
+    const previous = employees.get(String(candidate?.id || "").trim().toLowerCase());
+    const employee = normalizeWorkEmployee(candidate, previous || {});
+    if (!employee.id) {
       continue;
     }
 
-    seen.add(employee.id);
-    unique.push(employee);
+    employees.set(employee.id, employee);
   }
 
-  return unique.length ? unique : [normalizeWorkEmployee(defaultWorkEmployee)];
+  return employees.size ? [...employees.values()] : defaultWorkEmployees.map((employee) => normalizeWorkEmployee(employee));
 }
 
 function workEmployeeById(workState, employeeId) {
@@ -2069,10 +2089,14 @@ function workEmployeeForAssignment(workState = null, assignment = null) {
   return workEmployeeById(workState, assignment?.employeeId || defaultWorkEmployee.id);
 }
 
+function isDefaultWorkEmployee(employee) {
+  return employee?.id === defaultWorkEmployee.id;
+}
+
 function workInviteRecipients(workState = null, assignment = null) {
   const employee = workEmployeeForAssignment(workState, assignment);
   const employeeEmails = parseGuestEmails(employee?.email || "");
-  const fallbackEmails = parseGuestEmails(workInviteEmailConfig.to);
+  const fallbackEmails = isDefaultWorkEmployee(employee) ? parseGuestEmails(workInviteEmailConfig.to) : [];
   return uniqueEmails(employeeEmails.length ? employeeEmails : fallbackEmails).filter(isValidEmail);
 }
 
@@ -2106,7 +2130,7 @@ function workLarkReceiveId(workState = null, assignment = null) {
   if (employeeId) return employeeId;
 
   const configuredId = String(workLarkNotificationConfig.receiveId || "").trim();
-  if (configuredId) return configuredId;
+  if (configuredId && isDefaultWorkEmployee(employee)) return configuredId;
 
   if (workLarkReceiveIdType(workState, assignment) === "email") {
     return workInviteRecipients(workState, assignment)[0] || "";
@@ -2440,13 +2464,13 @@ async function sendWorkInviteEmails(workState, assignments) {
 function workLarkNotificationMessage(summary) {
   if (!summary?.attempted) return "";
   if (summary.sent) {
-    return "Lark notification sent to Faye.";
+    return "Lark notification sent to the employee.";
   }
   if (summary.failed) {
     return `Work saved, but Lark notification could not send: ${summary.errors[0] || "unknown error"}`;
   }
   if (summary.skipped) {
-    return "Work saved. Add WORK_LARK_RECEIVE_ID or WORK_INVITE_EMAIL_TO in Render to notify Faye in Lark.";
+    return "Work saved. Add the employee's Lark or email details to notify them in Lark.";
   }
   return "";
 }
@@ -2471,7 +2495,7 @@ function workInviteMessage(summary) {
     return `Work saved, but the invite email could not send: ${summary.errors[0] || "unknown error"}`;
   }
   if (summary.skipped) {
-    return `Work saved. Add WORK_INVITE_EMAIL_TO in Render to email Faye from ${workInviteEmailConfig.from}.`;
+    return `Work saved. Add the employee's email details to send work invite emails from ${workInviteEmailConfig.from}.`;
   }
   return "";
 }

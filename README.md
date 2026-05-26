@@ -27,13 +27,15 @@ Default logins:
 - Boss password: `Sg1654723576`
 - Faye login: `Faye`
 - Faye password: `1111`
+- Test employee login: `Test`
+- Test employee password: `1111`
 
-Faye can access Bookings and Work. Boss can access Bookings, Clients, Photographers, Invoices, Wages, and Work.
+Faye and Test can access Bookings and Work. Boss can access Bookings, Clients, Photographers, Invoices, Wages, and Work.
 Work actions are enforced by server-side permissions; hiding buttons in the browser is only for usability.
 
-Work assignments include an assignee dropdown. Faye is the default employee and the default assignee for imported booking work.
+Work assignments include an assignee dropdown. Faye is the default employee and the default assignee for imported booking work; Test is available as a quiet testing employee account.
 
-You can override these with `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `EMPLOYEE_USERNAME`, and `EMPLOYEE_PASSWORD`.
+You can override these with `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `EMPLOYEE_USERNAME`, `EMPLOYEE_PASSWORD`, `TEST_EMPLOYEE_USERNAME`, and `TEST_EMPLOYEE_PASSWORD`.
 
 Invoices are created automatically from confirmed bookings. The default draft invoice prices are:
 
