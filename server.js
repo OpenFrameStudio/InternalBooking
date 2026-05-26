@@ -1246,14 +1246,22 @@ function formatInvoiceMoney(value) {
 
 function formatDocumentMoney(value, currency = invoiceCurrency) {
   const safeCurrency = /^[A-Z]{3}$/.test(String(currency || "")) ? String(currency).toUpperCase() : invoiceCurrency;
+  const amount = Number(value || 0);
+  if (safeCurrency === "THB") {
+    return `${safeCurrency} ${amount.toLocaleString("en-AU", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    })}`;
+  }
+
   try {
     return new Intl.NumberFormat("en-AU", {
       style: "currency",
       currency: safeCurrency,
-      currencyDisplay: safeCurrency === "THB" ? "narrowSymbol" : "symbol"
-    }).format(Number(value || 0));
+      currencyDisplay: "symbol"
+    }).format(amount).replace(/\u00a0/g, " ");
   } catch {
-    return `${safeCurrency} ${Number(value || 0).toFixed(2)}`;
+    return `${safeCurrency} ${amount.toFixed(2)}`;
   }
 }
 
