@@ -144,11 +144,11 @@ Work assignment invites also use Resend over HTTPS. Set
 
 Work assignment Lark notifications use your existing Lark app to send a bot
 message to Faye when new work is assigned. In Lark Open Platform, enable the
-bot and grant permission to send messages as the app. If Faye's Lark login
-email is the same as `WORK_INVITE_EMAIL_TO`, leave `WORK_LARK_RECEIVE_ID`
-empty and keep `WORK_LARK_RECEIVE_ID_TYPE=email`. Otherwise set
-`WORK_LARK_RECEIVE_ID` to Faye's Lark user identifier and change
-`WORK_LARK_RECEIVE_ID_TYPE` to `user_id`, `open_id`, `union_id`, or `chat_id`.
+bot and grant permission to send messages as the app. The app can send to an
+email recipient, then fall back to looking up Faye's `open_id` by email; that
+fallback needs Lark's contact user ID lookup permission. If Lark still rejects
+the email, set `WORK_LARK_RECEIVE_ID` to Faye's Lark user identifier and change
+`WORK_LARK_RECEIVE_ID_TYPE` to `open_id`, `user_id`, `union_id`, or `chat_id`.
 
 SMTP is still available if `INVOICE_EMAIL_PROVIDER=smtp`, but Render free
 services block outbound SMTP ports such as `465` and `587`.

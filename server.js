@@ -134,6 +134,7 @@ const workDeskOrigins = new Set(
     .filter(Boolean)
 );
 const larkMessageReceiveIdTypes = new Set(["open_id", "user_id", "union_id", "email", "chat_id"]);
+const larkInvalidReceiveIdCode = 230034;
 
 let tenantTokenCache = null;
 const sessions = new Map();
@@ -2132,6 +2133,67 @@ function buildWorkLarkNotificationText(assignment, workState) {
   return lines.join("\n");
 }
 
+function isInvalidLarkReceiveIdResult(result) {
+  const code = Number(result?.code);
+  const message = String(result?.msg || result?.message || "").toLowerCase();
+  return code === larkInvalidReceiveIdCode || message.includes("invalid receive_id");
+}
+
+function larkMessageErrorText(response, result) {
+  return result?.msg || result?.message || `Lark message failed with ${response.status}.`;
+}
+
+async function resolveLarkOpenIdByEmail(email, token) {
+  if (!isValidEmail(email)) {
+    return "";
+  }
+
+  const params = new URLSearchParams({ user_id_type: "open_id" });
+  const response = await fetch(`${larkConfig.apiBase}/contact/v3/users/batch_get_id?${params}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    body: JSON.stringify({
+      emails: [email],
+      include_resigned: false
+    })
+  });
+  const result = await response.json().catch(() => ({}));
+
+  if (!response.ok || (result.code !== undefined && result.code !== 0)) {
+    throw new Error(result.msg || result.message || `Lark user lookup failed with ${response.status}.`);
+  }
+
+  const user = result.data?.user_list?.[0] || result.data?.users?.[0] || null;
+  return user?.open_id || user?.user_id || user?.id || "";
+}
+
+async function postWorkLarkMessage(token, receiveIdType, receiveId, text) {
+  const params = new URLSearchParams({ receive_id_type: receiveIdType });
+  const response = await fetch(`${larkConfig.apiBase}/im/v1/messages?${params}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    body: JSON.stringify({
+      receive_id: receiveId,
+      msg_type: "text",
+      content: JSON.stringify({ text })
+    })
+  });
+  const result = await response.json().catch(() => ({}));
+
+  return {
+    ok: response.ok && (result.code === undefined || result.code === 0),
+    invalidReceiveId: isInvalidLarkReceiveIdResult(result),
+    message: larkMessageErrorText(response, result),
+    result
+  };
+}
+
 function buildWorkInviteEmailHtml(assignment, workState) {
   const notes = assignment.notes
     ? `<p><strong>Details:</strong><br />${escapeHtmlForEmail(assignment.notes).replace(/\n/g, "<br />")}</p>`
@@ -2160,30 +2222,39 @@ async function sendWorkLarkNotification(assignment, workState) {
   const token = await getTenantAccessToken();
   const receiveIdType = workLarkReceiveIdType(workState);
   const receiveId = workLarkReceiveId(workState);
-  const params = new URLSearchParams({ receive_id_type: receiveIdType });
-  const response = await fetch(`${larkConfig.apiBase}/im/v1/messages?${params}`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json; charset=utf-8"
-    },
-    body: JSON.stringify({
-      receive_id: receiveId,
-      msg_type: "text",
-      content: JSON.stringify({ text: buildWorkLarkNotificationText(assignment, workState) })
-    })
-  });
+  const text = buildWorkLarkNotificationText(assignment, workState);
+  const firstAttempt = await postWorkLarkMessage(token, receiveIdType, receiveId, text);
+  let resolvedOpenId = "";
+  let result = firstAttempt.result;
 
-  const result = await response.json().catch(() => ({}));
-  if (!response.ok || (result.code !== undefined && result.code !== 0)) {
-    const message = result.msg || result.message || `Lark message failed with ${response.status}.`;
-    throw new Error(message);
+  if (!firstAttempt.ok && receiveIdType === "email" && firstAttempt.invalidReceiveId) {
+    try {
+      resolvedOpenId = await resolveLarkOpenIdByEmail(receiveId, token);
+    } catch (error) {
+      throw new Error(
+        `Lark rejected ${receiveId} as a message recipient, and the app could not look up Faye's Lark user ID by email: ${error.message}.`
+      );
+    }
+
+    if (resolvedOpenId) {
+      const retryAttempt = await postWorkLarkMessage(token, "open_id", resolvedOpenId, text);
+      result = retryAttempt.result;
+      if (!retryAttempt.ok) {
+        throw new Error(retryAttempt.message);
+      }
+    } else {
+      throw new Error(
+        `Lark rejected ${receiveId} as a message recipient, and no Lark user was found for that email. Use Faye's Lark login email or set WORK_LARK_RECEIVE_ID_TYPE=open_id with her Lark open_id.`
+      );
+    }
+  } else if (!firstAttempt.ok) {
+    throw new Error(firstAttempt.message);
   }
 
   return {
     sent: true,
-    receiveId,
-    receiveIdType,
+    receiveId: resolvedOpenId || receiveId,
+    receiveIdType: resolvedOpenId ? "open_id" : receiveIdType,
     messageId: result.data?.message_id || result.data?.messageId || ""
   };
 }
