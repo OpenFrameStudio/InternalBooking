@@ -187,6 +187,7 @@ function renderEmployeeWages() {
     item.querySelector(".employee-wage-notes").textContent = wage.notes || "No notes";
     item.querySelector(".invoice-total strong").textContent = formatMoney(wage.amount || wage.total, wage.currency || "THB");
     item.querySelector(".invoice-total small").textContent = `${wage.currency || "THB"} ${labelize(wage.payPeriod)}`;
+    item.querySelector(".print-employee-payslip-button").addEventListener("click", () => printEmployeePayslip(wage.id));
     item.querySelector(".edit-employee-wage-button").addEventListener("click", () => fillEmployeeForm(wage));
     item.querySelector(".paid-employee-wage-button").hidden = wage.status !== "draft";
     item.querySelector(".paid-employee-wage-button").addEventListener("click", () => updateEmployeeWageStatus(wage.id, "paid"));
@@ -283,6 +284,28 @@ async function saveEmployeeWage(event) {
   renderEmployeeWages();
   resetEmployeeForm("Employee wage saved.");
   setMessage(el.employeeWageMessage, "Employee wage saved.", "success");
+}
+
+async function printEmployeePayslip(id) {
+  const wage = state.employeeWages.find((item) => item.id === id);
+  if (!wage) return;
+  setMessage(el.employeeWageMessage, `Preparing ${wage.employeeName} payslip...`);
+  const response = await fetch(`/api/employee-wages/${encodeURIComponent(id)}/pdf`, { credentials: "include" });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    setMessage(el.employeeWageMessage, (data.errors || ["Could not create payslip PDF."]).join(" "), "error");
+    return;
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${[wage.wageNumber, wage.employeeName, "Pay Slip"].filter(Boolean).join(" - ").replace(/[\\/:*?"<>|]/g, " - ")}.pdf`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+  setMessage(el.employeeWageMessage, `${wage.employeeName} payslip downloaded.`, "success");
 }
 
 async function updateEmployeeWageStatus(id, status) {

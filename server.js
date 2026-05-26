@@ -1190,6 +1190,19 @@ function formatInvoiceMoney(value) {
   }).format(Number(value || 0));
 }
 
+function formatDocumentMoney(value, currency = invoiceCurrency) {
+  const safeCurrency = /^[A-Z]{3}$/.test(String(currency || "")) ? String(currency).toUpperCase() : invoiceCurrency;
+  try {
+    return new Intl.NumberFormat("en-AU", {
+      style: "currency",
+      currency: safeCurrency,
+      currencyDisplay: safeCurrency === "THB" ? "narrowSymbol" : "symbol"
+    }).format(Number(value || 0));
+  } catch {
+    return `${safeCurrency} ${Number(value || 0).toFixed(2)}`;
+  }
+}
+
 function formatInvoiceDocumentDate(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
@@ -1640,6 +1653,165 @@ function validateEmployeeWage(input, existing = null, employeeWages = []) {
       updatedAt: new Date().toISOString()
     })
   };
+}
+
+function employeeWageFileName(wage) {
+  const base = [wage.wageNumber || "payslip", wage.employeeName || "employee", "Pay-Slip"]
+    .filter(Boolean)
+    .join("-")
+    .replace(/[^a-z0-9._-]+/gi, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 96);
+
+  return `${base || "employee-payslip"}.pdf`;
+}
+
+function formatWageLabel(value) {
+  return String(value || "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function drawEmployeePayslipPdf(doc, wage) {
+  const pageWidth = doc.page.width;
+  const margin = 52;
+  const logoPath = path.join(publicDir, "openframe-logo.png");
+  const currency = wage.currency || employeeWageCurrency;
+  const total = Number(wage.amount || wage.total || 0);
+
+  doc.rect(0, 0, pageWidth, 8).fill("#111611");
+  doc.fillColor("#000").font("Helvetica-Bold").fontSize(34).text("Pay Slip", margin, 54);
+  doc.font("Helvetica-Bold").fontSize(12).fillColor("#117a5d").text("Employee wage", margin, 94);
+  try {
+    doc.image(logoPath, pageWidth - margin - 88, 48, { width: 88, height: 88, fit: [88, 88] });
+  } catch {
+    doc.fontSize(11).fillColor("#000").text("OPENFRAME\nSTUDIO", pageWidth - margin - 88, 62, { width: 88, align: "center" });
+  }
+
+  doc.fillColor("#000").font("Helvetica").fontSize(11);
+  doc.text("Payslip Number", margin, 158);
+  doc.text(wage.wageNumber || "", 198, 158);
+  doc.text("Issue Date", margin, 181);
+  doc.text(formatInvoiceDocumentDate(wage.issuedAt), 198, 181);
+  doc.text("Pay Period", margin, 204);
+  doc.text(formatWageLabel(normalizePayPeriod(wage.payPeriod)), 198, 204);
+
+  doc.font("Helvetica-Bold").fontSize(13).text("EMPLOYER", margin, 260);
+  doc.font("Helvetica").fontSize(10.5);
+  [
+    "OpenFrame Studio Pty Ltd",
+    "23 Selborne St",
+    "Burwood NSW 2134",
+    "admin@openframe.studio"
+  ].forEach((line, index) => doc.text(line, margin, 286 + index * 17));
+
+  const employeeX = 324;
+  doc.font("Helvetica-Bold").fontSize(13).text("EMPLOYEE", employeeX, 260);
+  doc.font("Helvetica").fontSize(10.5);
+  [
+    wage.employeeName || "Employee",
+    formatWageLabel(normalizeEmploymentType(wage.employmentType)),
+    `${formatWageLabel(normalizePayPeriod(wage.payPeriod))} wage`
+  ].forEach((line, index) => doc.text(line, employeeX, 286 + index * 17, {
+    width: pageWidth - margin - employeeX,
+    height: 16,
+    ellipsis: true
+  }));
+
+  const tableX = margin;
+  const tableY = 392;
+  const columnWidths = [250, 82, 159];
+  const headerHeight = 34;
+  const rowHeight = 48;
+  const tableWidth = columnWidths.reduce((sum, width) => sum + width, 0);
+  const headers = ["DESCRIPTION", "PERIOD", "AMOUNT"];
+
+  doc.rect(tableX, tableY, tableWidth, headerHeight).fill("#eef3f0");
+  doc.fillColor("#000").font("Helvetica-Bold").fontSize(10);
+  let cursorX = tableX;
+  headers.forEach((header, index) => {
+    drawPdfCell(doc, header, cursorX, tableY, columnWidths[index], headerHeight, { align: "center" });
+    cursorX += columnWidths[index];
+  });
+
+  const rowY = tableY + headerHeight;
+  cursorX = tableX;
+  doc.font("Helvetica").fontSize(10);
+  drawPdfCell(doc, `${wage.employeeName || "Employee"} wage`, cursorX, rowY, columnWidths[0], rowHeight, { align: "left" });
+  cursorX += columnWidths[0];
+  drawPdfCell(doc, formatWageLabel(normalizePayPeriod(wage.payPeriod)), cursorX, rowY, columnWidths[1], rowHeight, { align: "center" });
+  cursorX += columnWidths[1];
+  drawPdfCell(doc, formatDocumentMoney(total, currency), cursorX, rowY, columnWidths[2], rowHeight, { align: "right" });
+  doc.moveTo(tableX, rowY + rowHeight).lineTo(tableX + tableWidth, rowY + rowHeight).lineWidth(1).stroke("#cbd7d1");
+
+  const totalX = 324;
+  const totalY = 526;
+  const totalRowHeight = 30;
+  doc.lineWidth(1.4).strokeColor("#000").rect(totalX, totalY, 219, totalRowHeight * 2).stroke();
+  [
+    ["Gross Pay", formatDocumentMoney(total, currency)],
+    ["Net Pay", formatDocumentMoney(total, currency)]
+  ].forEach(([label, value], index) => {
+    const y = totalY + index * totalRowHeight;
+    if (index > 0) doc.moveTo(totalX, y).lineTo(totalX + 219, y).lineWidth(1).stroke("#cbd7d1");
+    doc.font(index === 1 ? "Helvetica-Bold" : "Helvetica").fontSize(10.5).fillColor("#000");
+    drawPdfCell(doc, label, totalX, y, 110, totalRowHeight, { align: "left", paddingY: 5 });
+    drawPdfCell(doc, value, totalX + 110, y, 109, totalRowHeight, { align: "right", paddingY: 5 });
+  });
+
+  doc.save();
+  doc.rotate(-10, { origin: [144, 620] });
+  const stampColor = wage.status === "paid" ? "#117a5d" : wage.status === "void" ? "#a6403a" : "#f5a623";
+  doc.rect(108, 604, 108, 30).lineWidth(2).stroke(stampColor);
+  doc.fillColor(stampColor)
+    .font("Helvetica-Bold").fontSize(18)
+    .text(wage.status === "paid" ? "PAID" : wage.status === "void" ? "VOID" : "DRAFT", 116, 610);
+  doc.restore();
+
+  doc.font("Helvetica").fontSize(10).fillColor("#555");
+  const notes = String(wage.notes || "").trim();
+  if (notes) {
+    doc.font("Helvetica-Bold").fillColor("#000").text("NOTES", margin, 650);
+    doc.font("Helvetica").fontSize(9.5).fillColor("#555").text(notes, margin, 674, {
+      width: pageWidth - margin * 2,
+      height: 58,
+      ellipsis: true
+    });
+  }
+
+  doc.font("Helvetica").fontSize(9.5).fillColor("#787878");
+  doc.text("This payslip is generated from the OpenFrame internal wage system.", margin, 742, {
+    width: pageWidth - margin * 2
+  });
+}
+
+async function createEmployeePayslipPdfBuffer(wage) {
+  let PDFDocument;
+  try {
+    ({ default: PDFDocument } = await import("pdfkit"));
+  } catch {
+    throw new Error("Payslip PDF generation is still installing. Wait for the latest deploy to finish, then try again.");
+  }
+
+  const doc = new PDFDocument({
+    size: "A4",
+    margin: 0,
+    info: {
+      Title: `${wage.wageNumber} ${wage.employeeName} Pay Slip`,
+      Author: "OpenFrame Studio"
+    }
+  });
+  const chunks = [];
+  const finished = new Promise((resolve, reject) => {
+    doc.on("data", (chunk) => chunks.push(chunk));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+  });
+
+  drawEmployeePayslipPdf(doc, wage);
+  doc.end();
+  return finished;
 }
 
 function normalizeWage(wage) {
@@ -4362,6 +4534,37 @@ async function handleApi(req, res, url) {
     await saveEmployeeWages(employeeWages);
     employeeWages.sort((a, b) => a.employeeName.localeCompare(b.employeeName));
     sendJson(res, 200, { employeeWage, employeeWages });
+    return;
+  }
+
+  const employeePayslipPdfMatch = url.pathname.match(/^\/api\/employee-wages\/([^/]+)\/pdf$/);
+  if (req.method === "GET" && employeePayslipPdfMatch) {
+    if (!hasPermission(req, "manage_wages")) {
+      sendForbidden(res, "Boss or team leader only.");
+      return;
+    }
+
+    const employeeWageId = decodeURIComponent(employeePayslipPdfMatch[1]);
+    const employeeWages = await loadEmployeeWages();
+    const employeeWage = employeeWages.find((item) => item.id === employeeWageId);
+    if (!employeeWage) {
+      sendJson(res, 404, { errors: ["Employee wage not found."] });
+      return;
+    }
+
+    try {
+      const pdf = await createEmployeePayslipPdfBuffer(employeeWage);
+      const filename = employeeWageFileName(employeeWage).replace(/["\\\r\n]/g, "");
+      res.writeHead(200, {
+        "Content-Type": "application/pdf",
+        "Content-Length": pdf.length,
+        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Cache-Control": "no-store"
+      });
+      res.end(pdf);
+    } catch (error) {
+      sendJson(res, 500, { errors: [error.message || "Could not create employee payslip PDF."] });
+    }
     return;
   }
 
