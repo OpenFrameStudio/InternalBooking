@@ -75,11 +75,31 @@
 
 .work-photo-upload {
   gap: 8px;
+  border: 1px dashed rgba(17, 122, 93, 0.32);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(17, 122, 93, 0.06), rgba(55, 103, 143, 0.035)),
+    var(--field);
+  padding: 14px;
+  transition:
+    background-color 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
+    transform 0.16s ease;
 }
 
 .work-photo-upload input {
   min-height: 48px;
   padding: 12px;
+}
+
+.work-photo-upload.drag-over {
+  border-color: var(--accent);
+  background:
+    linear-gradient(180deg, rgba(17, 122, 93, 0.13), rgba(55, 103, 143, 0.07)),
+    var(--paper);
+  box-shadow: 0 12px 30px rgba(17, 122, 93, 0.16);
+  transform: translateY(-1px);
 }
 
 .work-photo-upload small,

@@ -21,6 +21,7 @@ const el = {
   assignmentNoticeDetail: $("#assignmentNoticeDetail"),
   assignmentNoticeTitle: $("#assignmentNoticeTitle"),
   assignmentNotes: $("#assignmentNotes"),
+  assignmentPhotoDropzone: $("#assignmentPhotoDropzone"),
   assignmentPhotoList: $("#assignmentPhotoList"),
   assignmentPhotos: $("#assignmentPhotos"),
   assignmentPriority: $("#assignmentPriority"),
@@ -753,22 +754,24 @@ async function attachmentFromFile(file) {
   };
 }
 
-async function addAssignmentPhotos(event) {
+async function processAssignmentPhotos(files) {
   if (!state.ui.assignmentDialogOpen) return;
 
-  const files = [...event.target.files];
-  event.target.value = "";
-  if (!files.length) return;
+  const photoFiles = [...files].filter((file) => file?.type?.startsWith("image/"));
+  if (!photoFiles.length) {
+    setUiState({ assignmentError: "Drop or choose JPEG, PNG, or WebP photos." });
+    return;
+  }
 
   const current = state.ui.assignmentDraft.attachments || [];
-  if (current.length + files.length > maxWorkAttachmentCount) {
+  if (current.length + photoFiles.length > maxWorkAttachmentCount) {
     setUiState({ assignmentError: `Attach up to ${maxWorkAttachmentCount} photos.` });
     return;
   }
 
   try {
     const attachments = [];
-    for (const file of files) {
+    for (const file of photoFiles) {
       attachments.push(await attachmentFromFile(file));
     }
 
@@ -782,6 +785,35 @@ async function addAssignmentPhotos(event) {
   } catch (error) {
     setUiState({ assignmentError: error.message });
   }
+}
+
+async function addAssignmentPhotos(event) {
+  const files = [...event.target.files];
+  event.target.value = "";
+  await processAssignmentPhotos(files);
+}
+
+function setPhotoDropActive(active) {
+  el.assignmentPhotoDropzone.classList.toggle("drag-over", active);
+}
+
+function handlePhotoDrag(event) {
+  event.preventDefault();
+  if (!state.ui.assignmentDialogOpen) return;
+
+  event.dataTransfer.dropEffect = "copy";
+  setPhotoDropActive(true);
+}
+
+function handlePhotoDragLeave(event) {
+  if (event.currentTarget.contains(event.relatedTarget)) return;
+  setPhotoDropActive(false);
+}
+
+async function handlePhotoDrop(event) {
+  event.preventDefault();
+  setPhotoDropActive(false);
+  await processAssignmentPhotos(event.dataTransfer.files);
 }
 
 function removeAssignmentPhoto(id) {
@@ -986,6 +1018,10 @@ function wireEvents() {
   el.assignmentForm.addEventListener("change", updateAssignmentDraft);
   el.assignmentForm.addEventListener("submit", handleAssignmentSubmit);
   el.assignmentPhotos.addEventListener("change", addAssignmentPhotos);
+  el.assignmentPhotoDropzone.addEventListener("dragenter", handlePhotoDrag);
+  el.assignmentPhotoDropzone.addEventListener("dragover", handlePhotoDrag);
+  el.assignmentPhotoDropzone.addEventListener("dragleave", handlePhotoDragLeave);
+  el.assignmentPhotoDropzone.addEventListener("drop", handlePhotoDrop);
   el.assignmentPhotoList.addEventListener("click", (event) => {
     const removeButton = event.target.closest("[data-remove-assignment-photo]");
     if (removeButton) removeAssignmentPhoto(removeButton.dataset.removeAssignmentPhoto);

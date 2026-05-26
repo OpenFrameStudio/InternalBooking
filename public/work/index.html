@@ -13,10 +13,10 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
     <link rel="stylesheet" href="/styles.css" />
-    <link rel="stylesheet" href="/work/styles.css?v=assignment-photos" />
+    <link rel="stylesheet" href="/work/styles.css?v=assignment-drop" />
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
     <script src="/install.js" defer></script>
-    <script src="/work/app.js?v=assignment-photos" type="module"></script>
+    <script src="/work/app.js?v=assignment-drop" type="module"></script>
   </head>
   <body>
     <main class="shell">
@@ -181,10 +181,10 @@
           <textarea id="assignmentNotes" rows="5" placeholder="What needs to be done"></textarea>
         </label>
 
-        <label class="work-photo-upload">
+        <label class="work-photo-upload" id="assignmentPhotoDropzone">
           <span>Photos</span>
           <input id="assignmentPhotos" type="file" accept="image/png,image/jpeg,image/webp" multiple />
-          <small>Photos are compressed and kept inside the private work assignment.</small>
+          <small>Drop photos here or click to choose. Photos are compressed and kept inside the private work assignment.</small>
         </label>
         <div class="work-photo-preview" id="assignmentPhotoList" aria-live="polite"></div>
 
