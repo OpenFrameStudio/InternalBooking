@@ -581,6 +581,7 @@ async function completeAssignment(id) {
   setWorkData(data);
   const assignment = data.assignments?.find((item) => item.id === id);
   if (assignment) notifyCompletion(assignment);
+  if (data.workCompletionNotificationMessage) showToast(data.workCompletionNotificationMessage);
 }
 
 async function reopenAssignment(id) {

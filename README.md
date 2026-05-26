@@ -74,6 +74,8 @@ restarts or redeploys the service.
    - optional: `WORK_INVITE_EMAIL_FROM` (defaults to `OpenFrame Studio <admin@openframe.studio>`)
    - optional: `WORK_LARK_RECEIVE_ID` for Faye's Lark work notifications
    - optional: `WORK_LARK_RECEIVE_ID_TYPE` (defaults to `email`)
+   - optional: `WORK_COMPLETION_LARK_RECEIVE_ID` for Barry's completion notifications (defaults to `barry.gao@openframe.studio`)
+   - optional: `WORK_COMPLETION_LARK_RECEIVE_ID_TYPE` (defaults to `email`)
    - optional: `ADMIN_USERNAME`
    - optional: `ADMIN_PASSWORD`
 4. After the service is live, open its Custom Domains settings and verify
@@ -153,6 +155,10 @@ email recipient, then fall back to looking up Faye's `open_id` by email; that
 fallback needs Lark's contact user ID lookup permission. If Lark still rejects
 the email, set `WORK_LARK_RECEIVE_ID` to Faye's Lark user identifier and change
 `WORK_LARK_RECEIVE_ID_TYPE` to `open_id`, `user_id`, `union_id`, or `chat_id`.
+
+When an employee marks work finished, the app sends Barry a Lark notification
+at `barry.gao@openframe.studio` by default. Override it with
+`WORK_COMPLETION_LARK_RECEIVE_ID` if needed.
 
 SMTP is still available if `INVOICE_EMAIL_PROVIDER=smtp`, but Render free
 services block outbound SMTP ports such as `465` and `587`.

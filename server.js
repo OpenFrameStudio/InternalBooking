@@ -94,6 +94,15 @@ const workLarkNotificationConfig = {
   receiveId: process.env.WORK_LARK_RECEIVE_ID || process.env.EMPLOYEE_LARK_RECEIVE_ID || "",
   subjectPrefix: process.env.WORK_LARK_NOTIFICATION_PREFIX || "New work"
 };
+const workCompletionLarkNotificationConfig = {
+  enabled: normalizeEnvBoolean(process.env.WORK_COMPLETION_LARK_NOTIFICATIONS_ENABLED, true),
+  receiveIdType: process.env.WORK_COMPLETION_LARK_RECEIVE_ID_TYPE || process.env.BOSS_LARK_RECEIVE_ID_TYPE || "email",
+  receiveId: process.env.WORK_COMPLETION_LARK_RECEIVE_ID
+    || process.env.BOSS_LARK_RECEIVE_ID
+    || process.env.ADMIN_LARK_RECEIVE_ID
+    || "barry.gao@openframe.studio",
+  subjectPrefix: process.env.WORK_COMPLETION_LARK_NOTIFICATION_PREFIX || "Work finished"
+};
 const calendarInviteEmailConfig = {
   enabled: normalizeEnvBoolean(process.env.CALENDAR_INVITE_EMAIL_ENABLED, true),
   from: process.env.CALENDAR_INVITE_EMAIL_FROM || invoiceEmailConfig.from,
@@ -698,6 +707,10 @@ function normalizeWorkState(raw) {
         larkNotifySentAt: assignment.larkNotifySentAt || "",
         larkNotifyTo: String(assignment.larkNotifyTo || ""),
         larkNotifyError: String(assignment.larkNotifyError || ""),
+        completionNotifyStatus: ["sent", "failed", "not_configured"].includes(assignment.completionNotifyStatus) ? assignment.completionNotifyStatus : "",
+        completionNotifySentAt: assignment.completionNotifySentAt || "",
+        completionNotifyTo: String(assignment.completionNotifyTo || ""),
+        completionNotifyError: String(assignment.completionNotifyError || ""),
         completedAt: assignment.completedAt || "",
         createdAt: assignment.createdAt || new Date().toISOString(),
         updatedAt: assignment.updatedAt || assignment.createdAt || new Date().toISOString()
@@ -784,6 +797,10 @@ function validateWorkAssignment(input, existing = null, workState = null) {
       larkNotifySentAt: existing?.larkNotifySentAt || "",
       larkNotifyTo: existing?.larkNotifyTo || "",
       larkNotifyError: existing?.larkNotifyError || "",
+      completionNotifyStatus: existing?.completionNotifyStatus || "",
+      completionNotifySentAt: existing?.completionNotifySentAt || "",
+      completionNotifyTo: existing?.completionNotifyTo || "",
+      completionNotifyError: existing?.completionNotifyError || "",
       completedAt: existing?.completedAt || "",
       createdAt: existing?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString()
@@ -884,6 +901,10 @@ function assignmentFromBooking(booking, existing = null) {
     larkNotifySentAt: existing?.larkNotifySentAt || "",
     larkNotifyTo: existing?.larkNotifyTo || "",
     larkNotifyError: existing?.larkNotifyError || "",
+    completionNotifyStatus: existing?.completionNotifyStatus || "",
+    completionNotifySentAt: existing?.completionNotifySentAt || "",
+    completionNotifyTo: existing?.completionNotifyTo || "",
+    completionNotifyError: existing?.completionNotifyError || "",
     completedAt: existing?.completedAt || "",
     createdAt: existing?.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString()
@@ -2154,6 +2175,27 @@ function isWorkLarkNotificationConfigured() {
   return workLarkNotificationMissingSettings().length === 0;
 }
 
+function workCompletionLarkReceiveIdType() {
+  return normalizeLarkMessageReceiveIdType(workCompletionLarkNotificationConfig.receiveIdType);
+}
+
+function workCompletionLarkReceiveId() {
+  return String(workCompletionLarkNotificationConfig.receiveId || "").trim();
+}
+
+function workCompletionLarkNotificationMissingSettings() {
+  const missing = [];
+  if (!workCompletionLarkNotificationConfig.enabled) missing.push("WORK_COMPLETION_LARK_NOTIFICATIONS_ENABLED");
+  if (!larkConfig.appId) missing.push("LARK_APP_ID");
+  if (!larkConfig.appSecret) missing.push("LARK_APP_SECRET");
+  if (!workCompletionLarkReceiveId()) missing.push("WORK_COMPLETION_LARK_RECEIVE_ID or BOSS_LARK_RECEIVE_ID");
+  return missing;
+}
+
+function isWorkCompletionLarkNotificationConfigured() {
+  return workCompletionLarkNotificationMissingSettings().length === 0;
+}
+
 function formatWorkInviteDueDate(assignment) {
   const dueDate = parseDateValue(assignment.dueDate);
   if (Number.isNaN(dueDate.getTime())) return assignment.dueDate || "Not set";
@@ -2211,6 +2253,28 @@ function buildWorkLarkNotificationText(assignment, workState) {
 
   if (assignment.notes) {
     const notes = assignment.notes.length > 900 ? `${assignment.notes.slice(0, 900)}...` : assignment.notes;
+    lines.push("Details:", notes, "");
+  }
+
+  lines.push("Open work desk:", `${publicAppUrl}/work/`);
+  return lines.join("\n");
+}
+
+function buildWorkCompletionLarkNotificationText(assignment, workState, completedBy) {
+  const employee = workEmployeeForAssignment(workState, assignment);
+  const completedByName = completedBy?.name || employee?.name || "Employee";
+  const lines = [
+    `${workCompletionLarkNotificationConfig.subjectPrefix}: ${assignment.title}`,
+    "",
+    `${completedByName} marked this work as finished.`,
+    `Assigned to: ${employee?.name || "Employee"}`,
+    `Due: ${formatWorkInviteDueDate(assignment)}`,
+    `Priority: ${assignment.priority}`,
+    ""
+  ];
+
+  if (assignment.notes) {
+    const notes = assignment.notes.length > 700 ? `${assignment.notes.slice(0, 700)}...` : assignment.notes;
     lines.push("Details:", notes, "");
   }
 
@@ -2332,6 +2396,52 @@ async function sendWorkLarkNotification(assignment, workState) {
     } else {
       throw new Error(
         `Lark rejected ${receiveId} as a message recipient, and no Lark user was found for that email. Use ${assignee?.name || "the assignee"}'s Lark login email or set WORK_LARK_RECEIVE_ID_TYPE=open_id with their Lark open_id.`
+      );
+    }
+  } else if (!firstAttempt.ok) {
+    throw new Error(firstAttempt.message);
+  }
+
+  return {
+    sent: true,
+    receiveId: resolvedOpenId || receiveId,
+    receiveIdType: resolvedOpenId ? "open_id" : receiveIdType,
+    messageId: result.data?.message_id || result.data?.messageId || ""
+  };
+}
+
+async function sendWorkCompletionLarkNotification(assignment, workState, completedBy) {
+  const missing = workCompletionLarkNotificationMissingSettings();
+  if (missing.length) {
+    return { sent: false, skipped: true, missing };
+  }
+
+  const token = await getTenantAccessToken();
+  const receiveIdType = workCompletionLarkReceiveIdType();
+  const receiveId = workCompletionLarkReceiveId();
+  const text = buildWorkCompletionLarkNotificationText(assignment, workState, completedBy);
+  const firstAttempt = await postWorkLarkMessage(token, receiveIdType, receiveId, text);
+  let resolvedOpenId = "";
+  let result = firstAttempt.result;
+
+  if (!firstAttempt.ok && receiveIdType === "email" && firstAttempt.invalidReceiveId) {
+    try {
+      resolvedOpenId = await resolveLarkOpenIdByEmail(receiveId, token);
+    } catch (error) {
+      throw new Error(
+        `Lark rejected ${receiveId} as the boss notification recipient, and the app could not look up that Lark user ID by email: ${error.message}.`
+      );
+    }
+
+    if (resolvedOpenId) {
+      const retryAttempt = await postWorkLarkMessage(token, "open_id", resolvedOpenId, text);
+      result = retryAttempt.result;
+      if (!retryAttempt.ok) {
+        throw new Error(retryAttempt.message);
+      }
+    } else {
+      throw new Error(
+        `Lark rejected ${receiveId} as the boss notification recipient, and no Lark user was found for that email. Set WORK_COMPLETION_LARK_RECEIVE_ID_TYPE=open_id with your Lark open_id.`
       );
     }
   } else if (!firstAttempt.ok) {
@@ -2484,6 +2594,60 @@ function workAssignmentNotificationMessage(workLarkSummary, workEmailSummary) {
   }
 
   return [larkMessage, emailMessage].filter(Boolean).join(" ");
+}
+
+async function trySendWorkCompletionLarkNotification(workState, assignment, completedBy) {
+  const summary = {
+    attempted: completedBy?.role === "employee" ? 1 : 0,
+    sent: 0,
+    skipped: 0,
+    failed: 0,
+    recipients: [],
+    errors: [],
+    missing: []
+  };
+
+  if (!summary.attempted) {
+    return summary;
+  }
+
+  try {
+    const result = await sendWorkCompletionLarkNotification(assignment, workState, completedBy);
+    const now = new Date().toISOString();
+
+    if (result.sent) {
+      summary.sent = 1;
+      const recipient = `${result.receiveIdType}:${result.receiveId}`;
+      summary.recipients = [recipient];
+      assignment.completionNotifyStatus = "sent";
+      assignment.completionNotifySentAt = now;
+      assignment.completionNotifyTo = recipient;
+      assignment.completionNotifyError = "";
+    } else {
+      summary.skipped = 1;
+      summary.missing = result.missing || [];
+      assignment.completionNotifyStatus = "not_configured";
+      assignment.completionNotifyError = result.missing?.length
+        ? `Missing ${result.missing.join(", ")}`
+        : "Completion Lark notification is not configured.";
+    }
+  } catch (error) {
+    summary.failed = 1;
+    const message = error.message || "Could not send completion Lark notification.";
+    summary.errors = [message];
+    assignment.completionNotifyStatus = "failed";
+    assignment.completionNotifyError = message;
+  }
+
+  return summary;
+}
+
+function workCompletionNotificationMessage(summary) {
+  if (!summary?.attempted) return "";
+  if (summary.sent) return "Completion notification sent to Barry.";
+  if (summary.failed) return `Finished, but Barry's Lark notification could not send: ${summary.errors[0] || "unknown error"}`;
+  if (summary.skipped) return "Finished. Add WORK_COMPLETION_LARK_RECEIVE_ID or BOSS_LARK_RECEIVE_ID in Render to notify Barry in Lark.";
+  return "";
 }
 
 function workInviteMessage(summary) {
@@ -3736,6 +3900,9 @@ async function handleApi(req, res, url) {
       workLarkNotificationConfigured: isWorkLarkNotificationConfigured(),
       workLarkNotificationsEnabled: workLarkNotificationConfig.enabled,
       workLarkReceiveIdType: normalizeLarkMessageReceiveIdType(workLarkNotificationConfig.receiveIdType),
+      workCompletionLarkNotificationConfigured: isWorkCompletionLarkNotificationConfigured(),
+      workCompletionLarkNotificationsEnabled: workCompletionLarkNotificationConfig.enabled,
+      workCompletionLarkReceiveIdType: workCompletionLarkReceiveIdType(),
       calendarInviteEmailConfigured: isCalendarInviteEmailConfigured(),
       calendarInviteEmailFrom: calendarInviteEmailConfig.from,
       larkNotificationsEnabled: shouldUseLarkCalendarNotifications(),
@@ -3898,19 +4065,28 @@ async function handleApi(req, res, url) {
     }
 
     const completedAt = new Date().toISOString();
-    workState.assignments = workState.assignments.map((item) =>
-      item.id === assignmentId
-        ? { ...item, status: "done", completedAt, updatedAt: completedAt }
-        : item
-    );
+    const completedAssignment = { ...assignment, status: "done", completedAt, updatedAt: completedAt };
     workState.messages.unshift({
       id: crypto.randomUUID(),
-      text: `${workEmployeeForAssignment(workState, assignment).name} finished: ${assignment.title}`,
+      text: `${workEmployeeForAssignment(workState, completedAssignment).name} finished: ${completedAssignment.title}`,
       createdAt: completedAt
     });
     workState.messages = workState.messages.slice(0, 12);
+    const workCompletionNotification = await trySendWorkCompletionLarkNotification(
+      workState,
+      completedAssignment,
+      currentUser(req)
+    );
+    workState.assignments = workState.assignments.map((item) =>
+      item.id === assignmentId ? completedAssignment : item
+    );
     await saveWorkState(workState);
-    sendJson(res, 200, { ...visibleWorkStateForUser(workState, currentUser(req)), user: currentUser(req) });
+    sendJson(res, 200, {
+      ...visibleWorkStateForUser(workState, currentUser(req)),
+      workCompletionNotification,
+      workCompletionNotificationMessage: workCompletionNotificationMessage(workCompletionNotification),
+      user: currentUser(req)
+    });
     return;
   }
 
