@@ -38,6 +38,7 @@ const el = {
   employeeAvailability: $("#employeeAvailability"),
   employeeName: $("#employeeName"),
   employeeRole: $("#employeeRole"),
+  employeeStatusDot: $("#employeeStatusDot"),
   enableMessagesButton: $("#enableMessagesButton"),
   filterButtons: $$("[data-filter]"),
   logoutButton: $("#logoutButton"),
@@ -108,6 +109,50 @@ function defaultEmployeeId() {
 
 function employeeById(employeeId) {
   return state.employees.find((employee) => employee.id === employeeId) || state.employee;
+}
+
+function getSydneyWorkTime(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-AU", {
+    timeZone: "Australia/Sydney",
+    weekday: "short",
+    hour: "numeric",
+    minute: "numeric",
+    hourCycle: "h23",
+  }).formatToParts(date);
+
+  const valueFor = (type) => parts.find((part) => part.type === type)?.value || "";
+  return {
+    weekday: valueFor("weekday"),
+    minutes: Number(valueFor("hour")) * 60 + Number(valueFor("minute")),
+  };
+}
+
+function employeeAvailabilityStatus(employee) {
+  const availability = (employee?.availability || "").toLowerCase();
+  const hasFayeSchedule =
+    availability.includes("mon-fri") &&
+    availability.includes("12pm") &&
+    availability.includes("8pm");
+
+  if (!hasFayeSchedule) {
+    return { online: false, label: "Offline now" };
+  }
+
+  const sydneyTime = getSydneyWorkTime();
+  const workDayIndex = {
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+  }[sydneyTime.weekday];
+  const { minutes } = sydneyTime;
+  const online = Boolean(workDayIndex) && minutes >= 12 * 60 && minutes < 20 * 60;
+
+  return {
+    online,
+    label: online ? "Online now" : "Offline now",
+  };
 }
 
 function assignmentDraftFromAssignment(assignment = null) {
@@ -334,10 +379,15 @@ function render() {
 }
 
 function renderProfile() {
+  const availabilityStatus = employeeAvailabilityStatus(state.employee);
   el.sessionPill.textContent = state.user?.label || "Logged in";
   el.employeeName.textContent = state.employee.name;
   el.employeeRole.textContent = state.employee.role;
   el.employeeAvailability.textContent = state.employee.availability;
+  el.employeeStatusDot.classList.toggle("ready", availabilityStatus.online);
+  el.employeeStatusDot.classList.toggle("offline", !availabilityStatus.online);
+  el.employeeStatusDot.title = availabilityStatus.label;
+  el.employeeStatusDot.setAttribute("aria-label", availabilityStatus.label);
   el.logoutButton.disabled = state.ui.loggingOut;
 }
 
@@ -1041,4 +1091,5 @@ function wireEvents() {
 wireEvents();
 render();
 loadWork().catch((error) => showToast(error.message));
+window.setInterval(renderProfile, 60 * 1000);
 window.addEventListener("load", refreshIcons);
