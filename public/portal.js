@@ -43,9 +43,15 @@ const appCatalog = [
   },
 ];
 
+const workNoticeDismissedKey = "openframe.workNoticeDismissed.v1";
 const launcherGrid = document.querySelector("#launcherGrid");
 const sessionLabel = document.querySelector("#sessionLabel");
 const logoutButton = document.querySelector("#logoutButton");
+
+const state = {
+  user: null,
+  workAssignments: [],
+};
 
 async function apiFetch(url, options = {}) {
   const response = await fetch(url, {
@@ -70,6 +76,7 @@ async function apiFetch(url, options = {}) {
 function renderApps(user) {
   const allowedApps = new Set(user?.apps || []);
   const apps = appCatalog.filter((app) => allowedApps.has(app.id));
+  const workNotice = workNoticeSummary();
 
   sessionLabel.textContent = user?.label || "Logged in";
   launcherGrid.replaceChildren(
@@ -77,9 +84,14 @@ function renderApps(user) {
       const link = document.createElement("a");
       link.className = "launcher-app";
       link.href = app.href;
+      if (app.id === "work" && workNotice.count) {
+        link.setAttribute("aria-label", `Work, ${workNotice.count} open assignment${workNotice.count === 1 ? "" : "s"}`);
+        link.addEventListener("click", () => dismissWorkNotice(workNotice.signature));
+      }
       link.innerHTML = `
         <span class="launcher-icon ${app.tone}">
           <i data-lucide="${app.icon}"></i>
+          ${app.id === "work" && workNotice.count ? `<span class="launcher-badge">${workNotice.label}</span>` : ""}
         </span>
         <span>${app.name}</span>
       `;
@@ -89,6 +101,59 @@ function renderApps(user) {
 
   if (window.lucide) {
     window.lucide.createIcons();
+  }
+}
+
+function readWorkNoticeDismissedSignature() {
+  try {
+    return localStorage.getItem(workNoticeDismissedKey) || "";
+  } catch {
+    return "";
+  }
+}
+
+function writeWorkNoticeDismissedSignature(signature) {
+  try {
+    if (signature) localStorage.setItem(workNoticeDismissedKey, signature);
+    else localStorage.removeItem(workNoticeDismissedKey);
+  } catch {
+    // This only controls the app launcher badge.
+  }
+}
+
+function dismissWorkNotice(signature) {
+  writeWorkNoticeDismissedSignature(signature);
+}
+
+function workNoticeSignature(assignments) {
+  return assignments
+    .map((assignment) => `${assignment.id}:${assignment.updatedAt || assignment.createdAt || ""}`)
+    .sort()
+    .join("|");
+}
+
+function workNoticeSummary() {
+  const openAssignments = state.workAssignments.filter((assignment) => assignment.status !== "done");
+  const signature = workNoticeSignature(openAssignments);
+  const dismissedSignature = readWorkNoticeDismissedSignature();
+  const count = signature && signature !== dismissedSignature ? openAssignments.length : 0;
+
+  return {
+    count,
+    signature,
+    label: count > 9 ? "9+" : String(count),
+  };
+}
+
+async function loadWorkNotice() {
+  if (!state.user?.apps?.includes("work")) return;
+
+  try {
+    const data = await apiFetch("/api/work");
+    state.workAssignments = Array.isArray(data.assignments) ? data.assignments : [];
+    renderApps(state.user);
+  } catch {
+    state.workAssignments = [];
   }
 }
 
@@ -104,7 +169,9 @@ async function logout() {
 logoutButton.addEventListener("click", logout);
 
 const session = await apiFetch("/api/session");
-renderApps(session.user);
+state.user = session.user || null;
+renderApps(state.user);
+loadWorkNotice();
 
 window.addEventListener("load", () => {
   if (window.lucide) {
