@@ -1,0 +1,120 @@
+.wage-shell {
+  padding-bottom: 54px;
+}
+
+.wage-hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 22px;
+  margin-bottom: 20px;
+  border: 1px solid rgba(21, 24, 22, 0.1);
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, rgba(15, 18, 16, 0.96), rgba(20, 36, 30, 0.9)),
+    #151816;
+  color: #f8faf7;
+  padding: clamp(24px, 5vw, 36px);
+  box-shadow: var(--shadow);
+}
+
+.wage-hero h1 {
+  max-width: 720px;
+  margin: 0;
+  font-size: clamp(2rem, 4.8vw, 4rem);
+  line-height: 0.96;
+}
+
+.wage-hero p:not(.eyebrow) {
+  max-width: 660px;
+  margin: 14px 0 0;
+  color: #cbd3cf;
+  font-weight: 650;
+}
+
+.wage-tabs {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 6px;
+}
+
+.wage-tab {
+  min-height: 42px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #d8dedb;
+  font-weight: 900;
+  padding: 0 16px;
+}
+
+.wage-tab.active {
+  background: #f8faf7;
+  color: var(--accent-dark);
+}
+
+.wage-sheet {
+  display: grid;
+  gap: 20px;
+}
+
+.wage-total-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 42px;
+  border-radius: 999px;
+  background: rgba(17, 122, 93, 0.1);
+  color: var(--accent-dark);
+  font-size: 1.1rem;
+  font-weight: 950;
+  padding: 0 18px;
+}
+
+.employee-wage-form textarea {
+  resize: vertical;
+}
+
+#employeeWageMessage,
+#wageMessage {
+  margin: 0;
+  color: var(--muted);
+  font-weight: 850;
+}
+
+#employeeWageMessage.error,
+#wageMessage.error {
+  color: var(--red);
+}
+
+#employeeWageMessage.success,
+#wageMessage.success {
+  color: var(--accent-dark);
+}
+
+.employee-wage-item .invoice-actions {
+  flex-wrap: wrap;
+}
+
+.employee-wage-type,
+.employee-wage-notes {
+  color: var(--muted);
+}
+
+@media (max-width: 780px) {
+  .wage-hero {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .wage-tabs {
+    width: 100%;
+  }
+
+  .wage-tab {
+    flex: 1 1 0;
+  }
+}

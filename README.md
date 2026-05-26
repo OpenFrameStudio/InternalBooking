@@ -42,7 +42,7 @@ Invoices are created automatically from confirmed bookings. The default draft in
 
 Invoices always add 10% GST to the service subtotal.
 
-Photographer wages are created automatically as draft proformas. Photography-only is `$90`; each photographer can be marked as GST included or no GST.
+Wages are split into two sheets. Employee wages are for full-time or part-time staff, with Faye seeded as a monthly `THB 15,000` employee wage. Contractor wages are photographer proformas created automatically from confirmed bookings; photography-only is `$90`, and each photographer can be marked as GST included or no GST.
 
 ## Deploy to openframe.studio
 

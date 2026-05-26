@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OpenFrame Wages</title>
+    <meta name="theme-color" content="#0f5c4f" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="OpenFrame" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/wages.css" />
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
+    <script src="/install.js" defer></script>
+    <script src="/wages.js" type="module"></script>
+  </head>
+  <body>
+    <main class="shell wage-shell">
+      <nav class="top-nav" aria-label="Main navigation">
+        <a class="nav-link nav-home" href="/">All apps</a>
+        <a class="nav-link" href="/bookings" data-app-link="bookings">Bookings</a>
+        <a class="nav-link" href="/clients" data-app-link="clients">Clients</a>
+        <a class="nav-link" href="/photographers" data-app-link="photographers">Photographers</a>
+        <a class="nav-link" href="/invoices" data-app-link="invoices">Invoices</a>
+        <a class="nav-link active" href="/wages" data-app-link="wages">Wages</a>
+        <a class="nav-link" href="/work/" data-app-link="work">Work</a>
+        <button class="nav-link nav-action" id="logoutButton" type="button">Log out</button>
+      </nav>
+
+      <section class="wage-hero">
+        <div>
+          <p class="eyebrow">Wage desk</p>
+          <h1>Employee and contractor wages</h1>
+          <p>Keep Faye's employee wage separate from photographer contractor proformas.</p>
+        </div>
+        <div class="wage-tabs" role="tablist" aria-label="Wage sheets">
+          <button class="wage-tab active" id="employeesTab" type="button" data-sheet="employees">Employees</button>
+          <button class="wage-tab" id="contractorsTab" type="button" data-sheet="contractors">Contractors</button>
+        </div>
+      </section>
+
+      <section class="wage-sheet" id="employeesSheet" aria-label="Employee wages">
+        <section class="directory-surface">
+          <div class="surface-header">
+            <div>
+              <p class="eyebrow">Full time / part time</p>
+              <h2>Employee wage sheet</h2>
+              <p class="surface-subtitle">Faye is set up as a monthly employee wage in Thai baht.</p>
+            </div>
+          </div>
+
+          <form class="booking-form employee-wage-form" id="employeeWageForm">
+            <input type="hidden" id="employeeWageId" />
+            <div class="form-row two">
+              <label>
+                <span>Employee</span>
+                <input id="employeeNameInput" autocomplete="name" value="Faye" required />
+              </label>
+              <label>
+                <span>Employment type</span>
+                <select id="employmentTypeInput">
+                  <option value="full_time">Full time</option>
+                  <option value="part_time">Part time</option>
+                </select>
+              </label>
+            </div>
+            <div class="form-row three">
+              <label>
+                <span>Pay period</span>
+                <select id="payPeriodInput">
+                  <option value="monthly">Monthly</option>
+                  <option value="fortnightly">Fortnightly</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="hourly">Hourly</option>
+                </select>
+              </label>
+              <label>
+                <span>Amount</span>
+                <input id="employeeAmountInput" type="number" min="0" step="0.01" value="15000" required />
+              </label>
+              <label>
+                <span>Currency</span>
+                <input id="employeeCurrencyInput" maxlength="3" value="THB" required />
+              </label>
+            </div>
+            <label>
+              <span>Notes</span>
+              <textarea id="employeeNotesInput" rows="3" placeholder="Monthly wage, part-time hours, or payment notes"></textarea>
+            </label>
+            <div class="actions">
+              <button class="primary-button" id="saveEmployeeWageButton" type="submit">Save employee wage</button>
+              <button class="ghost-button" id="newEmployeeWageButton" type="button">New employee</button>
+              <p id="employeeWageMessage" role="status"></p>
+            </div>
+          </form>
+        </section>
+
+        <section class="list-section">
+          <div class="section-header">
+            <div>
+              <p class="eyebrow">Employee sheet</p>
+              <h2>Staff wages</h2>
+            </div>
+            <div class="wage-total-pill" id="employeeWageTotal">฿0 THB</div>
+          </div>
+          <div class="invoice-list wage-list" id="employeeWageList"></div>
+        </section>
+      </section>
+
+      <section class="wage-sheet" id="contractorsSheet" aria-label="Contractor wages" hidden>
+        <section class="directory-surface invoice-summary-surface">
+          <div class="surface-header">
+            <div>
+              <p class="eyebrow">Contractors</p>
+              <h2>Photographer proformas</h2>
+              <p class="surface-subtitle">Draft photographer contractor proformas are created from confirmed bookings.</p>
+            </div>
+          </div>
+
+          <div class="invoice-stats">
+            <div>
+              <span id="wageDraftCount">0</span>
+              <small>draft</small>
+            </div>
+            <div>
+              <span id="wagePaidCount">0</span>
+              <small>paid</small>
+            </div>
+            <div>
+              <span id="wageTotalValue">$0</span>
+              <small>draft total</small>
+            </div>
+          </div>
+
+          <div class="actions">
+            <button class="primary-button" id="syncWagesButton" type="button">Create missing contractor wages</button>
+            <button class="ghost-button" id="refreshWagesButton" type="button">Refresh contractors</button>
+            <p id="wageMessage" role="status"></p>
+          </div>
+        </section>
+
+        <section class="list-section" aria-label="Photographer contractor wages">
+          <div class="section-header">
+            <div>
+              <p class="eyebrow">Contractor sheet</p>
+              <h2>Photographers</h2>
+            </div>
+          </div>
+
+          <div class="invoice-list wage-list" id="wageList"></div>
+        </section>
+      </section>
+    </main>
+
+    <template id="employeeWageTemplate">
+      <article class="invoice-item wage-item employee-wage-item">
+        <div class="invoice-main">
+          <div class="booking-title-row">
+            <h3></h3>
+            <span class="invoice-status"></span>
+          </div>
+          <p class="employee-wage-type"></p>
+          <p class="employee-wage-notes"></p>
+        </div>
+        <div class="invoice-total">
+          <strong></strong>
+          <small></small>
+        </div>
+        <div class="invoice-actions">
+          <button class="ghost-button edit-employee-wage-button" type="button">Edit</button>
+          <button class="ghost-button paid-employee-wage-button" type="button">Mark paid</button>
+          <button class="ghost-button draft-employee-wage-button" type="button">Back to draft</button>
+          <button class="icon-button void-employee-wage-button" type="button" title="Void employee wage" aria-label="Void employee wage">×</button>
+          <button class="icon-button delete-employee-wage-button" type="button" title="Delete employee wage" aria-label="Delete employee wage">
+            <i data-lucide="trash-2"></i>
+          </button>
+        </div>
+      </article>
+    </template>
+
+    <template id="wageTemplate">
+      <article class="invoice-item wage-item">
+        <div class="invoice-main">
+          <div class="booking-title-row">
+            <h3></h3>
+            <span class="invoice-status"></span>
+          </div>
+          <p class="wage-photographer"></p>
+          <p class="wage-booking"></p>
+          <p class="wage-services"></p>
+          <p class="wage-sent"></p>
+        </div>
+        <div class="invoice-total">
+          <strong></strong>
+          <small></small>
+        </div>
+        <div class="invoice-actions">
+          <button class="ghost-button print-wage-button" type="button">Download PDF</button>
+          <button class="ghost-button send-wage-button" type="button">Send proforma</button>
+          <button class="ghost-button paid-wage-button" type="button">Mark paid</button>
+          <button class="icon-button void-wage-button" type="button" title="Void wage" aria-label="Void wage">×</button>
+        </div>
+      </article>
+    </template>
+  </body>
+</html>

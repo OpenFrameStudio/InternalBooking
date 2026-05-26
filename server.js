@@ -22,6 +22,7 @@ const photographersFile = path.join(dataDir, "photographers.json");
 const workFile = path.join(dataDir, "work-assignments.json");
 const invoicesFile = path.join(dataDir, "invoices.json");
 const wagesFile = path.join(dataDir, "wages.json");
+const employeeWagesFile = path.join(dataDir, "employee-wages.json");
 const usersFile = path.join(dataDir, "users.json");
 const seedFiles = {
   bookings: path.join(bundledDataDir, "bookings.json"),
@@ -30,6 +31,7 @@ const seedFiles = {
   work: path.join(bundledDataDir, "work-assignments.json"),
   invoices: path.join(bundledDataDir, "invoices.json"),
   wages: path.join(bundledDataDir, "wages.json"),
+  employeeWages: path.join(bundledDataDir, "employee-wages.json"),
   users: path.join(bundledDataDir, "users.json")
 };
 const supabaseStorage = {
@@ -161,6 +163,7 @@ const invoiceServicePrices = {
 const invoiceGstRate = 0.1;
 const invoiceCurrency = "AUD";
 const wageCurrency = "AUD";
+const employeeWageCurrency = "THB";
 const larkImportDays = Number(process.env.LARK_IMPORT_DAYS || 120);
 const defaultPhotographers = [
   {
@@ -186,6 +189,24 @@ const defaultWorkState = {
   assignments: [],
   messages: []
 };
+const defaultEmployeeWages = [
+  {
+    id: "employee-faye-monthly",
+    wageNumber: "E001",
+    employeeName: "Faye",
+    employmentType: "full_time",
+    payPeriod: "monthly",
+    amount: 15000,
+    currency: employeeWageCurrency,
+    status: "draft",
+    issuedAt: "2026-05-26T00:00:00.000+10:00",
+    paidAt: "",
+    voidedAt: "",
+    notes: "Default monthly wage for Faye.",
+    createdAt: "2026-05-26T00:00:00.000+10:00",
+    updatedAt: "2026-05-26T00:00:00.000+10:00"
+  }
+];
 const dataFiles = {
   bookings: {
     file: bookingsFile,
@@ -222,6 +243,12 @@ const dataFiles = {
     seedFile: seedFiles.wages,
     supabaseKey: "wages",
     fallback: []
+  },
+  employeeWages: {
+    file: employeeWagesFile,
+    seedFile: seedFiles.employeeWages,
+    supabaseKey: "employee-wages",
+    fallback: defaultEmployeeWages
   },
   users: {
     file: usersFile,
@@ -567,6 +594,15 @@ async function loadWages() {
 
 async function saveWages(wages) {
   await writeStoredJson(dataFiles.wages, normalizeWages(wages));
+}
+
+async function loadEmployeeWages() {
+  const employeeWages = await readStoredJson(dataFiles.employeeWages);
+  return normalizeEmployeeWages(employeeWages);
+}
+
+async function saveEmployeeWages(employeeWages) {
+  await writeStoredJson(dataFiles.employeeWages, normalizeEmployeeWages(employeeWages));
 }
 
 function normalizeWorkState(raw) {
@@ -1421,6 +1457,94 @@ async function sendInvoiceEmail(invoice, recipients) {
 
 function normalizeWageStatus(status) {
   return ["draft", "paid", "void"].includes(status) ? status : "draft";
+}
+
+function normalizeEmployeeWageStatus(status) {
+  return ["draft", "paid", "void"].includes(status) ? status : "draft";
+}
+
+function normalizeEmploymentType(value) {
+  const type = String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return ["full_time", "part_time"].includes(type) ? type : "full_time";
+}
+
+function normalizePayPeriod(value) {
+  const period = String(value || "").trim().toLowerCase();
+  return ["monthly", "weekly", "fortnightly", "hourly"].includes(period) ? period : "monthly";
+}
+
+function nextEmployeeWageNumber(employeeWages) {
+  const maxNumber = employeeWages.reduce((max, wage) => {
+    const value = String(wage.wageNumber || "");
+    const match = value.match(/^E(\d+)$/);
+    return match ? Math.max(max, Number(match[1])) : max;
+  }, 0);
+  return `E${String(maxNumber + 1).padStart(3, "0")}`;
+}
+
+function normalizeEmployeeWage(wage) {
+  const amount = normalizeMoney(wage?.amount ?? wage?.total ?? 0);
+  const status = normalizeEmployeeWageStatus(wage?.status);
+
+  return {
+    id: wage?.id || crypto.randomUUID(),
+    wageNumber: String(wage?.wageNumber || "").trim(),
+    employeeName: String(wage?.employeeName || wage?.name || "").trim(),
+    employmentType: normalizeEmploymentType(wage?.employmentType || wage?.type),
+    payPeriod: normalizePayPeriod(wage?.payPeriod || wage?.period),
+    amount,
+    total: amount,
+    currency: String(wage?.currency || employeeWageCurrency).trim().toUpperCase(),
+    status,
+    issuedAt: wage?.issuedAt || new Date().toISOString(),
+    paidAt: status === "paid" ? (wage?.paidAt || wage?.updatedAt || new Date().toISOString()) : "",
+    voidedAt: status === "void" ? (wage?.voidedAt || wage?.updatedAt || new Date().toISOString()) : "",
+    notes: String(wage?.notes || ""),
+    createdAt: wage?.createdAt || new Date().toISOString(),
+    updatedAt: wage?.updatedAt || wage?.createdAt || new Date().toISOString()
+  };
+}
+
+function normalizeEmployeeWages(employeeWages) {
+  return Array.isArray(employeeWages)
+    ? employeeWages.map(normalizeEmployeeWage).filter((wage) => wage.employeeName && wage.amount > 0)
+    : defaultEmployeeWages.map(normalizeEmployeeWage);
+}
+
+function validateEmployeeWage(input, existing = null, employeeWages = []) {
+  const employeeName = String(input.employeeName || input.name || "").trim();
+  const employmentType = normalizeEmploymentType(input.employmentType || input.type);
+  const payPeriod = normalizePayPeriod(input.payPeriod || input.period);
+  const amount = normalizeMoney(input.amount ?? input.total);
+  const currency = String(input.currency || employeeWageCurrency).trim().toUpperCase();
+  const notes = String(input.notes || "").trim();
+  const errors = [];
+
+  if (!employeeName) errors.push("Enter the employee name.");
+  if (amount <= 0) errors.push("Enter the wage amount.");
+  if (!/^[A-Z]{3}$/.test(currency)) errors.push("Use a valid 3-letter currency code.");
+
+  return {
+    errors,
+    employeeWage: normalizeEmployeeWage({
+      ...(existing || {}),
+      id: existing?.id || input.id || crypto.randomUUID(),
+      wageNumber: existing?.wageNumber || input.wageNumber || nextEmployeeWageNumber(employeeWages),
+      employeeName,
+      employmentType,
+      payPeriod,
+      amount,
+      total: amount,
+      currency,
+      status: existing?.status || normalizeEmployeeWageStatus(input.status),
+      issuedAt: existing?.issuedAt || new Date().toISOString(),
+      paidAt: existing?.paidAt || "",
+      voidedAt: existing?.voidedAt || "",
+      notes,
+      createdAt: existing?.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    })
+  };
 }
 
 function normalizeWage(wage) {
@@ -3531,6 +3655,11 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  if (url.pathname.startsWith("/api/employee-wages") && !canAccessApp(req, "wages")) {
+    sendForbidden(res);
+    return;
+  }
+
   if (req.method === "GET" && url.pathname === "/api/work") {
     const workState = await loadWorkState();
     sendJson(res, 200, {
@@ -3836,6 +3965,89 @@ async function handleApi(req, res, url) {
     const wages = await loadWages();
     wages.sort((a, b) => new Date(b.issuedAt) - new Date(a.issuedAt));
     sendJson(res, 200, { wages });
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/employee-wages") {
+    const employeeWages = await loadEmployeeWages();
+    employeeWages.sort((a, b) => a.employeeName.localeCompare(b.employeeName));
+    sendJson(res, 200, { employeeWages });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/employee-wages") {
+    if (!hasPermission(req, "manage_wages")) {
+      sendForbidden(res, "Boss or team leader only.");
+      return;
+    }
+
+    const input = await readBody(req);
+    const employeeWages = await loadEmployeeWages();
+    const existingIndex = input.id
+      ? employeeWages.findIndex((item) => item.id === input.id)
+      : employeeWages.findIndex((item) => item.employeeName.toLowerCase() === String(input.employeeName || input.name || "").trim().toLowerCase());
+    const existing = existingIndex >= 0 ? employeeWages[existingIndex] : null;
+    const { errors, employeeWage } = validateEmployeeWage(input, existing, employeeWages);
+    if (errors.length) {
+      sendJson(res, 400, { errors });
+      return;
+    }
+
+    if (existingIndex >= 0) {
+      employeeWages[existingIndex] = employeeWage;
+    } else {
+      employeeWages.push(employeeWage);
+    }
+
+    employeeWages.sort((a, b) => a.employeeName.localeCompare(b.employeeName));
+    await saveEmployeeWages(employeeWages);
+    sendJson(res, 200, { employeeWage, employeeWages });
+    return;
+  }
+
+  const employeeWageActionMatch = url.pathname.match(/^\/api\/employee-wages\/([^/]+)\/(paid|void|draft)$/);
+  if (req.method === "POST" && employeeWageActionMatch) {
+    if (!hasPermission(req, "manage_wages")) {
+      sendForbidden(res, "Boss or team leader only.");
+      return;
+    }
+
+    const employeeWageId = decodeURIComponent(employeeWageActionMatch[1]);
+    const status = employeeWageActionMatch[2];
+    const employeeWages = await loadEmployeeWages();
+    const employeeWage = employeeWages.find((item) => item.id === employeeWageId);
+    if (!employeeWage) {
+      sendJson(res, 404, { errors: ["Employee wage not found."] });
+      return;
+    }
+
+    employeeWage.status = normalizeEmployeeWageStatus(status);
+    employeeWage.updatedAt = new Date().toISOString();
+    employeeWage.paidAt = employeeWage.status === "paid" ? (employeeWage.paidAt || employeeWage.updatedAt) : "";
+    employeeWage.voidedAt = employeeWage.status === "void" ? (employeeWage.voidedAt || employeeWage.updatedAt) : "";
+    await saveEmployeeWages(employeeWages);
+    employeeWages.sort((a, b) => a.employeeName.localeCompare(b.employeeName));
+    sendJson(res, 200, { employeeWage, employeeWages });
+    return;
+  }
+
+  const employeeWageDeleteMatch = url.pathname.match(/^\/api\/employee-wages\/([^/]+)$/);
+  if (req.method === "DELETE" && employeeWageDeleteMatch) {
+    if (!hasPermission(req, "manage_wages")) {
+      sendForbidden(res, "Boss or team leader only.");
+      return;
+    }
+
+    const employeeWageId = decodeURIComponent(employeeWageDeleteMatch[1]);
+    const employeeWages = await loadEmployeeWages();
+    const nextEmployeeWages = employeeWages.filter((item) => item.id !== employeeWageId);
+    if (nextEmployeeWages.length === employeeWages.length) {
+      sendJson(res, 404, { errors: ["Employee wage not found."] });
+      return;
+    }
+
+    await saveEmployeeWages(nextEmployeeWages);
+    sendJson(res, 200, { employeeWages: nextEmployeeWages });
     return;
   }
 
@@ -4421,7 +4633,7 @@ async function serveStatic(req, res, url) {
     "/": "/portal.html",
     "/bookings": "/index.html",
     "/invoices": "/index.html",
-    "/wages": "/index.html",
+    "/wages": "/wages.html",
     "/settings": "/settings.html",
     "/work": "/work/index.html",
     "/work/": "/work/index.html"
