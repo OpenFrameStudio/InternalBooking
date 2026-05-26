@@ -62,6 +62,14 @@ function labelize(value) {
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+function employeePaymentLabel(wage) {
+  const payDate = formatDate(wage.nextPaymentAt);
+  if (wage.paymentSchedule === "last_day_of_month" || wage.payPeriod === "monthly") {
+    return `Pay date last day of every month${payDate ? ` (${payDate})` : ""}`;
+  }
+  return payDate ? `Pay date ${payDate}` : "Pay date manual";
+}
+
 function parseEmails(value) {
   return String(value || "")
     .split(/[\s,;]+/)
@@ -183,7 +191,7 @@ function renderEmployeeWages() {
     status.textContent = labelize(wage.status || "draft");
     status.classList.toggle("paid", wage.status === "paid");
     status.classList.toggle("void", wage.status === "void");
-    item.querySelector(".employee-wage-type").textContent = `${labelize(wage.employmentType)} · ${labelize(wage.payPeriod)} · Issued ${formatDate(wage.issuedAt)}`;
+    item.querySelector(".employee-wage-type").textContent = `${labelize(wage.employmentType)} · ${labelize(wage.payPeriod)} · ${employeePaymentLabel(wage)}`;
     item.querySelector(".employee-wage-notes").textContent = wage.notes || "No notes";
     item.querySelector(".invoice-total strong").textContent = formatMoney(wage.amount || wage.total, wage.currency || "THB");
     item.querySelector(".invoice-total small").textContent = `${wage.currency || "THB"} ${labelize(wage.payPeriod)}`;

@@ -232,9 +232,11 @@ const defaultEmployeeWages = [
     currency: employeeWageCurrency,
     status: "draft",
     issuedAt: "2026-05-26T00:00:00.000+10:00",
+    paymentSchedule: "last_day_of_month",
+    nextPaymentAt: "2026-05-31T12:00:00.000Z",
     paidAt: "",
     voidedAt: "",
-    notes: "Default monthly wage for Faye.",
+    notes: "Monthly wage for Faye. Payment is due on the last day of every month.",
     createdAt: "2026-05-26T00:00:00.000+10:00",
     updatedAt: "2026-05-26T00:00:00.000+10:00"
   }
@@ -1581,6 +1583,26 @@ function normalizePayPeriod(value) {
   return ["monthly", "weekly", "fortnightly", "hourly"].includes(period) ? period : "monthly";
 }
 
+function lastDayOfMonthIso(value = new Date()) {
+  const date = new Date(value);
+  const base = Number.isNaN(date.getTime()) ? new Date() : date;
+  const year = base.getUTCFullYear();
+  const month = base.getUTCMonth();
+  return new Date(Date.UTC(year, month + 1, 0, 12, 0, 0)).toISOString();
+}
+
+function employeePaymentSchedule(payPeriod) {
+  return normalizePayPeriod(payPeriod) === "monthly" ? "last_day_of_month" : "";
+}
+
+function employeePaymentDate(wage) {
+  const payPeriod = normalizePayPeriod(wage?.payPeriod || wage?.period);
+  if (payPeriod === "monthly") {
+    return lastDayOfMonthIso(new Date());
+  }
+  return wage?.nextPaymentAt || wage?.dueAt || wage?.issuedAt || new Date().toISOString();
+}
+
 function nextEmployeeWageNumber(employeeWages) {
   const maxNumber = employeeWages.reduce((max, wage) => {
     const value = String(wage.wageNumber || "");
@@ -1593,18 +1615,24 @@ function nextEmployeeWageNumber(employeeWages) {
 function normalizeEmployeeWage(wage) {
   const amount = normalizeMoney(wage?.amount ?? wage?.total ?? 0);
   const status = normalizeEmployeeWageStatus(wage?.status);
+  const payPeriod = normalizePayPeriod(wage?.payPeriod || wage?.period);
+  const paymentSchedule = employeePaymentSchedule(payPeriod);
 
   return {
     id: wage?.id || crypto.randomUUID(),
     wageNumber: String(wage?.wageNumber || "").trim(),
     employeeName: String(wage?.employeeName || wage?.name || "").trim(),
     employmentType: normalizeEmploymentType(wage?.employmentType || wage?.type),
-    payPeriod: normalizePayPeriod(wage?.payPeriod || wage?.period),
+    payPeriod,
     amount,
     total: amount,
     currency: String(wage?.currency || employeeWageCurrency).trim().toUpperCase(),
     status,
     issuedAt: wage?.issuedAt || new Date().toISOString(),
+    paymentSchedule,
+    nextPaymentAt: paymentSchedule === "last_day_of_month"
+      ? employeePaymentDate({ ...wage, payPeriod })
+      : (wage?.nextPaymentAt || wage?.dueAt || wage?.issuedAt || new Date().toISOString()),
     paidAt: status === "paid" ? (wage?.paidAt || wage?.updatedAt || new Date().toISOString()) : "",
     voidedAt: status === "void" ? (wage?.voidedAt || wage?.updatedAt || new Date().toISOString()) : "",
     notes: String(wage?.notes || ""),
@@ -1646,6 +1674,8 @@ function validateEmployeeWage(input, existing = null, employeeWages = []) {
       currency,
       status: existing?.status || normalizeEmployeeWageStatus(input.status),
       issuedAt: existing?.issuedAt || new Date().toISOString(),
+      paymentSchedule: existing?.paymentSchedule || employeePaymentSchedule(payPeriod),
+      nextPaymentAt: existing?.nextPaymentAt || "",
       paidAt: existing?.paidAt || "",
       voidedAt: existing?.voidedAt || "",
       notes,
@@ -1673,6 +1703,12 @@ function formatWageLabel(value) {
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+function employeePaymentScheduleLabel(wage) {
+  return wage.paymentSchedule === "last_day_of_month"
+    ? "Last day of every month"
+    : "Manual";
+}
+
 function drawEmployeePayslipPdf(doc, wage) {
   const pageWidth = doc.page.width;
   const margin = 52;
@@ -1696,6 +1732,8 @@ function drawEmployeePayslipPdf(doc, wage) {
   doc.text(formatInvoiceDocumentDate(wage.issuedAt), 198, 181);
   doc.text("Pay Period", margin, 204);
   doc.text(formatWageLabel(normalizePayPeriod(wage.payPeriod)), 198, 204);
+  doc.text("Payment Date", margin, 227);
+  doc.text(formatInvoiceDocumentDate(wage.nextPaymentAt), 198, 227);
 
   doc.font("Helvetica-Bold").fontSize(13).text("EMPLOYER", margin, 260);
   doc.font("Helvetica").fontSize(10.5);
@@ -1712,7 +1750,8 @@ function drawEmployeePayslipPdf(doc, wage) {
   [
     wage.employeeName || "Employee",
     formatWageLabel(normalizeEmploymentType(wage.employmentType)),
-    `${formatWageLabel(normalizePayPeriod(wage.payPeriod))} wage`
+    `${formatWageLabel(normalizePayPeriod(wage.payPeriod))} wage`,
+    employeePaymentScheduleLabel(wage)
   ].forEach((line, index) => doc.text(line, employeeX, 286 + index * 17, {
     width: pageWidth - margin - employeeX,
     height: 16,
