@@ -1,6 +1,10 @@
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 const defaultWorkEmployeeId = "faye";
+const maxWorkAttachmentCount = 6;
+const maxWorkAttachmentBytes = 450_000;
+const maxWorkPhotoDimension = 1280;
+const workNoticeDismissedKey = "openframe.workNoticeDismissed.v1";
 
 const el = {
   addAssignmentButton: $("#addAssignmentButton"),
@@ -17,6 +21,8 @@ const el = {
   assignmentNoticeDetail: $("#assignmentNoticeDetail"),
   assignmentNoticeTitle: $("#assignmentNoticeTitle"),
   assignmentNotes: $("#assignmentNotes"),
+  assignmentPhotoList: $("#assignmentPhotoList"),
+  assignmentPhotos: $("#assignmentPhotos"),
   assignmentPriority: $("#assignmentPriority"),
   assignmentTitle: $("#assignmentTitle"),
   appLinks: $$("[data-app-link]"),
@@ -73,6 +79,7 @@ const state = {
     assignmentDialogOpen: false,
     assignmentDraft: emptyAssignmentDraft(),
     assignmentError: "",
+    assignmentNoticeDismissedSignature: readWorkNoticeDismissedSignature(),
     bookingSyncStatus: initialBookingSyncStatus,
     filter: "open",
     loggingOut: false,
@@ -90,6 +97,7 @@ function emptyAssignmentDraft() {
     dueDate: toISODate(new Date()),
     priority: "normal",
     notes: "",
+    attachments: [],
   };
 }
 
@@ -111,6 +119,7 @@ function assignmentDraftFromAssignment(assignment = null) {
     dueDate: assignment.dueDate || toISODate(new Date()),
     priority: assignment.priority || "normal",
     notes: assignment.notes || "",
+    attachments: Array.isArray(assignment.attachments) ? assignment.attachments : [],
   };
 }
 
@@ -242,6 +251,18 @@ function formatMessageTime(value) {
   }).format(new Date(value));
 }
 
+function formatFileSize(bytes) {
+  const size = Number(bytes || 0);
+  if (size < 1024) return `${Math.max(0, Math.round(size))} B`;
+  if (size < 1024 * 1024) return `${Math.round(size / 102.4) / 10} KB`;
+  return `${Math.round(size / 1024 / 102.4) / 10} MB`;
+}
+
+function workAttachmentByteSize(dataUrl) {
+  const base64 = String(dataUrl || "").split(",")[1] || "";
+  return Math.ceil(base64.length * 3 / 4);
+}
+
 function isToday(dateISO) {
   return dateISO === toISODate(new Date());
 }
@@ -252,6 +273,23 @@ function isOverdue(assignment) {
 
 function priorityWeight(priority) {
   return { high: 3, normal: 2, low: 1 }[priority] || 2;
+}
+
+function readWorkNoticeDismissedSignature() {
+  try {
+    return localStorage.getItem(workNoticeDismissedKey) || "";
+  } catch {
+    return "";
+  }
+}
+
+function writeWorkNoticeDismissedSignature(signature) {
+  try {
+    if (signature) localStorage.setItem(workNoticeDismissedKey, signature);
+    else localStorage.removeItem(workNoticeDismissedKey);
+  } catch {
+    // This only controls whether the small in-app banner is hidden.
+  }
 }
 
 function getOpenAssignments() {
@@ -265,6 +303,13 @@ function getOpenAssignments() {
       if (prioritySort) return prioritySort;
       return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
     });
+}
+
+function workNoticeSignature(assignments) {
+  return assignments
+    .map((assignment) => `${assignment.id}:${assignment.updatedAt || assignment.createdAt || ""}`)
+    .sort()
+    .join("|");
 }
 
 function getNotificationPermission() {
@@ -320,9 +365,10 @@ function renderMetrics() {
 
 function renderAssignmentNotice() {
   const open = getOpenAssignments();
-  el.assignmentNotice.hidden = open.length === 0;
+  const signature = workNoticeSignature(open);
+  el.assignmentNotice.hidden = open.length === 0 || signature === state.ui.assignmentNoticeDismissedSignature;
 
-  if (!open.length) {
+  if (!open.length || signature === state.ui.assignmentNoticeDismissedSignature) {
     el.assignmentNoticeTitle.textContent = "New work waiting";
     el.assignmentNoticeDetail.textContent = "";
     return;
@@ -413,6 +459,7 @@ function renderAssignmentCard(assignment) {
     day: "numeric",
     month: "short",
   })}`;
+  renderAssignmentAttachments(card, assignment.attachments || []);
 
   const actions = card.querySelector(".assignment-actions");
 
@@ -449,6 +496,27 @@ function renderAssignmentCard(assignment) {
   }
 
   return card;
+}
+
+function renderAssignmentAttachments(card, attachments) {
+  if (!attachments.length) return;
+
+  const gallery = document.createElement("div");
+  gallery.className = "assignment-photo-gallery";
+  gallery.replaceChildren(...attachments.map((attachment) => {
+    const link = document.createElement("a");
+    link.href = attachment.dataUrl;
+    link.target = "_blank";
+    link.rel = "noopener";
+    link.download = attachment.name || "work-photo.jpg";
+    link.title = attachment.name || "Open photo";
+    link.innerHTML = `<img alt="" loading="lazy" />`;
+    link.querySelector("img").src = attachment.dataUrl;
+    link.querySelector("img").alt = attachment.name || "Work photo";
+    return link;
+  }));
+
+  card.querySelector(".assignment-content").insertBefore(gallery, card.querySelector(".assignment-meta"));
 }
 
 function renderMessages() {
@@ -489,6 +557,7 @@ function renderAssignmentDialog() {
   el.assignmentNotes.value = draft.notes;
   el.assignmentError.textContent = state.ui.assignmentError;
   el.deleteAssignmentButton.hidden = !draft.id;
+  renderAssignmentPhotoList();
 
   if (state.ui.assignmentDialogOpen && !wasOpen) {
     el.assignmentDialog.showModal();
@@ -498,6 +567,36 @@ function renderAssignmentDialog() {
   if (!state.ui.assignmentDialogOpen && wasOpen) {
     el.assignmentDialog.close();
   }
+}
+
+function renderAssignmentPhotoList() {
+  const attachments = state.ui.assignmentDraft.attachments || [];
+
+  if (!attachments.length) {
+    el.assignmentPhotoList.innerHTML = `<p class="work-photo-empty">No photos attached.</p>`;
+    return;
+  }
+
+  el.assignmentPhotoList.replaceChildren(...attachments.map((attachment) => {
+    const item = document.createElement("figure");
+    item.className = "work-photo-chip";
+    item.innerHTML = `
+      <img alt="" loading="lazy" />
+      <figcaption>
+        <strong></strong>
+        <span></span>
+      </figcaption>
+      <button class="icon-button" type="button" title="Remove photo" aria-label="Remove photo">
+        <i data-lucide="x"></i>
+      </button>
+    `;
+    item.querySelector("img").src = attachment.dataUrl;
+    item.querySelector("img").alt = attachment.name || "Work photo";
+    item.querySelector("strong").textContent = attachment.name || "Work photo";
+    item.querySelector("span").textContent = formatFileSize(attachment.size || workAttachmentByteSize(attachment.dataUrl));
+    item.querySelector("button").dataset.removeAssignmentPhoto = attachment.id;
+    return item;
+  }));
 }
 
 function renderEmployeeOptions(selectedEmployeeId) {
@@ -585,7 +684,115 @@ function assignmentPayloadFromDraft(draft) {
     dueDate: draft.dueDate,
     priority: draft.priority,
     notes: draft.notes.trim(),
+    attachments: Array.isArray(draft.attachments) ? draft.attachments : [],
   };
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => resolve(reader.result));
+    reader.addEventListener("error", () => reject(new Error("Photo could not be read.")));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImage(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.addEventListener("load", () => resolve(image));
+    image.addEventListener("error", () => reject(new Error("Photo could not be loaded.")));
+    image.src = dataUrl;
+  });
+}
+
+function canvasToDataUrl(canvas, quality) {
+  return canvas.toDataURL("image/jpeg", quality);
+}
+
+async function compressPhoto(file) {
+  if (!/^image\/(jpeg|jpg|png|webp)$/i.test(file.type)) {
+    throw new Error("Only JPEG, PNG, or WebP photos can be attached.");
+  }
+
+  const originalDataUrl = await readFileAsDataUrl(file);
+  const image = await loadImage(originalDataUrl);
+  const scale = Math.min(1, maxWorkPhotoDimension / Math.max(image.width, image.height));
+  const width = Math.max(1, Math.round(image.width * scale));
+  const height = Math.max(1, Math.round(image.height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, width, height);
+  context.drawImage(image, 0, 0, width, height);
+
+  for (const quality of [0.74, 0.64, 0.52]) {
+    const dataUrl = canvasToDataUrl(canvas, quality);
+    if (workAttachmentByteSize(dataUrl) <= maxWorkAttachmentBytes) return dataUrl;
+  }
+
+  throw new Error(`${file.name} is too large. Please upload a smaller photo.`);
+}
+
+function attachmentId() {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+async function attachmentFromFile(file) {
+  const dataUrl = await compressPhoto(file);
+  return {
+    id: attachmentId(),
+    name: file.name || "Work photo.jpg",
+    type: "image/jpeg",
+    size: workAttachmentByteSize(dataUrl),
+    dataUrl,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+async function addAssignmentPhotos(event) {
+  if (!state.ui.assignmentDialogOpen) return;
+
+  const files = [...event.target.files];
+  event.target.value = "";
+  if (!files.length) return;
+
+  const current = state.ui.assignmentDraft.attachments || [];
+  if (current.length + files.length > maxWorkAttachmentCount) {
+    setUiState({ assignmentError: `Attach up to ${maxWorkAttachmentCount} photos.` });
+    return;
+  }
+
+  try {
+    const attachments = [];
+    for (const file of files) {
+      attachments.push(await attachmentFromFile(file));
+    }
+
+    setUiState({
+      assignmentDraft: {
+        ...state.ui.assignmentDraft,
+        attachments: [...current, ...attachments],
+      },
+      assignmentError: "",
+    });
+  } catch (error) {
+    setUiState({ assignmentError: error.message });
+  }
+}
+
+function removeAssignmentPhoto(id) {
+  const attachments = state.ui.assignmentDraft.attachments || [];
+  setUiState({
+    assignmentDraft: {
+      ...state.ui.assignmentDraft,
+      attachments: attachments.filter((attachment) => attachment.id !== id),
+    },
+    assignmentError: "",
+  });
 }
 
 async function handleAssignmentSubmit(event) {
@@ -649,7 +856,9 @@ async function clearMessages() {
 }
 
 function viewOpenAssignments() {
-  setUiState({ filter: "open" });
+  const signature = workNoticeSignature(getOpenAssignments());
+  writeWorkNoticeDismissedSignature(signature);
+  setUiState({ filter: "open", assignmentNoticeDismissedSignature: signature });
   window.requestAnimationFrame(() => {
     el.assignmentList.scrollIntoView({ behavior: "smooth", block: "start" });
   });
@@ -776,6 +985,11 @@ function wireEvents() {
   el.assignmentForm.addEventListener("input", updateAssignmentDraft);
   el.assignmentForm.addEventListener("change", updateAssignmentDraft);
   el.assignmentForm.addEventListener("submit", handleAssignmentSubmit);
+  el.assignmentPhotos.addEventListener("change", addAssignmentPhotos);
+  el.assignmentPhotoList.addEventListener("click", (event) => {
+    const removeButton = event.target.closest("[data-remove-assignment-photo]");
+    if (removeButton) removeAssignmentPhoto(removeButton.dataset.removeAssignmentPhoto);
+  });
   el.assignmentDialog.addEventListener("cancel", (event) => {
     event.preventDefault();
     closeAssignmentDialog();

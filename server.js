@@ -46,6 +46,14 @@ const host = process.env.HOST || (process.env.PORT ? "0.0.0.0" : "127.0.0.1");
 const cancelledBookingRetentionHours = Number(process.env.CANCELLED_BOOKING_RETENTION_HOURS || 12);
 const cancelledBookingRetentionMs =
   (Number.isFinite(cancelledBookingRetentionHours) && cancelledBookingRetentionHours > 0 ? cancelledBookingRetentionHours : 12) * 60 * 60 * 1000;
+const configuredWorkAttachmentCount = Number(process.env.WORK_ATTACHMENT_MAX_COUNT || 6);
+const configuredWorkAttachmentBytes = Number(process.env.WORK_ATTACHMENT_MAX_BYTES || 450_000);
+const maxWorkAttachmentCount = Number.isFinite(configuredWorkAttachmentCount) && configuredWorkAttachmentCount > 0
+  ? configuredWorkAttachmentCount
+  : 6;
+const maxWorkAttachmentBytes = Number.isFinite(configuredWorkAttachmentBytes) && configuredWorkAttachmentBytes > 0
+  ? configuredWorkAttachmentBytes
+  : 450_000;
 const publicAppUrl = (process.env.APP_PUBLIC_URL || "https://system.openframe.studio").replace(/\/$/, "");
 const larkConfig = {
   appId: process.env.LARK_APP_ID || "",
@@ -682,6 +690,37 @@ function workEmployeeById(workState, employeeId) {
   return employees.find((employee) => employee.id === employeeId) || employees[0] || defaultWorkEmployee;
 }
 
+function workAttachmentByteSize(dataUrl) {
+  const base64 = String(dataUrl || "").split(",")[1] || "";
+  return Math.ceil(base64.length * 3 / 4);
+}
+
+function normalizeWorkAttachment(attachment) {
+  const dataUrl = String(attachment?.dataUrl || "").trim();
+  const match = dataUrl.match(/^data:(image\/(?:jpeg|jpg|png|webp));base64,([a-z0-9+/=]+)$/i);
+  if (!match) return null;
+
+  const type = match[1].toLowerCase() === "image/jpg" ? "image/jpeg" : match[1].toLowerCase();
+  const estimatedSize = workAttachmentByteSize(dataUrl);
+  if (estimatedSize > maxWorkAttachmentBytes) return null;
+  const providedSize = Number(attachment?.size || estimatedSize);
+
+  return {
+    id: String(attachment?.id || crypto.randomUUID()),
+    name: String(attachment?.name || "Work photo").trim().slice(0, 120) || "Work photo",
+    type,
+    size: Number.isFinite(providedSize) ? Math.max(0, Math.min(providedSize, maxWorkAttachmentBytes)) : estimatedSize,
+    dataUrl,
+    createdAt: attachment?.createdAt || new Date().toISOString()
+  };
+}
+
+function normalizeWorkAttachments(attachments) {
+  return Array.isArray(attachments)
+    ? attachments.slice(0, maxWorkAttachmentCount).map(normalizeWorkAttachment).filter(Boolean)
+    : [];
+}
+
 function normalizeWorkState(raw) {
   const employees = normalizeWorkEmployees(raw);
   const employeeIds = new Set(employees.map((employee) => employee.id));
@@ -700,6 +739,7 @@ function normalizeWorkState(raw) {
         status: assignment.status === "done" ? "done" : "open",
         source: String(assignment.source || ""),
         sourceId: String(assignment.sourceId || ""),
+        attachments: normalizeWorkAttachments(assignment.attachments),
         inviteStatus: ["sent", "failed", "not_configured"].includes(assignment.inviteStatus) ? assignment.inviteStatus : "",
         inviteSentAt: assignment.inviteSentAt || "",
         inviteTo: uniqueEmails(parseGuestEmails(assignment.inviteTo || "")).join(", "),
@@ -765,6 +805,10 @@ function validateWorkAssignment(input, existing = null, workState = null) {
   const dueDate = String(input.dueDate || "").trim();
   const priority = ["high", "normal", "low"].includes(input.priority) ? input.priority : "normal";
   const notes = String(input.notes || "").trim();
+  const rawAttachments = Object.prototype.hasOwnProperty.call(input, "attachments")
+    ? input.attachments
+    : existing?.attachments || [];
+  const attachments = normalizeWorkAttachments(rawAttachments);
   const employees = Array.isArray(workState?.employees) && workState.employees.length
     ? workState.employees
     : defaultWorkState.employees;
@@ -777,6 +821,12 @@ function validateWorkAssignment(input, existing = null, workState = null) {
   if (!title) errors.push("Enter the work title.");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) errors.push("Choose a valid due date.");
   if (!employees.some((employee) => employee.id === employeeId)) errors.push("Choose a valid employee.");
+  if (Array.isArray(rawAttachments) && rawAttachments.length > maxWorkAttachmentCount) {
+    errors.push(`Attach up to ${maxWorkAttachmentCount} photos.`);
+  }
+  if (Array.isArray(rawAttachments) && attachments.length !== rawAttachments.length) {
+    errors.push("One of the work photos is too large or is not a supported image.");
+  }
 
   return {
     errors,
@@ -787,6 +837,7 @@ function validateWorkAssignment(input, existing = null, workState = null) {
       dueDate,
       priority,
       notes,
+      attachments,
       status: existing?.status || "open",
       source: existing?.source || String(input.source || ""),
       sourceId: existing?.sourceId || String(input.sourceId || ""),
@@ -894,6 +945,7 @@ function assignmentFromBooking(booking, existing = null) {
     status: existing?.status || "open",
     source: "booking",
     sourceId: booking.id,
+    attachments: normalizeWorkAttachments(existing?.attachments || []),
     inviteStatus: existing?.inviteStatus || "",
     inviteSentAt: existing?.inviteSentAt || "",
     inviteTo: existing?.inviteTo || "",
@@ -2440,6 +2492,10 @@ function buildWorkInviteEmailText(assignment, workState) {
     lines.push("Details:", assignment.notes, "");
   }
 
+  if (assignment.attachments?.length) {
+    lines.push(`Photos: ${assignment.attachments.length} attached in the work desk.`, "");
+  }
+
   lines.push(
     "Open the work desk:",
     `${publicAppUrl}/work/`,
@@ -2465,6 +2521,10 @@ function buildWorkLarkNotificationText(assignment, workState) {
   if (assignment.notes) {
     const notes = assignment.notes.length > 900 ? `${assignment.notes.slice(0, 900)}...` : assignment.notes;
     lines.push("Details:", notes, "");
+  }
+
+  if (assignment.attachments?.length) {
+    lines.push(`Photos: ${assignment.attachments.length} attached in the work desk.`, "");
   }
 
   lines.push("Open work desk:", `${publicAppUrl}/work/`);
@@ -2559,6 +2619,9 @@ function buildWorkInviteEmailHtml(assignment, workState) {
   const notes = assignment.notes
     ? `<p><strong>Details:</strong><br />${escapeHtmlForEmail(assignment.notes).replace(/\n/g, "<br />")}</p>`
     : "";
+  const photos = assignment.attachments?.length
+    ? `<p><strong>Photos:</strong> ${assignment.attachments.length} attached in the work desk.</p>`
+    : "";
 
   return `
     <div style="font-family:Arial,sans-serif;color:#111611;line-height:1.5">
@@ -2568,6 +2631,7 @@ function buildWorkInviteEmailHtml(assignment, workState) {
       <p><strong>Due:</strong> ${escapeHtmlForEmail(formatWorkInviteDueDate(assignment))}</p>
       <p><strong>Priority:</strong> ${escapeHtmlForEmail(assignment.priority)}</p>
       ${notes}
+      ${photos}
       <p><a href="${escapeHtmlForEmail(`${publicAppUrl}/work/`)}">Open the work desk</a></p>
       <p>Thank you,<br />OpenFrame Studio</p>
     </div>

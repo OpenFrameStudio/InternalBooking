@@ -13,6 +13,7 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
     <link rel="stylesheet" href="/styles.css?v=client-dropdown-panel" />
+    <link rel="stylesheet" href="/work/styles.css?v=assignment-photos" />
     <script src="/install.js" defer></script>
   </head>
   <body>
@@ -67,6 +68,17 @@
                 Refresh
               </button>
             </div>
+
+            <section class="assignment-notice" id="mainAssignmentNotice" hidden aria-live="polite">
+              <div class="assignment-notice-copy">
+                <p class="eyebrow">New assignments</p>
+                <strong id="mainAssignmentNoticeTitle">New work waiting</strong>
+                <span id="mainAssignmentNoticeDetail"></span>
+              </div>
+              <button class="ghost-button" id="mainAssignmentNoticeButton" type="button">
+                <span>View open</span>
+              </button>
+            </section>
 
             <form class="booking-form" id="bookingForm">
               <label>

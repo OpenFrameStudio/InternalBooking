@@ -1,5 +1,6 @@
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
+const workNoticeDismissedKey = 'openframe.workNoticeDismissed.v1';
 
 const el = {
   bookingForm: $('#bookingForm'),
@@ -103,6 +104,10 @@ const el = {
   larkDot: $('#larkDot'),
   larkTitle: $('#larkTitle'),
   larkDetail: $('#larkDetail'),
+  mainAssignmentNotice: $('#mainAssignmentNotice'),
+  mainAssignmentNoticeButton: $('#mainAssignmentNoticeButton'),
+  mainAssignmentNoticeDetail: $('#mainAssignmentNoticeDetail'),
+  mainAssignmentNoticeTitle: $('#mainAssignmentNoticeTitle'),
   todayCount: $('#todayCount'),
   weekCount: $('#weekCount'),
   modeEyebrow: $('#bookingModeEyebrow'),
@@ -116,6 +121,7 @@ const state = {
   photographers: [],
   invoices: [],
   wages: [],
+  workAssignments: [],
   bookingForm: {
     selectedClientId: '',
     selectedPhotographerId: '',
@@ -128,6 +134,7 @@ const state = {
   restoringDraft: false,
   syncedClientEmail: [],
   syncedPhotographerEmail: [],
+  workNoticeDismissedSignature: readWorkNoticeDismissedSignature(),
   user: null
 };
 
@@ -198,6 +205,23 @@ function removeStored(key) {
   }
 }
 
+function readWorkNoticeDismissedSignature() {
+  try {
+    return localStorage.getItem(workNoticeDismissedKey) || '';
+  } catch {
+    return '';
+  }
+}
+
+function writeWorkNoticeDismissedSignature(signature) {
+  try {
+    if (signature) localStorage.setItem(workNoticeDismissedKey, signature);
+    else localStorage.removeItem(workNoticeDismissedKey);
+  } catch {
+    // This only hides the small in-app banner.
+  }
+}
+
 function cacheBookings() {
   writeStored(storageKeys.bookings, state.bookings);
 }
@@ -261,7 +285,8 @@ function refreshLiveData() {
     loadPhotographers(),
     loadBookings(),
     loadInvoices(),
-    loadWages()
+    loadWages(),
+    loadWorkAssignments()
   ]);
 }
 
@@ -567,6 +592,41 @@ function bookingServiceLabel(booking) {
     return booking.services.map((service) => service.name).join(' + ');
   }
   return booking.service || 'Booking';
+}
+
+function workPriorityWeight(priority) {
+  return { high: 3, normal: 2, low: 1 }[priority] || 2;
+}
+
+function parseDateValue(value) {
+  const [year, month, day] = String(value || '').split('-').map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function isTodayDateValue(value) {
+  return value === toDateValue(new Date());
+}
+
+function isOverdueWorkAssignment(assignment) {
+  return assignment.status !== 'done' && parseDateValue(assignment.dueDate) < parseDateValue(toDateValue(new Date()));
+}
+
+function openWorkAssignments() {
+  return [...state.workAssignments]
+    .filter((assignment) => assignment.status !== 'done')
+    .sort((a, b) => {
+      const overdueSort = Number(isOverdueWorkAssignment(b)) - Number(isOverdueWorkAssignment(a));
+      if (overdueSort) return overdueSort;
+      if (a.dueDate !== b.dueDate) return String(a.dueDate || '').localeCompare(String(b.dueDate || ''));
+      return workPriorityWeight(b.priority) - workPriorityWeight(a.priority);
+    });
+}
+
+function workNoticeSignature(assignments) {
+  return assignments
+    .map((assignment) => `${assignment.id}:${assignment.updatedAt || assignment.createdAt || ''}`)
+    .sort()
+    .join('|');
 }
 
 function toDateValue(date) {
@@ -1160,6 +1220,32 @@ function renderBookings() {
   updateStats();
 }
 
+function renderMainAssignmentNotice() {
+  if (!el.mainAssignmentNotice) return;
+
+  const open = openWorkAssignments();
+  const signature = workNoticeSignature(open);
+  el.mainAssignmentNotice.hidden = open.length === 0 || signature === state.workNoticeDismissedSignature;
+
+  if (!open.length || signature === state.workNoticeDismissedSignature) {
+    el.mainAssignmentNoticeTitle.textContent = 'New work waiting';
+    el.mainAssignmentNoticeDetail.textContent = '';
+    return;
+  }
+
+  const nextAssignment = open[0];
+  const countLabel = open.length === 1 ? '1 new assignment' : `${open.length} new assignments`;
+  const audienceLabel = state.user?.role === 'employee' ? 'assigned to you' : 'in the work queue';
+  const dueLabel = isOverdueWorkAssignment(nextAssignment)
+    ? 'overdue'
+    : isTodayDateValue(nextAssignment.dueDate)
+      ? 'due today'
+      : `due ${dateFormatter.format(parseDateValue(nextAssignment.dueDate))}`;
+
+  el.mainAssignmentNoticeTitle.textContent = `${countLabel} ${audienceLabel}`;
+  el.mainAssignmentNoticeDetail.textContent = `Next: ${nextAssignment.title} - ${dueLabel}`;
+}
+
 function formatMoney(value) {
   return currencyFormatter.format(Number(value || 0));
 }
@@ -1526,6 +1612,23 @@ async function loadBookings() {
     el.larkDot.className = 'status-dot offline';
     el.larkTitle.textContent = 'Bookings refresh delayed';
     el.larkDetail.textContent = 'Showing saved bookings while the live calendar catches up.';
+  }
+}
+
+async function loadWorkAssignments() {
+  if (!userCanAccess('work')) {
+    state.workAssignments = [];
+    renderMainAssignmentNotice();
+    return;
+  }
+
+  try {
+    const { response, data } = await fetchJson('/api/work');
+    if (!response.ok) return;
+    state.workAssignments = Array.isArray(data.assignments) ? data.assignments : [];
+    renderMainAssignmentNotice();
+  } catch {
+    renderMainAssignmentNotice();
   }
 }
 
@@ -2170,6 +2273,14 @@ async function logout() {
   }
 }
 
+function viewOpenWorkAssignments() {
+  const signature = workNoticeSignature(openWorkAssignments());
+  state.workNoticeDismissedSignature = signature;
+  writeWorkNoticeDismissedSignature(signature);
+  renderMainAssignmentNotice();
+  window.location.href = '/work/';
+}
+
 el.bookingForm.addEventListener('submit', submitBooking);
 el.bookingForm.addEventListener('input', saveDraft);
 el.bookingForm.addEventListener('change', saveDraft);
@@ -2191,6 +2302,7 @@ el.passwordDialog.addEventListener('click', (event) => {
   if (event.target === el.passwordDialog) closePasswordDialog();
 });
 el.logoutButton.addEventListener('click', logout);
+el.mainAssignmentNoticeButton?.addEventListener('click', viewOpenWorkAssignments);
 el.clientDropdownButton.addEventListener('click', () => {
   setClientDropdownOpen(!state.bookingForm.clientDropdownOpen);
 });

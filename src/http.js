@@ -43,9 +43,11 @@ export function parseCookies(header = "") {
 export function readBody(req) {
   return new Promise((resolve, reject) => {
     let data = "";
+    const configuredMaxBytes = Number(process.env.JSON_BODY_LIMIT_BYTES || 4_500_000);
+    const maxBytes = Number.isFinite(configuredMaxBytes) && configuredMaxBytes > 0 ? configuredMaxBytes : 4_500_000;
     req.on("data", (chunk) => {
       data += chunk;
-      if (data.length > 1_000_000) {
+      if (data.length > maxBytes) {
         reject(new Error("Request body is too large."));
         req.destroy();
       }
