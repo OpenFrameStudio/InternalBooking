@@ -16,9 +16,6 @@ const el = {
   invoicesPage: $('#invoicesPage'),
   wagesPage: $('#wagesPage'),
   propertyAddress: $('#propertyAddressInput'),
-  addressDatalist: $('#addressSuggestionList'),
-  addressSuggestions: $('#addressSuggestions'),
-  addressMessage: $('#addressMessage'),
   formMessage: $('#formMessage'),
   clientMessage: $('#clientMessage'),
   photographerMessage: $('#photographerMessage'),
@@ -78,7 +75,6 @@ const el = {
   refreshWagesButton: $('#refreshWagesButton'),
   invoicePrintSheet: $('#invoicePrintSheet'),
   refreshButton: $('#refreshButton'),
-  searchAddressButton: $('#searchAddressButton'),
   testLarkButton: $('#testLarkButton'),
   previewLarkButton: $('#previewLarkButton'),
   submitButton: $('#bookingSubmitButton'),
@@ -238,7 +234,6 @@ function hydrateCachedData() {
   const cachedBookings = readStored(storageKeys.bookings, []).filter((booking) => booking?.id);
   if (cachedBookings.length) {
     state.bookings = cachedBookings;
-    updateAddressSuggestions();
   }
   renderBookings();
 
@@ -387,99 +382,6 @@ function rememberAddress(address) {
   if (!cleanAddress) return;
   const stored = readStored(storageKeys.addresses, []);
   writeStored(storageKeys.addresses, uniqueAddresses([cleanAddress, ...stored]).slice(0, 30));
-}
-
-function localAddressSuggestions(query = el.propertyAddress.value) {
-  const search = normalizeAddress(query).toLowerCase();
-  const saved = readStored(storageKeys.addresses, []);
-  const bookingAddresses = state.bookings.flatMap((booking) => [
-    booking.propertyAddress,
-    booking.locationAddress,
-    booking.locationName
-  ]);
-  return uniqueAddresses([...saved, ...bookingAddresses])
-    .filter((address) => !search || address.toLowerCase().includes(search))
-    .slice(0, 8);
-}
-
-function normalizeRemoteAddress(value) {
-  return normalizeAddress(String(value || '').replace(/,\s*AUS$/i, ', Australia'));
-}
-
-async function fetchBrowserAddressSuggestions(query) {
-  const params = new URLSearchParams({
-    f: 'json',
-    text: query,
-    countryCode: 'AUS',
-    maxSuggestions: '6'
-  });
-  const response = await fetch(`https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/suggest?${params}`);
-  if (!response.ok) return [];
-  const data = await response.json().catch(() => ({}));
-  return (data.suggestions || []).map((suggestion) => normalizeRemoteAddress(suggestion.text)).filter(Boolean);
-}
-
-function renderAddressSuggestions(addresses, message = '') {
-  const suggestions = uniqueAddresses(addresses).slice(0, 8);
-  el.addressDatalist.innerHTML = '';
-  el.addressSuggestions.innerHTML = '';
-
-  for (const address of suggestions) {
-    el.addressDatalist.append(new Option(address, address));
-    const button = document.createElement('button');
-    button.className = 'address-suggestion';
-    button.type = 'button';
-    button.textContent = address;
-    button.addEventListener('click', () => {
-      el.propertyAddress.value = address;
-      rememberAddress(address);
-      renderAddressSuggestions(localAddressSuggestions(address));
-      saveDraft();
-    });
-    el.addressSuggestions.append(button);
-  }
-
-  el.addressSuggestions.hidden = !suggestions.length;
-  if (message) {
-    setMessage(el.addressMessage, message);
-  }
-}
-
-function updateAddressSuggestions() {
-  renderAddressSuggestions(localAddressSuggestions(), '');
-}
-
-async function searchAddressSuggestions() {
-  const query = normalizeAddress(el.propertyAddress.value);
-  if (query.length < 4) {
-    setMessage(el.addressMessage, 'Type at least 4 characters.', 'error');
-    return;
-  }
-
-  el.searchAddressButton.disabled = true;
-  el.searchAddressButton.textContent = 'Searching';
-  setMessage(el.addressMessage, 'Searching addresses...');
-  try {
-    let remoteAddresses = await fetchBrowserAddressSuggestions(query);
-    if (!remoteAddresses.length) {
-      const { response, data } = await fetchJson(`/api/address-suggestions?q=${encodeURIComponent(query)}`);
-      if (!response.ok) {
-        setMessage(el.addressMessage, (data.errors || ['Could not find address suggestions.']).join(' '), 'error');
-        return;
-      }
-      remoteAddresses = (data.suggestions || []).map((suggestion) => suggestion.address || suggestion.label);
-    }
-    const addresses = uniqueAddresses([...remoteAddresses, ...localAddressSuggestions(query)]);
-    renderAddressSuggestions(addresses, addresses.length ? 'Choose an address above.' : 'No suggestions found.');
-    if (addresses.length) {
-      setMessage(el.addressMessage, 'Choose an address above.', 'success');
-    }
-  } catch {
-    setMessage(el.addressMessage, 'Could not reach address lookup.', 'error');
-  } finally {
-    el.searchAddressButton.disabled = false;
-    el.searchAddressButton.textContent = 'Find address suggestions';
-  }
 }
 
 function parseEmails(value) {
@@ -1071,7 +973,6 @@ function fillBookingForm(booking) {
   state.syncedClientEmail = uniqueEmails(parseEmails(el.clientEmail.value)).filter(isEmail);
   state.syncedPhotographerEmail = uniqueEmails(parseEmails(el.photographerEmail.value)).filter(isEmail);
   updateInvitationSummary();
-  updateAddressSuggestions();
   el.larkPreview.hidden = true;
   state.restoringDraft = false;
 }
@@ -1095,7 +996,6 @@ function resetBookingForm(message = '') {
   updateDurationForServices();
   applyExamplePlaceholders();
   updateInvitationSummary();
-  updateAddressSuggestions();
   el.larkPreview.hidden = true;
   setMessage(el.formMessage, message);
 }
@@ -1602,7 +1502,6 @@ async function loadBookings() {
     state.bookings = data.bookings || [];
     cacheBookings();
     renderBookings();
-    updateAddressSuggestions();
     if (data.larkImportError) {
       el.larkDot.className = 'status-dot offline';
       el.larkTitle.textContent = 'Lark import needs checking';
@@ -2291,7 +2190,6 @@ el.refreshInvoicesButton.addEventListener('click', loadInvoices);
 el.syncInvoicesButton.addEventListener('click', syncInvoices);
 el.refreshWagesButton.addEventListener('click', loadWages);
 el.syncWagesButton.addEventListener('click', syncWages);
-el.searchAddressButton.addEventListener('click', searchAddressSuggestions);
 el.testLarkButton.addEventListener('click', testLark);
 el.previewLarkButton.addEventListener('click', previewLarkEvent);
 el.cancelEditButton.addEventListener('click', cancelBookingEdit);
@@ -2344,8 +2242,6 @@ el.photographerEmail.addEventListener('input', () => syncManagedGuestEmail(el.ph
 el.photographerEmail.addEventListener('change', () => syncManagedGuestEmail(el.photographerEmail, 'syncedPhotographerEmail'));
 el.photographerEmail.addEventListener('blur', () => syncManagedGuestEmail(el.photographerEmail, 'syncedPhotographerEmail'));
 el.guestEmails.addEventListener('input', updateInvitationSummary);
-el.propertyAddress.addEventListener('input', updateAddressSuggestions);
-el.propertyAddress.addEventListener('focus', updateAddressSuggestions);
 el.newClientButton.addEventListener('click', () => {
   el.clientForm.reset();
   el.directoryClientId.value = '';
@@ -2377,6 +2273,5 @@ applyAppAccess();
 hydrateCachedData();
 restoreDraft();
 updateInvitationSummary();
-updateAddressSuggestions();
 setRoute(window.location.pathname, false);
 refreshLiveData();

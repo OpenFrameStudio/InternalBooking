@@ -12,7 +12,7 @@
     <link rel="manifest" href="/site.webmanifest" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
-    <link rel="stylesheet" href="/styles.css?v=client-dropdown-panel" />
+    <link rel="stylesheet" href="/styles.css?v=plain-address-field" />
     <link rel="stylesheet" href="/work/styles.css?v=assignment-photos" />
     <script src="/install.js" defer></script>
   </head>
@@ -86,17 +86,10 @@
                 <input
                   name="propertyAddress"
                   id="propertyAddressInput"
-                  list="addressSuggestionList"
                   placeholder="27 Willowbank Road Marrickville NSW 2204 Australia"
                   required
                 />
               </label>
-              <datalist id="addressSuggestionList"></datalist>
-              <div class="address-actions">
-                <button class="ghost-button" id="searchAddressButton" type="button">Find address suggestions</button>
-                <p id="addressMessage" role="status"></p>
-              </div>
-              <div class="address-suggestions" id="addressSuggestions" hidden></div>
 
               <section class="client-panel" aria-label="Client details">
                 <div class="client-panel-header">
@@ -640,6 +633,6 @@
 
     <section class="invoice-print-sheet" id="invoicePrintSheet" hidden aria-label="Printable invoice"></section>
 
-    <script src="/app.js?v=invoice-edit" type="module"></script>
+    <script src="/app.js?v=plain-address-field" type="module"></script>
   </body>
 </html>

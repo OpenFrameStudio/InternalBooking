@@ -690,50 +690,6 @@ button:disabled {
   line-height: 1.35;
 }
 
-.address-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-top: -8px;
-}
-
-#addressMessage {
-  min-height: 22px;
-  margin: 0;
-  color: var(--muted);
-  font-weight: 760;
-}
-
-#addressMessage.error {
-  color: var(--red);
-}
-
-#addressMessage.success {
-  color: var(--accent-dark);
-}
-
-.address-suggestions {
-  display: grid;
-  gap: 8px;
-  margin-top: -8px;
-}
-
-.address-suggestion {
-  width: 100%;
-  min-height: 42px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: #fff;
-  color: var(--ink);
-  padding: 9px 11px;
-  text-align: left;
-}
-
-.address-suggestion:hover {
-  border-color: var(--line-strong);
-  background: var(--soft);
-}
-
 .invitation-summary {
   display: flex;
   align-items: center;
@@ -1902,7 +1858,6 @@ dialog::backdrop {
   .client-panel-header,
   .photographer-panel-header,
   .client-save-row,
-  .address-actions,
   .invitation-summary {
     align-items: stretch;
     flex-direction: column;
