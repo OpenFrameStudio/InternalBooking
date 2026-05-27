@@ -451,6 +451,7 @@ function getVisibleAssignments() {
   return [...state.assignments]
     .filter((assignment) => {
       if (state.ui.filter === "done") return assignment.status === "done";
+      if (state.ui.filter === "overdue") return isOverdue(assignment);
       if (state.ui.filter === "open") return assignment.status !== "done";
       return true;
     })
@@ -471,8 +472,12 @@ function renderAssignments() {
         <span></span>
       </div>
     `;
-    el.assignmentList.querySelector("span").textContent =
-      state.ui.filter === "done" ? "No finished work yet." : "Ready for the next assignment.";
+    const emptyMessages = {
+      done: "No finished work yet.",
+      overdue: "No overdue work.",
+      open: "Ready for the next assignment."
+    };
+    el.assignmentList.querySelector("span").textContent = emptyMessages[state.ui.filter] || "No work assigned.";
     return;
   }
 

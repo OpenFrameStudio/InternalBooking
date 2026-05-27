@@ -16,7 +16,7 @@
     <link rel="stylesheet" href="/work/styles.css?v=work-notify" />
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
     <script src="/install.js" defer></script>
-    <script src="/work/app.js?v=work-notify" type="module"></script>
+    <script src="/work/app.js?v=work-overdue" type="module"></script>
   </head>
   <body>
     <main class="shell">
@@ -119,6 +119,10 @@
               <label class="service-option">
                 <input name="workFilter" type="radio" data-filter="open" checked />
                 <span><strong>Open</strong></span>
+              </label>
+              <label class="service-option">
+                <input name="workFilter" type="radio" data-filter="overdue" />
+                <span><strong>Overdue</strong></span>
               </label>
               <label class="service-option">
                 <input name="workFilter" type="radio" data-filter="all" />
