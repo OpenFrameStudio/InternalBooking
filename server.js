@@ -3688,12 +3688,24 @@ async function findAddressSuggestions(query) {
 
 function validateClient(input) {
   const errors = [];
+  const addressLine1 = String(input.addressLine1 || input.billingAddressLine1 || "").trim();
+  const addressLine2 = String(input.addressLine2 || input.billingAddressLine2 || "").trim();
+  const city = String(input.city || input.billingCity || "").trim();
+  const postcode = String(input.postcode || input.postalCode || input.billingPostcode || "").trim();
   const client = {
     id: String(input.id || "").trim(),
     name: String(input.name || input.clientName || "").trim(),
     email: String(input.email || input.clientEmail || "").trim(),
     agentName: String(input.agentName || "").trim(),
-    agentPhone: String(input.agentPhone || "").trim()
+    agentPhone: String(input.agentPhone || input.phone || "").trim(),
+    addressLine1,
+    addressLine2,
+    city,
+    postcode,
+    billingAddress: String(input.billingAddress || [addressLine1, addressLine2, city, postcode].filter(Boolean).join(", ")).trim(),
+    abn: String(input.abn || input.ABN || "").trim(),
+    customerStatus: String(input.customerStatus || input.status || "").trim(),
+    sourceCustomerId: String(input.sourceCustomerId || input.customerId || "").trim()
   };
   const clientEmails = uniqueEmails(parseGuestEmails(client.email));
 
@@ -3709,6 +3721,35 @@ function validateClient(input) {
 
   client.email = clientEmails.join(", ");
   return { errors, client };
+}
+
+function mergeClientRecord(existing, client, now) {
+  const merged = {
+    ...(existing || {}),
+    name: client.name,
+    email: client.email,
+    agentName: client.agentName,
+    agentPhone: client.agentPhone,
+    updatedAt: now
+  };
+  const optionalFields = [
+    "addressLine1",
+    "addressLine2",
+    "city",
+    "postcode",
+    "billingAddress",
+    "abn",
+    "customerStatus",
+    "sourceCustomerId"
+  ];
+
+  for (const field of optionalFields) {
+    if (client[field] || existing?.[field] === undefined) {
+      merged[field] = client[field];
+    }
+  }
+
+  return merged;
 }
 
 function clientIdentityKey(client) {
@@ -5169,23 +5210,12 @@ async function handleApi(req, res, url) {
     const now = new Date().toISOString();
 
     if (existingIndex >= 0) {
-      clients[existingIndex] = {
-        ...clients[existingIndex],
-        name: client.name,
-        email: client.email,
-        agentName: client.agentName,
-        agentPhone: client.agentPhone,
-        updatedAt: now
-      };
+      clients[existingIndex] = mergeClientRecord(clients[existingIndex], client, now);
     } else {
       clients.push({
+        ...mergeClientRecord(null, client, now),
         id: crypto.randomUUID(),
-        name: client.name,
-        email: client.email,
-        agentName: client.agentName,
-        agentPhone: client.agentPhone,
         createdAt: now,
-        updatedAt: now
       });
     }
 
