@@ -4970,6 +4970,33 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  const invoiceDeleteMatch = url.pathname.match(/^\/api\/invoices\/([^/]+)$/);
+  if (req.method === "DELETE" && invoiceDeleteMatch) {
+    if (!hasPermission(req, "manage_invoices")) {
+      sendForbidden(res, "Boss or team leader only.");
+      return;
+    }
+
+    const invoiceId = decodeURIComponent(invoiceDeleteMatch[1]);
+    const invoices = await loadInvoices();
+    const invoice = invoices.find((item) => item.id === invoiceId);
+    if (!invoice) {
+      sendJson(res, 404, { errors: ["Invoice not found."] });
+      return;
+    }
+
+    if (invoice.status !== "void") {
+      sendJson(res, 400, { errors: ["Only voided invoices can be deleted."] });
+      return;
+    }
+
+    const nextInvoices = invoices.filter((item) => item.id !== invoiceId);
+    await saveInvoices(nextInvoices);
+    nextInvoices.sort((a, b) => new Date(b.issuedAt) - new Date(a.issuedAt));
+    sendJson(res, 200, { invoices: nextInvoices, deletedInvoiceId: invoiceId });
+    return;
+  }
+
   const invoiceSendMatch = url.pathname.match(/^\/api\/invoices\/([^/]+)\/send$/);
   if (req.method === "POST" && invoiceSendMatch) {
     if (!hasPermission(req, "manage_invoices")) {

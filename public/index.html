@@ -12,7 +12,7 @@
     <link rel="manifest" href="/site.webmanifest" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
-    <link rel="stylesheet" href="/styles.css?v=plain-address-field" />
+    <link rel="stylesheet" href="/styles.css?v=invoice-filters" />
     <link rel="stylesheet" href="/work/styles.css?v=assignment-photos" />
     <script src="/install.js" defer></script>
   </head>
@@ -441,6 +441,22 @@
             </div>
           </div>
 
+          <div class="invoice-filters" aria-label="Invoice filters">
+            <label>
+              <span>Status</span>
+              <select id="invoiceStatusFilter">
+                <option value="all">All invoices</option>
+                <option value="draft">Not paid</option>
+                <option value="paid">Paid</option>
+                <option value="void">Voided</option>
+              </select>
+            </label>
+            <label>
+              <span>Client name</span>
+              <input id="invoiceClientFilter" type="search" placeholder="Search client, agent, address, or invoice" autocomplete="off" />
+            </label>
+          </div>
+
           <div class="invoice-list" id="invoiceList"></div>
         </section>
       </section>
@@ -601,6 +617,7 @@
           <button class="ghost-button edit-invoice-button" type="button">Edit</button>
           <button class="ghost-button send-invoice-button" type="button">Send invoice</button>
           <button class="ghost-button paid-invoice-button" type="button">Mark paid</button>
+          <button class="ghost-button danger-button delete-invoice-button" type="button">Delete</button>
           <button class="icon-button void-invoice-button" type="button" title="Void invoice" aria-label="Void invoice">×</button>
         </div>
       </article>
@@ -633,6 +650,6 @@
 
     <section class="invoice-print-sheet" id="invoicePrintSheet" hidden aria-label="Printable invoice"></section>
 
-    <script src="/app.js?v=plain-address-field" type="module"></script>
+    <script src="/app.js?v=invoice-filters" type="module"></script>
   </body>
 </html>

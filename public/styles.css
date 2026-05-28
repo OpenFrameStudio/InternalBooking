@@ -1136,6 +1136,37 @@ button:focus-visible {
   text-transform: uppercase;
 }
 
+.invoice-filters {
+  display: grid;
+  grid-template-columns: minmax(170px, 0.35fr) minmax(260px, 1fr);
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.invoice-filters label {
+  display: grid;
+  gap: 6px;
+}
+
+.invoice-filters span {
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 850;
+}
+
+.invoice-filters select,
+.invoice-filters input {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  padding: 9px 12px;
+  font: inherit;
+  font-weight: 750;
+}
+
 .invoice-item {
   grid-template-columns: minmax(0, 1fr) minmax(110px, 0.18fr) auto;
 }
@@ -1205,6 +1236,12 @@ button:focus-visible {
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.danger-button {
+  color: var(--red);
+  border-color: rgba(166, 64, 58, 0.24);
+  background: rgba(166, 64, 58, 0.06);
 }
 
 .directory-actions {
@@ -1968,7 +2005,8 @@ dialog::backdrop {
 
   .client-item,
   .photographer-item,
-  .invoice-stats {
+  .invoice-stats,
+  .invoice-filters {
     grid-template-columns: 1fr;
   }
 

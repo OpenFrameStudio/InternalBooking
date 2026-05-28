@@ -64,6 +64,8 @@ const el = {
   invoiceDraftCount: $('#invoiceDraftCount'),
   invoicePaidCount: $('#invoicePaidCount'),
   invoiceTotalValue: $('#invoiceTotalValue'),
+  invoiceStatusFilter: $('#invoiceStatusFilter'),
+  invoiceClientFilter: $('#invoiceClientFilter'),
   syncInvoicesButton: $('#syncInvoicesButton'),
   refreshInvoicesButton: $('#refreshInvoicesButton'),
   wageList: $('#wageList'),
@@ -125,6 +127,10 @@ const state = {
     photographerDropdownOpen: false,
     clientSearchQuery: '',
     clientSearchOpen: false
+  },
+  invoiceFilters: {
+    status: 'all',
+    query: ''
   },
   editingBookingId: '',
   restoringDraft: false,
@@ -1213,6 +1219,23 @@ function updateWageStats() {
   el.wageTotalValue.textContent = formatMoney(drafts.reduce((sum, wage) => sum + Number(wage.total || 0), 0));
 }
 
+function invoiceMatchesFilters(invoice) {
+  if (state.invoiceFilters.status !== 'all' && invoice.status !== state.invoiceFilters.status) {
+    return false;
+  }
+
+  const query = state.invoiceFilters.query.trim().toLowerCase();
+  if (!query) return true;
+
+  return [
+    invoice.clientName,
+    invoice.agentName,
+    invoice.propertyAddress,
+    invoice.invoiceNumber,
+    invoice.clientEmail
+  ].some((value) => String(value || '').toLowerCase().includes(query));
+}
+
 function renderWages() {
   if (!userCanAccess('wages')) return;
 
@@ -1272,13 +1295,17 @@ function renderInvoices() {
   if (!userCanAccess('invoices')) return;
 
   el.invoiceList.innerHTML = '';
-  const invoices = [...state.invoices].sort((a, b) => new Date(b.issuedAt) - new Date(a.issuedAt));
+  const invoices = [...state.invoices]
+    .filter(invoiceMatchesFilters)
+    .sort((a, b) => new Date(b.issuedAt) - new Date(a.issuedAt));
   updateInvoiceStats();
 
   if (!invoices.length) {
     const empty = document.createElement('div');
     empty.className = 'empty-state';
-    empty.textContent = 'No invoices yet. Create or sync booking invoices and they will appear here.';
+    empty.textContent = state.invoices.length
+      ? 'No invoices match this filter.'
+      : 'No invoices yet. Create or sync booking invoices and they will appear here.';
     el.invoiceList.append(empty);
     return;
   }
@@ -1324,6 +1351,9 @@ function renderInvoices() {
     const paidButton = item.querySelector('.paid-invoice-button');
     paidButton.hidden = invoice.status !== 'draft';
     paidButton.addEventListener('click', () => updateInvoiceStatus(invoice.id, 'paid'));
+    const deleteButton = item.querySelector('.delete-invoice-button');
+    deleteButton.hidden = invoice.status !== 'void';
+    deleteButton.addEventListener('click', () => deleteInvoice(invoice.id));
     const voidButton = item.querySelector('.void-invoice-button');
     voidButton.hidden = invoice.status === 'void';
     voidButton.addEventListener('click', () => updateInvoiceStatus(invoice.id, 'void'));
@@ -1744,6 +1774,37 @@ async function updateInvoiceStatus(id, status) {
     cacheInvoices();
     renderInvoices();
     setMessage(el.invoiceMessage, status === 'paid' ? 'Invoice marked paid.' : 'Invoice voided.', 'success');
+  } catch {
+    setMessage(el.invoiceMessage, 'Could not reach the invoice app.', 'error');
+  }
+}
+
+async function deleteInvoice(id) {
+  const invoice = state.invoices.find((item) => item.id === id);
+  if (!invoice) return;
+
+  if (invoice.status !== 'void') {
+    setMessage(el.invoiceMessage, 'Only voided invoices can be deleted.', 'error');
+    return;
+  }
+
+  if (!window.confirm(`Delete voided invoice ${invoice.invoiceNumber}? This removes it from the invoice list.`)) {
+    return;
+  }
+
+  setMessage(el.invoiceMessage, `Deleting ${invoice.invoiceNumber}...`);
+  try {
+    const { response, data } = await fetchJson(`/api/invoices/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    });
+    if (!response.ok) {
+      setMessage(el.invoiceMessage, (data.errors || ['Could not delete invoice.']).join(' '), 'error');
+      return;
+    }
+    state.invoices = data.invoices || state.invoices.filter((invoiceItem) => invoiceItem.id !== id);
+    cacheInvoices();
+    renderInvoices();
+    setMessage(el.invoiceMessage, `${invoice.invoiceNumber} deleted.`, 'success');
   } catch {
     setMessage(el.invoiceMessage, 'Could not reach the invoice app.', 'error');
   }
@@ -2188,6 +2249,14 @@ el.photographerForm.addEventListener('submit', saveDirectoryPhotographer);
 el.refreshButton.addEventListener('click', loadBookings);
 el.refreshInvoicesButton.addEventListener('click', loadInvoices);
 el.syncInvoicesButton.addEventListener('click', syncInvoices);
+el.invoiceStatusFilter.addEventListener('change', () => {
+  state.invoiceFilters.status = el.invoiceStatusFilter.value;
+  renderInvoices();
+});
+el.invoiceClientFilter.addEventListener('input', () => {
+  state.invoiceFilters.query = el.invoiceClientFilter.value;
+  renderInvoices();
+});
 el.refreshWagesButton.addEventListener('click', loadWages);
 el.syncWagesButton.addEventListener('click', syncWages);
 el.testLarkButton.addEventListener('click', testLark);
