@@ -4649,7 +4649,7 @@ async function fetchLarkImportedBookings() {
     } while (pageToken && imported.length < 500);
   }
 
-  return [...new Map(imported.map((booking) => [booking.larkEventId, booking])).values()];
+  return [...new Map(imported.map((booking) => [booking.larkEventId, booking])).values()].filter((booking) => booking.status !== "cancelled");
 }
 
 function mergeLocalAndLarkBookings(localBookings, larkBookings) {
@@ -6120,6 +6120,11 @@ async function handleApi(req, res, url) {
     const bookings = await loadBookings();
     const bookingIndex = bookings.findIndex((item) => item.id === id);
     if (bookingIndex === -1) {
+      if (id.startsWith("lark-")) {
+        sendJson(res, 200, { removedBookingId: id, bookings });
+        return;
+      }
+
       sendJson(res, 404, { errors: ["Booking not found."] });
       return;
     }
