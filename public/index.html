@@ -427,7 +427,8 @@
           </div>
 
           <div class="actions">
-            <button class="primary-button" id="syncInvoicesButton" type="button">Create missing invoices</button>
+            <button class="primary-button" id="newInvoiceButton" type="button">Create invoice</button>
+            <button class="ghost-button" id="syncInvoicesButton" type="button">Create missing invoices</button>
             <button class="ghost-button" id="refreshInvoicesButton" type="button">Refresh invoices</button>
             <p id="invoiceMessage" role="status"></p>
           </div>
@@ -570,6 +571,85 @@
       </form>
     </dialog>
 
+    <dialog id="manualInvoiceDialog" aria-labelledby="manualInvoiceDialogTitle">
+      <form class="dialog-card password-form" id="manualInvoiceForm">
+        <div class="dialog-heading">
+          <div>
+            <p class="eyebrow">Invoice</p>
+            <h2 id="manualInvoiceDialogTitle">Create invoice</h2>
+          </div>
+        </div>
+
+        <div class="form-row two">
+          <label>
+            <span>Invoice number</span>
+            <input id="manualInvoiceNumberInput" type="text" autocomplete="off" inputmode="latin" placeholder="Leave blank for auto" />
+          </label>
+          <label>
+            <span>Issue date</span>
+            <input id="manualInvoiceDateInput" type="date" required />
+          </label>
+        </div>
+
+        <label>
+          <span>Client name</span>
+          <input id="manualInvoiceClientInput" type="text" autocomplete="organization" required />
+        </label>
+
+        <label>
+          <span>Client email</span>
+          <input id="manualInvoiceEmailInput" type="text" autocomplete="email" placeholder="name@example.com" />
+        </label>
+
+        <label>
+          <span>Property / invoice description</span>
+          <input id="manualInvoicePropertyInput" type="text" autocomplete="street-address" required />
+        </label>
+
+        <fieldset class="service-picker">
+          <legend>Items</legend>
+          <label class="service-option">
+            <input name="invoiceServices" type="checkbox" value="Photography" checked />
+            <span><strong>Photography $150</strong></span>
+          </label>
+          <label class="service-option">
+            <input name="invoiceServices" type="checkbox" value="Floorplan" />
+            <span><strong>Floorplan $75</strong></span>
+          </label>
+          <label class="service-option">
+            <input name="invoiceServices" type="checkbox" value="Drone" />
+            <span><strong>Drone $100</strong></span>
+          </label>
+          <label class="service-option">
+            <input name="invoiceServices" type="checkbox" value="Siteplan" />
+            <span><strong>Siteplan $25</strong></span>
+          </label>
+        </fieldset>
+
+        <div class="form-row two">
+          <label>
+            <span>Extra item</span>
+            <input id="manualInvoiceCustomItemInput" type="text" autocomplete="off" placeholder="Optional" />
+          </label>
+          <label>
+            <span>Extra amount</span>
+            <input id="manualInvoiceCustomAmountInput" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00" />
+          </label>
+        </div>
+
+        <p class="invoice-preview-total" id="manualInvoiceTotalPreview">$165.00 incl. GST</p>
+        <p class="form-error" id="manualInvoiceMessage" role="status"></p>
+
+        <div class="dialog-actions">
+          <span></span>
+          <div>
+            <button class="ghost-button" id="cancelManualInvoiceButton" type="button">Cancel</button>
+            <button class="primary-button" id="saveManualInvoiceButton" type="submit">Create invoice</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
     <template id="bookingTemplate">
       <article class="booking-item">
         <div class="date-box">
@@ -677,6 +757,6 @@
 
     <section class="invoice-print-sheet" id="invoicePrintSheet" hidden aria-label="Printable invoice"></section>
 
-    <script src="/app.js?v=invoice-number-edit" type="module"></script>
+    <script src="/app.js?v=manual-invoice-create" type="module"></script>
   </body>
 </html>

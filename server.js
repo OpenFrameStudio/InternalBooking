@@ -1202,6 +1202,91 @@ function bookingInvoiceItems(booking) {
   });
 }
 
+function normalizeManualInvoiceItem(item) {
+  const name = String(item?.name || "").trim();
+  const quantity = Math.max(1, Number(item?.quantity || 1));
+  const unitPrice = normalizeMoney(item?.unitPrice ?? item?.price ?? item?.amount);
+  return {
+    name,
+    quantity,
+    unitPrice,
+    amount: normalizeMoney(quantity * unitPrice)
+  };
+}
+
+function validateManualInvoice(input, invoices) {
+  const errors = [];
+  const clientName = String(input?.clientName || "").trim();
+  const clientEmail = uniqueEmails(parseGuestEmails(input?.clientEmail || ""));
+  const propertyAddress = String(input?.propertyAddress || input?.description || "").trim();
+  const agentName = String(input?.agentName || "").trim();
+  const agentPhone = String(input?.agentPhone || "").trim();
+  const items = (Array.isArray(input?.items) ? input.items : [])
+    .map(normalizeManualInvoiceItem)
+    .filter((item) => item.name || item.amount > 0);
+  const invoiceNumberInput = String(input?.invoiceNumber || "").trim();
+  const invoiceNumberValidation = invoiceNumberInput
+    ? validateEditableInvoiceNumber(invoiceNumberInput)
+    : { invoiceNumber: "", errors: [] };
+
+  if (!clientName) errors.push("Enter the client name.");
+  if (!propertyAddress) errors.push("Enter the property or invoice description.");
+  for (const email of clientEmail) {
+    if (!isValidEmail(email)) errors.push(`Enter a valid client email for ${email}.`);
+  }
+  for (const item of items) {
+    if (!item.name) errors.push("Enter a name for each invoice item.");
+    if (!(item.amount > 0)) errors.push(`${item.name || "Invoice item"} needs an amount above $0.`);
+  }
+  if (!items.length) errors.push("Add at least one invoice item.");
+  errors.push(...invoiceNumberValidation.errors);
+
+  let invoiceNumber = invoiceNumberValidation.invoiceNumber;
+  if (!invoiceNumber && !errors.length) {
+    invoiceNumber = nextInvoiceNumber(invoices, { clientName });
+  }
+  if (invoiceNumber && invoices.some((invoice) => String(invoice.invoiceNumber || "").trim().toUpperCase() === invoiceNumber)) {
+    errors.push(`${invoiceNumber} is already used by another invoice.`);
+  }
+
+  const issuedDate = new Date(input?.issuedAt || Date.now());
+  const issuedAt = Number.isNaN(issuedDate.getTime()) ? new Date() : issuedDate;
+  const dueDate = input?.dueAt ? new Date(input.dueAt) : addDays(issuedAt, 7);
+  const dueAt = Number.isNaN(dueDate.getTime()) ? addDays(issuedAt, 7) : dueDate;
+  const subtotal = normalizeMoney(items.reduce((sum, item) => sum + item.amount, 0));
+  const gstAmount = calculateGst(subtotal);
+  const status = normalizeInvoiceStatus(input?.status);
+  const now = new Date().toISOString();
+
+  return {
+    errors,
+    invoice: normalizeInvoice({
+      id: crypto.randomUUID(),
+      invoiceNumber,
+      source: "manual",
+      propertyAddress,
+      clientName,
+      clientEmail: clientEmail.join(", "),
+      agentName,
+      agentPhone,
+      items,
+      subtotal,
+      gstRate: invoiceGstRate,
+      gstAmount,
+      gstIncluded: true,
+      total: normalizeMoney(subtotal + gstAmount),
+      currency: invoiceCurrency,
+      status,
+      issuedAt: issuedAt.toISOString(),
+      dueAt: dueAt.toISOString(),
+      paidAt: status === "paid" ? now : "",
+      notes: String(input?.notes || "Created manually.").trim(),
+      createdAt: now,
+      updatedAt: now
+    })
+  };
+}
+
 function normalizeInvoiceClientKey(value) {
   return String(value || "")
     .normalize("NFKD")
@@ -5162,6 +5247,27 @@ async function handleApi(req, res, url) {
     const invoices = await loadInvoices();
     invoices.sort((a, b) => new Date(b.issuedAt) - new Date(a.issuedAt));
     sendJson(res, 200, { invoices });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/invoices") {
+    if (!hasPermission(req, "manage_invoices")) {
+      sendForbidden(res, "Boss or team leader only.");
+      return;
+    }
+
+    const input = await readBody(req);
+    const invoices = await loadInvoices();
+    const { errors, invoice } = validateManualInvoice(input, invoices);
+    if (errors.length) {
+      sendJson(res, errors.some((error) => error.includes("already used")) ? 409 : 400, { errors });
+      return;
+    }
+
+    invoices.push(invoice);
+    await saveInvoices(invoices);
+    invoices.sort((a, b) => new Date(b.issuedAt) - new Date(a.issuedAt));
+    sendJson(res, 201, { invoice, invoices });
     return;
   }
 

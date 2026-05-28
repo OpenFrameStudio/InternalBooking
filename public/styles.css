@@ -1230,6 +1230,17 @@ button:focus-visible {
   font-weight: 800;
 }
 
+.invoice-preview-total {
+  margin: 0;
+  border: 1px solid rgba(17, 122, 93, 0.22);
+  border-radius: 8px;
+  background: #eef8f4;
+  padding: 12px 14px;
+  color: var(--accent-dark);
+  font-size: 1rem;
+  font-weight: 900;
+}
+
 .invoice-actions {
   display: flex;
   flex-wrap: wrap;

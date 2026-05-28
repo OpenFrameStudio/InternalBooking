@@ -66,8 +66,23 @@ const el = {
   invoiceTotalValue: $('#invoiceTotalValue'),
   invoiceStatusFilter: $('#invoiceStatusFilter'),
   invoiceClientFilter: $('#invoiceClientFilter'),
+  newInvoiceButton: $('#newInvoiceButton'),
   syncInvoicesButton: $('#syncInvoicesButton'),
   refreshInvoicesButton: $('#refreshInvoicesButton'),
+  manualInvoiceDialog: $('#manualInvoiceDialog'),
+  manualInvoiceForm: $('#manualInvoiceForm'),
+  manualInvoiceNumber: $('#manualInvoiceNumberInput'),
+  manualInvoiceDate: $('#manualInvoiceDateInput'),
+  manualInvoiceClient: $('#manualInvoiceClientInput'),
+  manualInvoiceEmail: $('#manualInvoiceEmailInput'),
+  manualInvoiceProperty: $('#manualInvoicePropertyInput'),
+  manualInvoiceServiceInputs: $$('input[name=invoiceServices]'),
+  manualInvoiceCustomItem: $('#manualInvoiceCustomItemInput'),
+  manualInvoiceCustomAmount: $('#manualInvoiceCustomAmountInput'),
+  manualInvoiceTotalPreview: $('#manualInvoiceTotalPreview'),
+  manualInvoiceMessage: $('#manualInvoiceMessage'),
+  cancelManualInvoiceButton: $('#cancelManualInvoiceButton'),
+  saveManualInvoiceButton: $('#saveManualInvoiceButton'),
   wageList: $('#wageList'),
   wageMessage: $('#wageMessage'),
   wageDraftCount: $('#wageDraftCount'),
@@ -180,6 +195,12 @@ const monthFormatter = new Intl.DateTimeFormat('en-AU', { month: 'short', timeZo
 const dayFormatter = new Intl.DateTimeFormat('en-AU', { day: '2-digit', timeZone: bookingTimeZone });
 const invoiceDateFormatter = new Intl.DateTimeFormat('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
 const currencyFormatter = new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' });
+const manualInvoiceServicePrices = {
+  Photography: 150,
+  Floorplan: 75,
+  Drone: 100,
+  Siteplan: 25
+};
 const bookingUpcomingGraceMs = 24 * 60 * 60 * 1000;
 const timeZonePartsFormatter = new Intl.DateTimeFormat('en-AU', {
   timeZone: bookingTimeZone,
@@ -1631,6 +1652,103 @@ async function saveInvoiceNumber(event) {
   }
 }
 
+function manualInvoiceItems() {
+  const serviceItems = el.manualInvoiceServiceInputs
+    .filter((input) => input.checked)
+    .map((input) => ({
+      name: input.value,
+      quantity: 1,
+      unitPrice: manualInvoiceServicePrices[input.value] || 0
+    }));
+  const customName = el.manualInvoiceCustomItem.value.trim();
+  const customAmount = Number(el.manualInvoiceCustomAmount.value || 0);
+  if (customName || customAmount > 0) {
+    serviceItems.push({
+      name: customName,
+      quantity: 1,
+      unitPrice: Number.isFinite(customAmount) ? customAmount : 0
+    });
+  }
+  return serviceItems;
+}
+
+function updateManualInvoiceTotal() {
+  const subtotal = manualInvoiceItems().reduce((sum, item) => sum + Number(item.unitPrice || 0), 0);
+  const total = subtotal * 1.1;
+  el.manualInvoiceTotalPreview.textContent = `${formatMoney(total)} incl. GST`;
+}
+
+function openManualInvoiceDialog() {
+  el.manualInvoiceForm.reset();
+  el.manualInvoiceDate.value = toDateValue(new Date());
+  el.manualInvoiceServiceInputs.forEach((input) => {
+    input.checked = input.value === 'Photography';
+  });
+  setMessage(el.manualInvoiceMessage, '');
+  el.saveManualInvoiceButton.disabled = false;
+  updateManualInvoiceTotal();
+
+  if (typeof el.manualInvoiceDialog.showModal === 'function') {
+    el.manualInvoiceDialog.showModal();
+  } else {
+    el.manualInvoiceDialog.setAttribute('open', '');
+  }
+
+  requestAnimationFrame(() => el.manualInvoiceClient.focus());
+}
+
+function closeManualInvoiceDialog() {
+  el.manualInvoiceForm.reset();
+  setMessage(el.manualInvoiceMessage, '');
+
+  if (typeof el.manualInvoiceDialog.close === 'function' && el.manualInvoiceDialog.open) {
+    el.manualInvoiceDialog.close();
+  } else {
+    el.manualInvoiceDialog.removeAttribute('open');
+  }
+}
+
+async function createManualInvoice(event) {
+  event.preventDefault();
+  const items = manualInvoiceItems();
+  if (!items.length) {
+    setMessage(el.manualInvoiceMessage, 'Choose an item or add an extra item.', 'error');
+    return;
+  }
+
+  el.saveManualInvoiceButton.disabled = true;
+  el.saveManualInvoiceButton.textContent = 'Creating';
+  try {
+    const { response, data } = await fetchJson('/api/invoices', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        invoiceNumber: el.manualInvoiceNumber.value,
+        issuedAt: el.manualInvoiceDate.value,
+        clientName: el.manualInvoiceClient.value,
+        clientEmail: el.manualInvoiceEmail.value,
+        propertyAddress: el.manualInvoiceProperty.value,
+        items
+      })
+    });
+    if (!response.ok) {
+      setMessage(el.manualInvoiceMessage, (data.errors || ['Could not create invoice.']).join(' '), 'error');
+      return;
+    }
+
+    state.invoices = data.invoices || [data.invoice, ...state.invoices].filter(Boolean);
+    cacheInvoices();
+    renderInvoices();
+    closeManualInvoiceDialog();
+    setMessage(el.invoiceMessage, `${data.invoice?.invoiceNumber || 'Invoice'} created.`, 'success');
+  } catch {
+    setMessage(el.manualInvoiceMessage, 'Could not reach the invoice app.', 'error');
+  } finally {
+    el.saveManualInvoiceButton.disabled = false;
+    el.saveManualInvoiceButton.textContent = 'Create invoice';
+  }
+}
+
 async function startInvoiceEdit(id) {
   const invoice = state.invoices.find((item) => item.id === id);
   if (!invoice) {
@@ -2417,6 +2535,7 @@ el.bookingForm.addEventListener('change', saveDraft);
 el.clientForm.addEventListener('submit', saveDirectoryClient);
 el.photographerForm.addEventListener('submit', saveDirectoryPhotographer);
 el.refreshButton.addEventListener('click', loadBookings);
+el.newInvoiceButton.addEventListener('click', openManualInvoiceDialog);
 el.refreshInvoicesButton.addEventListener('click', loadInvoices);
 el.syncInvoicesButton.addEventListener('click', syncInvoices);
 el.invoiceStatusFilter.addEventListener('change', () => {
@@ -2443,6 +2562,14 @@ el.cancelInvoiceNumberButton.addEventListener('click', closeInvoiceNumberDialog)
 el.invoiceNumberDialog.addEventListener('click', (event) => {
   if (event.target === el.invoiceNumberDialog) closeInvoiceNumberDialog();
 });
+el.manualInvoiceForm.addEventListener('submit', createManualInvoice);
+el.cancelManualInvoiceButton.addEventListener('click', closeManualInvoiceDialog);
+el.manualInvoiceDialog.addEventListener('click', (event) => {
+  if (event.target === el.manualInvoiceDialog) closeManualInvoiceDialog();
+});
+el.manualInvoiceServiceInputs.forEach((input) => input.addEventListener('change', updateManualInvoiceTotal));
+el.manualInvoiceCustomItem.addEventListener('input', updateManualInvoiceTotal);
+el.manualInvoiceCustomAmount.addEventListener('input', updateManualInvoiceTotal);
 el.logoutButton.addEventListener('click', logout);
 el.mainAssignmentNoticeButton?.addEventListener('click', viewOpenWorkAssignments);
 el.clientDropdownButton.addEventListener('click', () => {
