@@ -1216,23 +1216,21 @@ function renderBookings() {
     editButton.disabled = booking.status === 'cancelled' || booking.larkOnly;
     editButton.title = booking.larkOnly ? 'This booking was imported from Lark.' : '';
     editButton.addEventListener('click', () => startBookingEdit(booking.id));
+    const deleteCancelledButton = item.querySelector('.delete-cancelled-booking-button');
+    deleteCancelledButton.hidden = booking.status !== 'cancelled';
+    deleteCancelledButton.title = 'Delete this cancelled booking from the system.';
+    deleteCancelledButton.addEventListener('click', () => removeCancelledBooking(booking.id));
     const cancelButton = item.querySelector('.cancel-button');
     const canRetryCalendarCancel = booking.status === 'cancelled' && booking.larkEventId && booking.larkStatus !== 'cancelled';
-    const canRemoveCancelledBooking = booking.status === 'cancelled' && !canRetryCalendarCancel && !booking.larkOnly;
-    cancelButton.disabled = (booking.status === 'cancelled' && !canRetryCalendarCancel && !canRemoveCancelledBooking) || booking.larkOnly;
-    cancelButton.setAttribute('aria-label', canRemoveCancelledBooking ? 'Remove cancelled booking' : 'Cancel booking');
+    cancelButton.hidden = booking.status === 'cancelled' && !canRetryCalendarCancel;
+    cancelButton.disabled = (booking.status === 'cancelled' && !canRetryCalendarCancel) || booking.larkOnly;
+    cancelButton.setAttribute('aria-label', canRetryCalendarCancel ? 'Retry calendar cancellation' : 'Cancel booking');
     cancelButton.title = booking.larkOnly
       ? 'Cancel this in Lark.'
-      : canRemoveCancelledBooking
-        ? 'Remove this cancelled booking from the system.'
-        : canRetryCalendarCancel
-          ? 'Send calendar cancellation again.'
-          : 'Cancel booking';
+      : canRetryCalendarCancel
+        ? 'Send calendar cancellation again.'
+        : 'Cancel booking';
     cancelButton.addEventListener('click', () => {
-      if (canRemoveCancelledBooking) {
-        removeCancelledBooking(booking.id);
-        return;
-      }
       cancelBooking(booking.id);
     });
     el.bookingList.append(item);
@@ -2404,7 +2402,11 @@ async function cancelBooking(id) {
 }
 
 async function removeCancelledBooking(id) {
-  const { response, data } = await fetchJson(`/api/bookings/${id}`, { method: 'DELETE' });
+  if (!window.confirm('Delete this cancelled booking from the system?')) {
+    return;
+  }
+
+  const { response, data } = await fetchJson(`/api/bookings/${id}?force=1`, { method: 'DELETE' });
   if (!response.ok) {
     if (data.booking) {
       state.bookings = state.bookings.map((booking) => booking.id === id ? data.booking : booking);

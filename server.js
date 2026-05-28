@@ -6106,7 +6106,8 @@ async function handleApi(req, res, url) {
       return;
     }
 
-    if (booking.larkEventId && booking.larkStatus !== "cancelled") {
+    const forceLocalDelete = ["1", "true", "yes"].includes(String(url.searchParams.get("force") || "").toLowerCase());
+    if (!forceLocalDelete && booking.larkEventId && booking.larkStatus !== "cancelled") {
       await cancelBookingInLark(booking);
       if (booking.larkStatus === "delete_failed") {
         await saveBookings(bookings);
@@ -6118,7 +6119,7 @@ async function handleApi(req, res, url) {
       }
     }
 
-    if (booking.calendarInviteStatus !== "cancelled") {
+    if (!forceLocalDelete && booking.calendarInviteStatus !== "cancelled") {
       await trySendBookingCalendarInviteEmail(booking, "CANCEL");
     }
 
