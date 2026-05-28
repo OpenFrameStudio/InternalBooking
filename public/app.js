@@ -166,13 +166,24 @@ const photographerExamples = [
   ['Iris Chen', 'iris@openframe.studio', '0419 830 642']
 ];
 
-const dateFormatter = new Intl.DateTimeFormat(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
-const timeFormatter = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
-const monthFormatter = new Intl.DateTimeFormat(undefined, { month: 'short' });
-const dayFormatter = new Intl.DateTimeFormat(undefined, { day: '2-digit' });
+const bookingTimeZone = 'Australia/Sydney';
+const dateFormatter = new Intl.DateTimeFormat('en-AU', { weekday: 'short', month: 'short', day: 'numeric', timeZone: bookingTimeZone });
+const timeFormatter = new Intl.DateTimeFormat('en-AU', { hour: 'numeric', minute: '2-digit', timeZone: bookingTimeZone });
+const monthFormatter = new Intl.DateTimeFormat('en-AU', { month: 'short', timeZone: bookingTimeZone });
+const dayFormatter = new Intl.DateTimeFormat('en-AU', { day: '2-digit', timeZone: bookingTimeZone });
 const invoiceDateFormatter = new Intl.DateTimeFormat('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
 const currencyFormatter = new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' });
 const bookingUpcomingGraceMs = 24 * 60 * 60 * 1000;
+const timeZonePartsFormatter = new Intl.DateTimeFormat('en-AU', {
+  timeZone: bookingTimeZone,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hourCycle: 'h23'
+});
 
 function isTruthy(value) {
   return value === true || ['1', 'true', 'yes', 'on'].includes(String(value || '').trim().toLowerCase());
@@ -506,9 +517,23 @@ function workPriorityWeight(priority) {
   return { high: 3, normal: 2, low: 1 }[priority] || 2;
 }
 
-function parseDateValue(value) {
+function parseDateParts(value) {
   const [year, month, day] = String(value || '').split('-').map(Number);
-  return new Date(year, month - 1, day);
+  return Number.isInteger(year) && Number.isInteger(month) && Number.isInteger(day)
+    ? { year, month, day }
+    : null;
+}
+
+function parseTimeParts(value) {
+  const [hour, minute] = String(value || '').split(':').map(Number);
+  return Number.isInteger(hour) && Number.isInteger(minute)
+    ? { hour, minute }
+    : null;
+}
+
+function parseDateValue(value) {
+  const parts = parseDateParts(value);
+  return parts ? new Date(parts.year, parts.month - 1, parts.day) : new Date(NaN);
 }
 
 function isTodayDateValue(value) {
@@ -537,24 +562,82 @@ function workNoticeSignature(assignments) {
     .join('|');
 }
 
+function getAustraliaTimeParts(date) {
+  const parts = Object.fromEntries(timeZonePartsFormatter.formatToParts(date).map((part) => [part.type, part.value]));
+  return {
+    year: Number(parts.year),
+    month: Number(parts.month),
+    day: Number(parts.day),
+    hour: Number(parts.hour),
+    minute: Number(parts.minute),
+    second: Number(parts.second)
+  };
+}
+
+function dateValueFromParts(parts) {
+  return `${parts.year}-${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`;
+}
+
+function timeValueFromMinutes(minutes) {
+  return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+}
+
+function addDaysToDateValue(value, days) {
+  const parts = parseDateParts(value);
+  if (!parts) return value;
+  const date = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + days, 12, 0, 0));
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
+}
+
 function toDateValue(date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  return dateValueFromParts(getAustraliaTimeParts(date));
 }
 
 function toTimeValue(date) {
-  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+  const parts = getAustraliaTimeParts(date);
+  return `${String(parts.hour).padStart(2, '0')}:${String(parts.minute).padStart(2, '0')}`;
+}
+
+function australiaDateTimeToUtcDate(dateValue, timeValue) {
+  const dateParts = parseDateParts(dateValue);
+  const timeParts = parseTimeParts(timeValue);
+  if (!dateParts || !timeParts) return null;
+
+  const targetUtc = Date.UTC(dateParts.year, dateParts.month - 1, dateParts.day, timeParts.hour, timeParts.minute, 0);
+  let utc = targetUtc;
+  for (let index = 0; index < 3; index += 1) {
+    const parts = getAustraliaTimeParts(new Date(utc));
+    const displayedUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second || 0);
+    utc -= displayedUtc - targetUtc;
+  }
+
+  const result = new Date(utc);
+  const check = getAustraliaTimeParts(result);
+  const matches = check.year === dateParts.year
+    && check.month === dateParts.month
+    && check.day === dateParts.day
+    && check.hour === timeParts.hour
+    && check.minute === timeParts.minute;
+
+  return matches ? result : null;
 }
 
 function setInitialDateTime() {
-  const next = new Date();
-  next.setMinutes(Math.ceil(next.getMinutes() / 15) * 15, 0, 0);
-  if (next.getHours() >= 18) {
-    next.setDate(next.getDate() + 1);
-    next.setHours(9, 0, 0, 0);
+  const nowParts = getAustraliaTimeParts(new Date());
+  const today = dateValueFromParts(nowParts);
+  let dateValue = today;
+  let minutes = Math.ceil((nowParts.hour * 60 + nowParts.minute) / 15) * 15;
+
+  if (minutes < 8 * 60) {
+    minutes = 9 * 60;
+  } else if (minutes >= 18 * 60) {
+    dateValue = addDaysToDateValue(dateValue, 1);
+    minutes = 9 * 60;
   }
-  el.date.min = toDateValue(new Date());
-  el.date.value = toDateValue(next);
-  el.time.value = toTimeValue(next);
+
+  el.date.min = today;
+  el.date.value = dateValue;
+  el.time.value = timeValueFromMinutes(minutes);
 }
 
 function ensureDurationOption(minutes) {
@@ -1022,7 +1105,7 @@ function setRoute(route, push = true) {
 }
 
 function buildBookingPayload() {
-  const start = el.date.value && el.time.value ? new Date(`${el.date.value}T${el.time.value}:00`) : null;
+  const start = el.date.value && el.time.value ? australiaDateTimeToUtcDate(el.date.value, el.time.value) : null;
   if (!start || Number.isNaN(start.getTime())) return { error: 'Choose a valid date and time.' };
   syncAutoEmails();
   const data = Object.fromEntries(new FormData(el.bookingForm).entries());
@@ -1034,6 +1117,9 @@ function buildBookingPayload() {
   data.guestEmails = el.guestEmails.value;
   data.services = selectedServices();
   data.durationMinutes = Number(el.duration.value);
+  data.date = el.date.value;
+  data.time = el.time.value;
+  data.timezone = bookingTimeZone;
   data.startAt = start.toISOString();
   if (!data.services.length) return { error: 'Choose at least one service.' };
   return { data };
@@ -1498,8 +1584,10 @@ async function startInvoiceEdit(id) {
 
 function updateStats() {
   const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const todayEnd = todayStart + 24 * 60 * 60 * 1000;
+  const today = toDateValue(now);
+  const tomorrow = addDaysToDateValue(today, 1);
+  const todayStart = australiaDateTimeToUtcDate(today, '00:00').getTime();
+  const todayEnd = australiaDateTimeToUtcDate(tomorrow, '00:00').getTime();
   const weekEnd = now.getTime() + 7 * 24 * 60 * 60 * 1000;
   const active = state.bookings.filter((booking) => booking.status !== 'cancelled');
   el.todayCount.textContent = active.filter((booking) => {

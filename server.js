@@ -55,6 +55,7 @@ const maxWorkAttachmentBytes = Number.isFinite(configuredWorkAttachmentBytes) &&
   ? configuredWorkAttachmentBytes
   : 450_000;
 const publicAppUrl = (process.env.APP_PUBLIC_URL || "https://system.openframe.studio").replace(/\/$/, "");
+const bookingTimeZone = "Australia/Sydney";
 const larkConfig = {
   appId: process.env.LARK_APP_ID || "",
   appSecret: process.env.LARK_APP_SECRET || "",
@@ -63,7 +64,7 @@ const larkConfig = {
   organizerUserId: process.env.LARK_ORGANIZER_USER_ID || "",
   senderEmail: process.env.LARK_SENDER_EMAIL || "admin@openframe.studio",
   senderName: process.env.LARK_SENDER_NAME || "admin@openframe.studio",
-  timezone: process.env.LARK_TIMEZONE || "Australia/Sydney",
+  timezone: bookingTimeZone,
   apiBase: (process.env.LARK_API_BASE || "https://open.larksuite.com/open-apis").replace(/\/$/, "")
 };
 const invoiceEmailUser = process.env.INVOICE_EMAIL_USER || process.env.SMTP_USER || "admin@openframe.studio";
@@ -798,16 +799,78 @@ function visibleWorkStateForUser(workState, user) {
   };
 }
 
+function timeZoneDateParts(date, timeZone = bookingTimeZone) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-AU", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(date).map((part) => [part.type, part.value]));
+
+  return {
+    year: Number(parts.year),
+    month: Number(parts.month),
+    day: Number(parts.day),
+    hour: Number(parts.hour),
+    minute: Number(parts.minute),
+    second: Number(parts.second)
+  };
+}
+
+function parseDateParts(value) {
+  const [year, month, day] = String(value || "").split("-").map(Number);
+  return Number.isInteger(year) && Number.isInteger(month) && Number.isInteger(day)
+    ? { year, month, day }
+    : null;
+}
+
+function parseTimeParts(value) {
+  const [hour, minute] = String(value || "").split(":").map(Number);
+  return Number.isInteger(hour) && Number.isInteger(minute)
+    ? { hour, minute }
+    : null;
+}
+
+function dateValueFromTimeZone(date, timeZone = bookingTimeZone) {
+  const parts = timeZoneDateParts(date, timeZone);
+  return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
+}
+
+function zonedDateTimeToDate(dateValue, timeValue, timeZone = bookingTimeZone) {
+  const dateParts = parseDateParts(dateValue);
+  const timeParts = parseTimeParts(timeValue);
+  if (!dateParts || !timeParts) return null;
+
+  const targetUtc = Date.UTC(dateParts.year, dateParts.month - 1, dateParts.day, timeParts.hour, timeParts.minute, 0);
+  let utc = targetUtc;
+  for (let index = 0; index < 3; index += 1) {
+    const parts = timeZoneDateParts(new Date(utc), timeZone);
+    const displayedUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second || 0);
+    utc -= displayedUtc - targetUtc;
+  }
+
+  const result = new Date(utc);
+  const check = timeZoneDateParts(result, timeZone);
+  const matches = check.year === dateParts.year
+    && check.month === dateParts.month
+    && check.day === dateParts.day
+    && check.hour === timeParts.hour
+    && check.minute === timeParts.minute;
+
+  return matches ? result : null;
+}
+
 function toDateValue(date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return dateValueFromTimeZone(date, bookingTimeZone);
 }
 
 function parseDateValue(value) {
-  const [year, month, day] = String(value || "").split("-").map(Number);
-  return new Date(year, month - 1, day);
+  const parts = parseDateParts(value);
+  return parts ? new Date(parts.year, parts.month - 1, parts.day) : new Date(NaN);
 }
 
 function validateWorkAssignment(input, existing = null, workState = null) {
@@ -890,11 +953,13 @@ function bookingWindowLabel(booking) {
   const date = new Intl.DateTimeFormat("en-AU", {
     weekday: "short",
     day: "numeric",
-    month: "short"
+    month: "short",
+    timeZone: bookingTimeZone
   }).format(start);
   const time = new Intl.DateTimeFormat("en-AU", {
     hour: "numeric",
-    minute: "2-digit"
+    minute: "2-digit",
+    timeZone: bookingTimeZone
   });
 
   return Number.isNaN(end.getTime())
@@ -3923,7 +3988,11 @@ function validateBooking(input) {
   const rawGuestEmails = parseGuestEmails(input.guestEmails);
   const guestEmails = uniqueEmails([...clientEmails, photographerEmail, ...rawGuestEmails]);
   const notes = String(input.notes || "").trim();
-  const startAt = String(input.startAt || "").trim();
+  const bookingDate = String(input.date || input.bookingDate || "").trim();
+  const bookingTime = String(input.time || input.bookingTime || "").trim();
+  const startAt = bookingDate && bookingTime
+    ? zonedDateTimeToDate(bookingDate, bookingTime, bookingTimeZone)?.toISOString() || ""
+    : String(input.startAt || "").trim();
   const durationMinutes = Number(input.durationMinutes || 0);
 
   for (const requestedService of requestedServices) {
@@ -4139,8 +4208,8 @@ function parseLarkDateTime(time) {
   }
 
   if (time.date) {
-    const parsed = new Date(`${time.date}T00:00:00`);
-    if (!Number.isNaN(parsed.getTime())) {
+    const parsed = zonedDateTimeToDate(time.date, "00:00", bookingTimeZone);
+    if (parsed && !Number.isNaN(parsed.getTime())) {
       return parsed.toISOString();
     }
   }
