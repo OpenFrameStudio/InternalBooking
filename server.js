@@ -1093,6 +1093,24 @@ function normalizeInvoiceStatus(status) {
   return ["draft", "paid", "void"].includes(status) ? status : "draft";
 }
 
+function normalizeEditableInvoiceNumber(value) {
+  return String(value || "").trim().toUpperCase().replace(/\s+/g, "");
+}
+
+function validateEditableInvoiceNumber(value) {
+  const invoiceNumber = normalizeEditableInvoiceNumber(value);
+  const errors = [];
+  if (!invoiceNumber) {
+    errors.push("Enter an invoice number.");
+  } else if (invoiceNumber.length > 32) {
+    errors.push("Invoice number is too long.");
+  } else if (!/^[A-Z0-9][A-Z0-9-]*$/.test(invoiceNumber)) {
+    errors.push("Use only letters, numbers, and hyphens.");
+  }
+
+  return { invoiceNumber, errors };
+}
+
 function normalizeMoney(value) {
   const number = Number(value);
   return Number.isFinite(number) ? Math.round(number * 100) / 100 : 0;
@@ -5214,6 +5232,43 @@ async function handleApi(req, res, url) {
   }
 
   const invoiceDeleteMatch = url.pathname.match(/^\/api\/invoices\/([^/]+)$/);
+  if ((req.method === "PATCH" || req.method === "PUT") && invoiceDeleteMatch) {
+    if (!hasPermission(req, "manage_invoices")) {
+      sendForbidden(res, "Boss or team leader only.");
+      return;
+    }
+
+    const invoiceId = decodeURIComponent(invoiceDeleteMatch[1]);
+    const input = await readBody(req);
+    const { invoiceNumber, errors } = validateEditableInvoiceNumber(input?.invoiceNumber);
+    if (errors.length) {
+      sendJson(res, 400, { errors });
+      return;
+    }
+
+    const invoices = await loadInvoices();
+    const invoice = invoices.find((item) => item.id === invoiceId);
+    if (!invoice) {
+      sendJson(res, 404, { errors: ["Invoice not found."] });
+      return;
+    }
+
+    const duplicate = invoices.find((item) =>
+      item.id !== invoiceId && String(item.invoiceNumber || "").trim().toUpperCase() === invoiceNumber
+    );
+    if (duplicate) {
+      sendJson(res, 409, { errors: [`${invoiceNumber} is already used by another invoice.`] });
+      return;
+    }
+
+    invoice.invoiceNumber = invoiceNumber;
+    invoice.updatedAt = new Date().toISOString();
+    await saveInvoices(invoices);
+    invoices.sort((a, b) => new Date(b.issuedAt) - new Date(a.issuedAt));
+    sendJson(res, 200, { invoice, invoices });
+    return;
+  }
+
   if (req.method === "DELETE" && invoiceDeleteMatch) {
     if (!hasPermission(req, "manage_invoices")) {
       sendForbidden(res, "Boss or team leader only.");

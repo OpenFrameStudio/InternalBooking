@@ -544,6 +544,32 @@
       </form>
     </dialog>
 
+    <dialog id="invoiceNumberDialog" aria-labelledby="invoiceNumberDialogTitle">
+      <form class="dialog-card password-form" id="invoiceNumberForm">
+        <div class="dialog-heading">
+          <div>
+            <p class="eyebrow">Invoice</p>
+            <h2 id="invoiceNumberDialogTitle">Change invoice number</h2>
+          </div>
+        </div>
+
+        <label>
+          <span>Invoice number</span>
+          <input id="invoiceNumberInput" type="text" autocomplete="off" inputmode="latin" required />
+        </label>
+
+        <p class="form-error" id="invoiceNumberMessage" role="status"></p>
+
+        <div class="dialog-actions">
+          <span></span>
+          <div>
+            <button class="ghost-button" id="cancelInvoiceNumberButton" type="button">Cancel</button>
+            <button class="primary-button" id="saveInvoiceNumberButton" type="submit">Save number</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
     <template id="bookingTemplate">
       <article class="booking-item">
         <div class="date-box">
@@ -615,6 +641,7 @@
         <div class="invoice-actions">
           <button class="ghost-button print-invoice-button" type="button">Download PDF</button>
           <button class="ghost-button edit-invoice-button" type="button">Edit</button>
+          <button class="ghost-button edit-invoice-number-button" type="button">Edit number</button>
           <button class="ghost-button send-invoice-button" type="button">Send invoice</button>
           <button class="ghost-button paid-invoice-button" type="button">Mark paid</button>
           <button class="ghost-button danger-button delete-invoice-button" type="button">Delete</button>
@@ -650,6 +677,6 @@
 
     <section class="invoice-print-sheet" id="invoicePrintSheet" hidden aria-label="Printable invoice"></section>
 
-    <script src="/app.js?v=aus-booking-time" type="module"></script>
+    <script src="/app.js?v=invoice-number-edit" type="module"></script>
   </body>
 </html>

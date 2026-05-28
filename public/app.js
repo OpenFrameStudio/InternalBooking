@@ -91,6 +91,12 @@ const el = {
   passwordMessage: $('#passwordMessage'),
   cancelPasswordButton: $('#cancelPasswordButton'),
   savePasswordButton: $('#savePasswordButton'),
+  invoiceNumberDialog: $('#invoiceNumberDialog'),
+  invoiceNumberForm: $('#invoiceNumberForm'),
+  invoiceNumberInput: $('#invoiceNumberInput'),
+  invoiceNumberMessage: $('#invoiceNumberMessage'),
+  cancelInvoiceNumberButton: $('#cancelInvoiceNumberButton'),
+  saveInvoiceNumberButton: $('#saveInvoiceNumberButton'),
   newClientButton: $('#newClientButton'),
   newPhotographerButton: $('#newPhotographerButton'),
   larkPreview: $('#larkPreview'),
@@ -133,6 +139,7 @@ const state = {
     query: ''
   },
   editingBookingId: '',
+  editingInvoiceNumberId: '',
   restoringDraft: false,
   syncedClientEmail: [],
   syncedPhotographerEmail: [],
@@ -1423,6 +1430,7 @@ function renderInvoices() {
     item.querySelector('.invoice-total small').textContent = `${invoice.currency || 'AUD'} incl. GST`;
 
     item.querySelector('.print-invoice-button').addEventListener('click', () => printInvoice(invoice.id));
+    item.querySelector('.edit-invoice-number-button').addEventListener('click', () => openInvoiceNumberDialog(invoice.id));
     const editButton = item.querySelector('.edit-invoice-button');
     const sourceBooking = state.bookings.find((booking) => booking.id === invoice.bookingId);
     const canEditSourceBooking = Boolean(invoice.bookingId) && invoice.status !== 'void' && (!sourceBooking || sourceBooking.status !== 'cancelled');
@@ -1547,6 +1555,80 @@ function startBookingEdit(id) {
   fillBookingForm(booking);
   setMessage(el.formMessage, 'Editing booking. Update booking to save changes.');
   el.bookingForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function openInvoiceNumberDialog(id) {
+  const invoice = state.invoices.find((item) => item.id === id);
+  if (!invoice) {
+    setMessage(el.invoiceMessage, 'Invoice not found.', 'error');
+    return;
+  }
+
+  state.editingInvoiceNumberId = id;
+  el.invoiceNumberForm.reset();
+  el.invoiceNumberInput.value = invoice.invoiceNumber || '';
+  setMessage(el.invoiceNumberMessage, '');
+  el.saveInvoiceNumberButton.disabled = false;
+
+  if (typeof el.invoiceNumberDialog.showModal === 'function') {
+    el.invoiceNumberDialog.showModal();
+  } else {
+    el.invoiceNumberDialog.setAttribute('open', '');
+  }
+
+  requestAnimationFrame(() => {
+    el.invoiceNumberInput.focus();
+    el.invoiceNumberInput.select();
+  });
+}
+
+function closeInvoiceNumberDialog() {
+  state.editingInvoiceNumberId = '';
+  el.invoiceNumberForm.reset();
+  setMessage(el.invoiceNumberMessage, '');
+
+  if (typeof el.invoiceNumberDialog.close === 'function' && el.invoiceNumberDialog.open) {
+    el.invoiceNumberDialog.close();
+  } else {
+    el.invoiceNumberDialog.removeAttribute('open');
+  }
+}
+
+async function saveInvoiceNumber(event) {
+  event.preventDefault();
+  const id = state.editingInvoiceNumberId;
+  if (!id) return;
+
+  const invoiceNumber = el.invoiceNumberInput.value.trim().toUpperCase().replace(/\s+/g, '');
+  if (!invoiceNumber) {
+    setMessage(el.invoiceNumberMessage, 'Enter an invoice number.', 'error');
+    return;
+  }
+
+  el.saveInvoiceNumberButton.disabled = true;
+  el.saveInvoiceNumberButton.textContent = 'Saving';
+  try {
+    const { response, data } = await fetchJson(`/api/invoices/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ invoiceNumber })
+    });
+    if (!response.ok) {
+      setMessage(el.invoiceNumberMessage, (data.errors || ['Could not save invoice number.']).join(' '), 'error');
+      return;
+    }
+
+    state.invoices = data.invoices || state.invoices.map((invoice) => invoice.id === id ? data.invoice : invoice);
+    cacheInvoices();
+    renderInvoices();
+    closeInvoiceNumberDialog();
+    setMessage(el.invoiceMessage, `Invoice number changed to ${data.invoice?.invoiceNumber || invoiceNumber}.`, 'success');
+  } catch {
+    setMessage(el.invoiceNumberMessage, 'Could not reach the invoice app.', 'error');
+  } finally {
+    el.saveInvoiceNumberButton.disabled = false;
+    el.saveInvoiceNumberButton.textContent = 'Save number';
+  }
 }
 
 async function startInvoiceEdit(id) {
@@ -2355,6 +2437,11 @@ el.passwordForm.addEventListener('submit', changePassword);
 el.cancelPasswordButton.addEventListener('click', closePasswordDialog);
 el.passwordDialog.addEventListener('click', (event) => {
   if (event.target === el.passwordDialog) closePasswordDialog();
+});
+el.invoiceNumberForm.addEventListener('submit', saveInvoiceNumber);
+el.cancelInvoiceNumberButton.addEventListener('click', closeInvoiceNumberDialog);
+el.invoiceNumberDialog.addEventListener('click', (event) => {
+  if (event.target === el.invoiceNumberDialog) closeInvoiceNumberDialog();
 });
 el.logoutButton.addEventListener('click', logout);
 el.mainAssignmentNoticeButton?.addEventListener('click', viewOpenWorkAssignments);
