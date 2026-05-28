@@ -191,6 +191,29 @@ const invoiceServicePrices = {
 };
 const invoiceGstRate = 0.1;
 const invoiceCurrency = "AUD";
+const invoicePrefixOverrides = [
+  { prefix: "9AMC", names: ["9AM Group", "9AM Production"] },
+  { prefix: "BBS", names: ["Boteli Business Service"] },
+  { prefix: "CP", names: ["Consortium Property"] },
+  { prefix: "DY", names: ["D & Y Group"] },
+  { prefix: "ES", names: ["Esery Studio"] },
+  { prefix: "FS", names: ["Flipt Studio"] },
+  { prefix: "HP", names: ["Helium Property"] },
+  { prefix: "ID", names: ["Impact Displays"] },
+  { prefix: "JD", names: ["Julie Dang"] },
+  { prefix: "KG", names: ["KozyGuru", "The Guru Hub"] },
+  { prefix: "KRE", names: ["Khy Real Estate"] },
+  { prefix: "LM", names: ["Landmark Creations"] },
+  { prefix: "MB", names: ["McConnell Bourn"] },
+  { prefix: "MP", names: ["Masterpiece Holiday", "Masterpiece Homestay"] },
+  { prefix: "MS", names: ["MS image"] },
+  { prefix: "MW", names: ["Metawise BnB"] },
+  { prefix: "NC", names: ["Nguyen Cameras"] },
+  { prefix: "PA", names: ["Pico Australia"] },
+  { prefix: "RTW", names: ["RTW Properties"] },
+  { prefix: "SC", names: ["Sprite Clean"] },
+  { prefix: "VE", names: ["Video Estate", "VideoEstate"] }
+];
 const wageCurrency = "AUD";
 const employeeWageCurrency = "THB";
 const larkImportDays = Number(process.env.LARK_IMPORT_DAYS || 120);
@@ -1161,17 +1184,168 @@ function bookingInvoiceItems(booking) {
   });
 }
 
-function nextInvoiceNumber(invoices) {
-  const maxNumber = invoices.reduce((max, invoice) => {
-    const value = String(invoice.invoiceNumber || "");
-    const receiptMatch = value.match(/^R(\d+)$/);
-    if (receiptMatch) return Math.max(max, Number(receiptMatch[1]));
+function normalizeInvoiceClientKey(value) {
+  return String(value || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/\b(pty|ltd|limited|proprietary|company|co|the)\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
 
-    const legacyMatch = value.match(/^INV-\d{4}-(\d{4,})$/);
-    if (legacyMatch) return Math.max(max, Number(legacyMatch[1]));
-    return max;
-  }, 0);
-  return `R${String(maxNumber + 1).padStart(3, "0")}`;
+function compactInvoiceClientKey(value) {
+  return normalizeInvoiceClientKey(value).replace(/\s+/g, "");
+}
+
+function invoiceClientNames(source = {}) {
+  const names = [
+    source.clientName,
+    source.name,
+    source.billingName
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+
+  for (const name of [...names]) {
+    const parentheticalMatches = [...name.matchAll(/\(([^)]+)\)/g)];
+    parentheticalMatches.forEach((match) => {
+      if (match[1]) names.push(match[1].trim());
+    });
+  }
+
+  return [...new Set(names)];
+}
+
+function invoiceClientNameMatches(left, right) {
+  const leftKey = normalizeInvoiceClientKey(left);
+  const rightKey = normalizeInvoiceClientKey(right);
+  if (!leftKey || !rightKey) return false;
+  if (leftKey === rightKey) return true;
+  if (leftKey.includes(rightKey) || rightKey.includes(leftKey)) return true;
+
+  const leftCompact = compactInvoiceClientKey(left);
+  const rightCompact = compactInvoiceClientKey(right);
+  return Boolean(leftCompact && rightCompact && leftCompact === rightCompact);
+}
+
+function invoiceNumberParts(value) {
+  const invoiceNumber = String(value || "").trim().toUpperCase();
+  const prefixMatch = invoiceNumber.match(/^([A-Z0-9]*?[A-Z])(\d+)$/);
+  if (prefixMatch) {
+    return {
+      prefix: prefixMatch[1],
+      number: Number(prefixMatch[2]),
+      width: prefixMatch[2].length
+    };
+  }
+
+  const legacyMatch = invoiceNumber.match(/^INV-\d{4}-(\d{4,})$/);
+  if (legacyMatch) {
+    return {
+      prefix: "R",
+      number: Number(legacyMatch[1]),
+      width: Math.max(3, legacyMatch[1].length)
+    };
+  }
+
+  return null;
+}
+
+function matchingInvoicePrefixOverride(source) {
+  const names = invoiceClientNames(source);
+  return invoicePrefixOverrides.find((override) => {
+    return override.names.some((overrideName) =>
+      names.some((name) => invoiceClientNameMatches(name, overrideName))
+    );
+  })?.prefix || "";
+}
+
+function prefixFromInvoiceHistory(source, invoices) {
+  const names = invoiceClientNames(source);
+  if (!names.length) return "";
+
+  const matches = new Map();
+  for (const invoice of invoices) {
+    const parts = invoiceNumberParts(invoice.invoiceNumber);
+    if (!parts?.prefix) continue;
+
+    const invoiceNames = invoiceClientNames(invoice);
+    if (!invoiceNames.some((invoiceName) => names.some((name) => invoiceClientNameMatches(invoiceName, name)))) {
+      continue;
+    }
+
+    const existing = matches.get(parts.prefix) || { count: 0, highest: 0 };
+    matches.set(parts.prefix, {
+      count: existing.count + 1,
+      highest: Math.max(existing.highest, parts.number)
+    });
+  }
+
+  return [...matches.entries()]
+    .sort((left, right) => {
+      if (right[1].count !== left[1].count) return right[1].count - left[1].count;
+      return right[1].highest - left[1].highest;
+    })[0]?.[0] || "";
+}
+
+function initialsInvoicePrefix(source) {
+  const sourceName = invoiceClientNames(source)[0] || "Receipt";
+  const normalized = normalizeInvoiceClientKey(sourceName)
+    .replace(/\b(real estate|property|properties|agency|group|studio|australia|australian|service|services)\b/g, " ")
+    .trim();
+  const words = normalized.split(/\s+/).filter(Boolean);
+  if (!words.length) return "R";
+
+  const initials = words
+    .map((word) => word[0])
+    .join("")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+  if (initials.length >= 2) return initials.slice(0, 4);
+
+  return words[0].slice(0, 3).toUpperCase() || "R";
+}
+
+function invoicePrefixForSource(source, invoices) {
+  return matchingInvoicePrefixOverride(source)
+    || prefixFromInvoiceHistory(source, invoices)
+    || initialsInvoicePrefix(source);
+}
+
+function nextInvoiceNumber(invoices, source = {}) {
+  const prefix = invoicePrefixForSource(source, invoices);
+  const matchingNumbers = invoices
+    .map((invoice) => invoiceNumberParts(invoice.invoiceNumber))
+    .filter((parts) => parts?.prefix === prefix);
+
+  const maxNumber = matchingNumbers.reduce((max, parts) => Math.max(max, parts.number), 0);
+  const width = Math.max(3, ...matchingNumbers.map((parts) => parts.width));
+  return `${prefix}${String(maxNumber + 1).padStart(width, "0")}`;
+}
+
+function invoiceNumberForBooking(existing, booking, invoices) {
+  const otherInvoices = existing?.id
+    ? invoices.filter((invoice) => invoice.id !== existing.id)
+    : invoices;
+  const nextNumber = () => nextInvoiceNumber(otherInvoices, booking);
+  if (!existing?.invoiceNumber) {
+    return nextNumber();
+  }
+
+  const canRefreshDraftNumber =
+    existing.status === "draft"
+    && !existing.sentAt
+    && !existing.sourceInvoiceId;
+  if (!canRefreshDraftNumber) {
+    return existing.invoiceNumber;
+  }
+
+  const currentPrefix = invoiceNumberParts(existing.invoiceNumber)?.prefix || "";
+  const expectedPrefix = invoicePrefixForSource(booking, otherInvoices);
+  return currentPrefix === expectedPrefix ? existing.invoiceNumber : nextNumber();
 }
 
 function importInvoiceId(sourceInvoiceId) {
@@ -1285,7 +1459,7 @@ function invoiceFromBooking(booking, invoices, existing = null) {
   return normalizeInvoice({
     ...(existing || {}),
     id: existing?.id || crypto.randomUUID(),
-    invoiceNumber: existing?.invoiceNumber || nextInvoiceNumber(invoices),
+    invoiceNumber: invoiceNumberForBooking(existing, booking, invoices),
     bookingId: booking.id,
     propertyAddress: booking.propertyAddress || "",
     clientName: booking.clientName || "",
