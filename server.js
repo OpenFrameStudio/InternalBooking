@@ -2900,7 +2900,14 @@ function isInvalidLarkReceiveIdResult(result) {
 }
 
 function larkMessageErrorText(response, result) {
-  return result?.msg || result?.message || `Lark message failed with ${response.status}.`;
+  const message = result?.msg || result?.message || `Lark message failed with ${response.status}.`;
+  if (String(message).includes("contact:user.employee_id:readonly")) {
+    return "Lark needs the contact:user.employee_id:readonly permission before it can send notifications by User ID. Add that permission in the Lark Developer app, publish/save it, then retry.";
+  }
+  if (String(message).includes("contact:user.id:readonly")) {
+    return "Lark needs the contact:user.id:readonly permission before it can look up a user from an email address. Add that permission in the Lark Developer app, publish/save it, then retry.";
+  }
+  return message;
 }
 
 async function resolveLarkOpenIdByEmail(email, token) {
