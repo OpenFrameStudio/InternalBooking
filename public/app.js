@@ -2317,7 +2317,7 @@ async function submitBooking(event) {
     return;
   }
   const isEditing = Boolean(state.editingBookingId);
-  const endpoint = isEditing ? `/api/bookings/${state.editingBookingId}` : '/api/bookings';
+  const endpoint = isEditing ? `/api/bookings/${encodeURIComponent(state.editingBookingId)}` : '/api/bookings';
   setMessage(el.formMessage, isEditing ? 'Updating booking...' : 'Creating booking...');
   el.submitButton.disabled = true;
   try {
@@ -2391,7 +2391,7 @@ async function previewLarkEvent() {
 }
 
 async function cancelBooking(id) {
-  const { response, data } = await fetchJson(`/api/bookings/${id}/cancel`, { method: 'POST' });
+  const { response, data } = await fetchJson(`/api/bookings/${encodeURIComponent(id)}/cancel`, { method: 'POST' });
   if (!response.ok) return;
   state.bookings = state.bookings.map((booking) => booking.id === id ? data.booking : booking);
   upsertStateInvoice(data.invoice);
@@ -2406,7 +2406,7 @@ async function removeCancelledBooking(id) {
     return;
   }
 
-  const { response, data } = await fetchJson(`/api/bookings/${id}?force=1`, { method: 'DELETE' });
+  const { response, data } = await fetchJson(`/api/bookings/${encodeURIComponent(id)}?force=1`, { method: 'DELETE' });
   if (!response.ok) {
     if (data.booking) {
       state.bookings = state.bookings.map((booking) => booking.id === id ? data.booking : booking);

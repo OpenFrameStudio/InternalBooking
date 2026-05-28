@@ -5983,11 +5983,12 @@ async function handleApi(req, res, url) {
       return;
     }
 
-    const [, apiPart, bookingsPart, id, extra] = url.pathname.split("/");
-    if (apiPart !== "api" || bookingsPart !== "bookings" || !id || extra) {
+    const [, apiPart, bookingsPart, rawId, extra] = url.pathname.split("/");
+    if (apiPart !== "api" || bookingsPart !== "bookings" || !rawId || extra) {
       sendJson(res, 404, { errors: ["Booking not found."] });
       return;
     }
+    const id = decodeURIComponent(rawId);
 
     const input = await readBody(req);
     const { errors, value } = validateBooking(input);
@@ -6057,7 +6058,7 @@ async function handleApi(req, res, url) {
       return;
     }
 
-    const id = url.pathname.split("/")[3];
+    const id = decodeURIComponent(url.pathname.split("/")[3] || "");
     const bookings = await loadBookings();
     const booking = bookings.find((item) => item.id === id);
 
@@ -6087,11 +6088,12 @@ async function handleApi(req, res, url) {
       return;
     }
 
-    const [, apiPart, bookingsPart, id, extra] = url.pathname.split("/");
-    if (apiPart !== "api" || bookingsPart !== "bookings" || !id || extra) {
+    const [, apiPart, bookingsPart, rawId, extra] = url.pathname.split("/");
+    if (apiPart !== "api" || bookingsPart !== "bookings" || !rawId || extra) {
       sendJson(res, 404, { errors: ["Booking not found."] });
       return;
     }
+    const id = decodeURIComponent(rawId);
 
     const bookings = await loadBookings();
     const bookingIndex = bookings.findIndex((item) => item.id === id);
