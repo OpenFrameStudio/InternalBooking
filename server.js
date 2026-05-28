@@ -649,14 +649,24 @@ async function saveEmployeeWages(employeeWages) {
 
 function normalizeWorkEmployee(employee = {}, fallback = {}) {
   const id = String(employee.id || fallback.id || defaultWorkEmployee.id).trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-");
+  const configuredFayeReceiveId = String(workLarkNotificationConfig.receiveId || "").trim();
+  const configuredFayeReceiveIdType = normalizeLarkMessageReceiveIdType(workLarkNotificationConfig.receiveIdType);
+  const rawReceiveId = String(employee.larkReceiveId || fallback.larkReceiveId || "").trim();
+  const rawReceiveIdType = normalizeLarkMessageReceiveIdType(employee.larkReceiveIdType || fallback.larkReceiveIdType || "email");
+  const shouldUseConfiguredFayeLarkId =
+    id === defaultWorkEmployee.id
+    && configuredFayeReceiveId
+    && configuredFayeReceiveIdType !== "email"
+    && (rawReceiveIdType === "email" || !rawReceiveId || isValidEmail(rawReceiveId));
+
   return {
     ...fallback,
     ...employee,
     id: id || defaultWorkEmployee.id,
     name: String(employee.name || fallback.name || "Employee").trim(),
     email: String(employee.email || fallback.email || "").trim(),
-    larkReceiveId: String(employee.larkReceiveId || fallback.larkReceiveId || "").trim(),
-    larkReceiveIdType: String(employee.larkReceiveIdType || fallback.larkReceiveIdType || "email").trim(),
+    larkReceiveId: shouldUseConfiguredFayeLarkId ? configuredFayeReceiveId : rawReceiveId,
+    larkReceiveIdType: shouldUseConfiguredFayeLarkId ? configuredFayeReceiveIdType : rawReceiveIdType,
     role: String(employee.role || fallback.role || "").trim(),
     availability: String(employee.availability || fallback.availability || "").trim()
   };
@@ -3000,7 +3010,7 @@ async function sendWorkLarkNotification(assignment, workState) {
       }
     } else {
       throw new Error(
-        `Lark rejected ${receiveId} as a message recipient, and no Lark user was found for that email. Use ${assignee?.name || "the assignee"}'s Lark login email or set WORK_LARK_RECEIVE_ID_TYPE=open_id with their Lark open_id.`
+        `Lark rejected ${receiveId} as a message recipient, and no Lark user was found for that email. Set ${assignee?.name || "the assignee"}'s WORK_LARK_RECEIVE_ID_TYPE to user_id and WORK_LARK_RECEIVE_ID to their Lark User ID, or use open_id if you have their Lark open_id.`
       );
     }
   } else if (!firstAttempt.ok) {
@@ -3046,7 +3056,7 @@ async function sendWorkCompletionLarkNotification(assignment, workState, complet
       }
     } else {
       throw new Error(
-        `Lark rejected ${receiveId} as the boss notification recipient, and no Lark user was found for that email. Set WORK_COMPLETION_LARK_RECEIVE_ID_TYPE=open_id with your Lark open_id.`
+        `Lark rejected ${receiveId} as the boss notification recipient, and no Lark user was found for that email. Set WORK_COMPLETION_LARK_RECEIVE_ID_TYPE to user_id and WORK_COMPLETION_LARK_RECEIVE_ID to your Lark User ID, or use open_id if you have your Lark open_id.`
       );
     }
   } else if (!firstAttempt.ok) {

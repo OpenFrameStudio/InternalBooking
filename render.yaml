@@ -60,7 +60,7 @@ services:
       - key: WORK_LARK_NOTIFICATIONS_ENABLED
         value: true
       - key: WORK_LARK_RECEIVE_ID_TYPE
-        value: email
+        value: user_id
       - key: WORK_LARK_RECEIVE_ID
         sync: false
       - key: INVOICE_EMAIL_HOST
