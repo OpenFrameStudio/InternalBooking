@@ -1023,6 +1023,8 @@ function normalizeInvoice(invoice) {
     id: invoice?.id || crypto.randomUUID(),
     invoiceNumber: String(invoice?.invoiceNumber || "").trim(),
     bookingId: String(invoice?.bookingId || ""),
+    sourceInvoiceId: String(invoice?.sourceInvoiceId || ""),
+    source: String(invoice?.source || ""),
     propertyAddress: String(invoice?.propertyAddress || ""),
     clientName: String(invoice?.clientName || ""),
     clientEmail: String(invoice?.clientEmail || ""),
@@ -1033,8 +1035,10 @@ function normalizeInvoice(invoice) {
     bookingEndAt: invoice?.bookingEndAt || "",
     items,
     subtotal,
+    discount: normalizeMoney(invoice?.discount || 0),
     gstRate,
     gstAmount,
+    gstIncluded: normalizeEnvBoolean(invoice?.gstIncluded, true),
     total,
     currency: invoice?.currency || invoiceCurrency,
     status: normalizeInvoiceStatus(invoice?.status),
@@ -1045,6 +1049,7 @@ function normalizeInvoice(invoice) {
     sentAt: invoice?.sentAt || "",
     sentTo: uniqueEmails(Array.isArray(invoice?.sentTo) ? invoice.sentTo : parseGuestEmails(invoice?.sentTo || "")),
     notes: String(invoice?.notes || ""),
+    importedAt: invoice?.importedAt || "",
     createdAt: invoice?.createdAt || new Date().toISOString(),
     updatedAt: invoice?.updatedAt || invoice?.createdAt || new Date().toISOString()
   };
@@ -1092,6 +1097,103 @@ function nextInvoiceNumber(invoices) {
     return max;
   }, 0);
   return `R${String(maxNumber + 1).padStart(3, "0")}`;
+}
+
+function importInvoiceId(sourceInvoiceId) {
+  const safeId = String(sourceInvoiceId || "")
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return safeId ? `legacy-invoice-${safeId}` : crypto.randomUUID();
+}
+
+function uniqueImportInvoiceId(invoices, sourceInvoiceId) {
+  const baseId = importInvoiceId(sourceInvoiceId);
+  if (!invoices.some((invoice) => invoice.id === baseId)) {
+    return baseId;
+  }
+
+  let suffix = 2;
+  while (invoices.some((invoice) => invoice.id === `${baseId}-${suffix}`)) {
+    suffix += 1;
+  }
+  return `${baseId}-${suffix}`;
+}
+
+function mergeImportedInvoice(existing, input, allInvoices, now = new Date().toISOString()) {
+  const sourceInvoiceId = String(input?.sourceInvoiceId || "").trim();
+  const status = normalizeInvoiceStatus(input?.status);
+  const issuedAt = input?.issuedAt || existing?.issuedAt || now;
+  const invoice = normalizeInvoice({
+    ...(existing || {}),
+    ...input,
+    id: existing?.id || input?.id || uniqueImportInvoiceId(allInvoices, sourceInvoiceId),
+    sourceInvoiceId,
+    source: input?.source || existing?.source || "legacy-import",
+    status,
+    issuedAt,
+    dueAt: input?.dueAt || existing?.dueAt || addDays(new Date(issuedAt), 7).toISOString(),
+    paidAt: status === "paid" ? (input?.paidAt || existing?.paidAt || issuedAt) : "",
+    voidedAt: status === "void" ? (input?.voidedAt || existing?.voidedAt || now) : "",
+    importedAt: existing?.importedAt || input?.importedAt || now,
+    createdAt: existing?.createdAt || input?.createdAt || issuedAt,
+    updatedAt: now
+  });
+
+  return invoice;
+}
+
+function importInvoices(invoices, importedRecords) {
+  const now = new Date().toISOString();
+  const sourceIndex = new Map();
+  invoices.forEach((invoice, index) => {
+    if (invoice.sourceInvoiceId) {
+      sourceIndex.set(invoice.sourceInvoiceId, index);
+    }
+  });
+
+  let imported = 0;
+  let updated = 0;
+  const skipped = [];
+  const duplicateInvoiceNumbers = [];
+
+  for (const record of importedRecords) {
+    const sourceInvoiceId = String(record?.sourceInvoiceId || "").trim();
+    const invoiceNumber = String(record?.invoiceNumber || "").trim();
+
+    if (!sourceInvoiceId || !invoiceNumber) {
+      skipped.push({
+        sourceInvoiceId,
+        invoiceNumber,
+        reason: "Missing original invoice ID or invoice number."
+      });
+      continue;
+    }
+
+    const existingIndex = sourceIndex.get(sourceInvoiceId);
+    const existing = existingIndex === undefined ? null : invoices[existingIndex];
+    if (!existing) {
+      const hasDifferentInvoiceWithSameNumber = invoices.some((invoice) => (
+        invoice.invoiceNumber === invoiceNumber && invoice.sourceInvoiceId !== sourceInvoiceId
+      ));
+      if (hasDifferentInvoiceWithSameNumber) {
+        duplicateInvoiceNumbers.push({ sourceInvoiceId, invoiceNumber });
+      }
+    }
+
+    const invoice = mergeImportedInvoice(existing, { ...record, sourceInvoiceId, invoiceNumber }, invoices, now);
+    if (existingIndex === undefined) {
+      invoices.push(invoice);
+      sourceIndex.set(sourceInvoiceId, invoices.length - 1);
+      imported += 1;
+    } else {
+      invoices[existingIndex] = invoice;
+      updated += 1;
+    }
+  }
+
+  invoices.sort((a, b) => new Date(b.issuedAt) - new Date(a.issuedAt));
+  return { imported, updated, skipped, duplicateInvoiceNumbers };
 }
 
 function invoiceFromBooking(booking, invoices, existing = null) {
@@ -4828,6 +4930,26 @@ async function handleApi(req, res, url) {
     await saveInvoices(invoices);
     invoices.sort((a, b) => new Date(b.issuedAt) - new Date(a.issuedAt));
     sendJson(res, 200, { invoices, ...result });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/invoices/import") {
+    if (!hasPermission(req, "manage_invoices")) {
+      sendForbidden(res, "Boss or team leader only.");
+      return;
+    }
+
+    const input = await readBody(req);
+    const importedRecords = Array.isArray(input?.invoices) ? input.invoices : [];
+    if (!importedRecords.length) {
+      sendJson(res, 400, { errors: ["Add at least one invoice to import."] });
+      return;
+    }
+
+    const invoices = await loadInvoices();
+    const result = importInvoices(invoices, importedRecords);
+    await saveInvoices(invoices);
+    sendJson(res, 200, { invoices, ...result, total: invoices.length });
     return;
   }
 
