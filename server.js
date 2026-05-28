@@ -1633,6 +1633,25 @@ function bookingHasPassed(booking, now = Date.now()) {
   return !Number.isNaN(endDate.getTime()) && endDate.getTime() < now;
 }
 
+function bookingIdFromApiPath(pathname, trailingAction = "") {
+  const prefix = "/api/bookings/";
+  if (!pathname.startsWith(prefix)) return "";
+
+  let rawId = pathname.slice(prefix.length);
+  if (trailingAction) {
+    const suffix = `/${trailingAction}`;
+    if (!rawId.endsWith(suffix)) return "";
+    rawId = rawId.slice(0, -suffix.length);
+  }
+
+  if (!rawId) return "";
+  try {
+    return decodeURIComponent(rawId);
+  } catch {
+    return rawId;
+  }
+}
+
 function invoiceIsForPastBooking(invoice, pastBookingIds, now = Date.now()) {
   if (invoice?.bookingId && pastBookingIds.has(invoice.bookingId)) {
     return true;
@@ -5983,12 +6002,11 @@ async function handleApi(req, res, url) {
       return;
     }
 
-    const [, apiPart, bookingsPart, rawId, extra] = url.pathname.split("/");
-    if (apiPart !== "api" || bookingsPart !== "bookings" || !rawId || extra) {
+    const id = bookingIdFromApiPath(url.pathname);
+    if (!id) {
       sendJson(res, 404, { errors: ["Booking not found."] });
       return;
     }
-    const id = decodeURIComponent(rawId);
 
     const input = await readBody(req);
     const { errors, value } = validateBooking(input);
@@ -6058,7 +6076,12 @@ async function handleApi(req, res, url) {
       return;
     }
 
-    const id = decodeURIComponent(url.pathname.split("/")[3] || "");
+    const id = bookingIdFromApiPath(url.pathname, "cancel");
+    if (!id) {
+      sendJson(res, 404, { errors: ["Booking not found."] });
+      return;
+    }
+
     const bookings = await loadBookings();
     const booking = bookings.find((item) => item.id === id);
 
@@ -6088,12 +6111,11 @@ async function handleApi(req, res, url) {
       return;
     }
 
-    const [, apiPart, bookingsPart, rawId, extra] = url.pathname.split("/");
-    if (apiPart !== "api" || bookingsPart !== "bookings" || !rawId || extra) {
+    const id = bookingIdFromApiPath(url.pathname);
+    if (!id) {
       sendJson(res, 404, { errors: ["Booking not found."] });
       return;
     }
-    const id = decodeURIComponent(rawId);
 
     const bookings = await loadBookings();
     const bookingIndex = bookings.findIndex((item) => item.id === id);
