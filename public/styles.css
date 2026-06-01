@@ -643,6 +643,14 @@ button:disabled {
   min-height: 1em;
 }
 
+.client-dropdown-group {
+  padding: 10px 10px 3px;
+  color: var(--accent-dark);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
 .client-search-results {
   display: grid;
   gap: 8px;
@@ -1068,6 +1076,38 @@ button:focus-visible {
 .wage-list {
   display: grid;
   gap: 10px;
+}
+
+.client-list {
+  gap: 18px;
+}
+
+.client-list-group,
+.client-list-group-items {
+  display: grid;
+  gap: 10px;
+}
+
+.client-list-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.client-list-group-header h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.client-list-group-header span {
+  border-radius: 999px;
+  background: var(--soft);
+  color: var(--accent-dark);
+  padding: 5px 10px;
+  font-size: 0.76rem;
+  font-weight: 900;
 }
 
 .booking-item {

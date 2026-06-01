@@ -723,6 +723,32 @@ function clientOptionLabel(client) {
   return [client.name, client.agentName].filter(Boolean).join(' - ');
 }
 
+function clientHasAgent(client) {
+  return Boolean(String(client?.agentName || '').trim() || String(client?.agentPhone || '').trim());
+}
+
+function sortClientsByLabel(clients) {
+  return [...clients].sort((a, b) => clientOptionLabel(a).localeCompare(clientOptionLabel(b)));
+}
+
+function clientGroups() {
+  const realEstate = [];
+  const regular = [];
+
+  for (const client of state.clients) {
+    if (clientHasAgent(client)) {
+      realEstate.push(client);
+    } else {
+      regular.push(client);
+    }
+  }
+
+  return [
+    { title: 'Real estate clients', emptyText: 'No real estate clients saved yet.', clients: sortClientsByLabel(realEstate) },
+    { title: 'Regular clients', emptyText: 'No regular clients saved yet.', clients: sortClientsByLabel(regular) }
+  ];
+}
+
 function selectedClientLabel() {
   const client = selectedClient();
   return client ? clientOptionLabel(client) : 'New client / enter manually';
@@ -780,18 +806,7 @@ function renderClientDropdown() {
   el.clientDropdownButton.setAttribute('aria-expanded', String(state.bookingForm.clientDropdownOpen));
   el.clientDropdown.classList.toggle('open', state.bookingForm.clientDropdownOpen);
 
-  const options = [
-    { id: '', title: 'New client / enter manually', meta: 'Clear the saved client fields' },
-    ...[...state.clients]
-      .sort((a, b) => clientOptionLabel(a).localeCompare(clientOptionLabel(b)))
-      .map((client) => ({
-        id: client.id,
-        title: clientOptionLabel(client) || client.name,
-        meta: [client.email, client.agentPhone].filter(Boolean).join(' · ')
-      }))
-  ];
-
-  for (const option of options) {
+  const appendOption = (option) => {
     const button = document.createElement('button');
     const isSelected = option.id === state.bookingForm.selectedClientId;
     button.className = `client-dropdown-option${isSelected ? ' selected' : ''}`;
@@ -807,6 +822,25 @@ function renderClientDropdown() {
     button.append(title, meta);
     button.addEventListener('click', () => selectClient(option.id));
     el.clientDropdownMenu.append(button);
+  };
+
+  appendOption({ id: '', title: 'New client / enter manually', meta: 'Clear the saved client fields' });
+
+  for (const group of clientGroups()) {
+    if (!group.clients.length) continue;
+
+    const heading = document.createElement('div');
+    heading.className = 'client-dropdown-group';
+    heading.textContent = group.title;
+    el.clientDropdownMenu.append(heading);
+
+    for (const client of group.clients) {
+      appendOption({
+        id: client.id,
+        title: clientOptionLabel(client) || client.name,
+        meta: [client.email, client.agentPhone].filter(Boolean).join(' · ')
+      });
+    }
   }
 }
 
@@ -922,14 +956,42 @@ function renderClientList() {
     el.clientList.append(empty);
     return;
   }
-  for (const client of state.clients) {
-    const item = el.clientTemplate.content.firstElementChild.cloneNode(true);
-    item.querySelector('h3').textContent = client.name;
-    item.querySelector('.client-email').textContent = client.email || '';
-    item.querySelector('.client-agent').textContent = client.agentName ? `Agent: ${formatContact(client.agentName, client.agentPhone)}` : '';
-    item.querySelector('.edit-client-button').addEventListener('click', () => editClient(client.id));
-    item.querySelector('.delete-client-button').addEventListener('click', () => deleteClient(client.id));
-    el.clientList.append(item);
+
+  for (const group of clientGroups()) {
+    const section = document.createElement('section');
+    section.className = 'client-list-group';
+
+    const header = document.createElement('div');
+    header.className = 'client-list-group-header';
+    const title = document.createElement('h3');
+    title.textContent = group.title;
+    const count = document.createElement('span');
+    count.textContent = `${group.clients.length} ${group.clients.length === 1 ? 'client' : 'clients'}`;
+    header.append(title, count);
+    section.append(header);
+
+    const items = document.createElement('div');
+    items.className = 'client-list-group-items';
+
+    if (!group.clients.length) {
+      const empty = document.createElement('div');
+      empty.className = 'empty-state';
+      empty.textContent = group.emptyText;
+      items.append(empty);
+    }
+
+    for (const client of group.clients) {
+      const item = el.clientTemplate.content.firstElementChild.cloneNode(true);
+      item.querySelector('h3').textContent = client.name;
+      item.querySelector('.client-email').textContent = client.email || '';
+      item.querySelector('.client-agent').textContent = clientHasAgent(client) ? `Agent: ${formatContact(client.agentName, client.agentPhone)}` : '';
+      item.querySelector('.edit-client-button').addEventListener('click', () => editClient(client.id));
+      item.querySelector('.delete-client-button').addEventListener('click', () => deleteClient(client.id));
+      items.append(item);
+    }
+
+    section.append(items);
+    el.clientList.append(section);
   }
 }
 
