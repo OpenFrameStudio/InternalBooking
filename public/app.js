@@ -52,6 +52,11 @@ const el = {
   directoryClientEmail: $('#directoryClientEmail'),
   directoryAgentName: $('#directoryAgentName'),
   directoryAgentPhone: $('#directoryAgentPhone'),
+  directoryClientAddressLine1: $('#directoryClientAddressLine1'),
+  directoryClientAddressLine2: $('#directoryClientAddressLine2'),
+  directoryClientCity: $('#directoryClientCity'),
+  directoryClientPostcode: $('#directoryClientPostcode'),
+  directoryClientAbn: $('#directoryClientAbn'),
   photographerForm: $('#photographerForm'),
   photographerList: $('#photographerList'),
   directoryPhotographerId: $('#directoryPhotographerId'),
@@ -749,6 +754,11 @@ function clientGroups() {
   ];
 }
 
+function clientAddressLabel(client) {
+  const cityLine = [client?.city, client?.postcode].filter(Boolean).join(' ');
+  return [client?.addressLine1, client?.addressLine2, cityLine].filter(Boolean).join(', ');
+}
+
 function selectedClientLabel() {
   const client = selectedClient();
   return client ? clientOptionLabel(client) : 'New client / enter manually';
@@ -764,7 +774,9 @@ function clientSearchText(client) {
     client.name,
     client.agentName,
     client.email,
-    client.agentPhone
+    client.agentPhone,
+    clientAddressLabel(client),
+    client.abn
   ].join(' ').toLowerCase();
 }
 
@@ -985,6 +997,8 @@ function renderClientList() {
       item.querySelector('h3').textContent = client.name;
       item.querySelector('.client-email').textContent = client.email || '';
       item.querySelector('.client-agent').textContent = clientHasAgent(client) ? `Agent: ${formatContact(client.agentName, client.agentPhone)}` : '';
+      item.querySelector('.client-address').textContent = clientAddressLabel(client);
+      item.querySelector('.client-abn').textContent = client.abn ? `ABN: ${client.abn}` : '';
       item.querySelector('.edit-client-button').addEventListener('click', () => editClient(client.id));
       item.querySelector('.delete-client-button').addEventListener('click', () => deleteClient(client.id));
       items.append(item);
@@ -2183,7 +2197,12 @@ async function saveDirectoryClient(event) {
     name: el.directoryClientName.value.trim(),
     email: el.directoryClientEmail.value.trim(),
     agentName: el.directoryAgentName.value.trim(),
-    agentPhone: el.directoryAgentPhone.value.trim()
+    agentPhone: el.directoryAgentPhone.value.trim(),
+    addressLine1: el.directoryClientAddressLine1.value.trim(),
+    addressLine2: el.directoryClientAddressLine2.value.trim(),
+    city: el.directoryClientCity.value.trim(),
+    postcode: el.directoryClientPostcode.value.trim(),
+    abn: el.directoryClientAbn.value.trim()
   };
   if (!payload.name) {
     setMessage(el.clientMessage, 'Enter the agency or client name before saving.', 'error');
@@ -2279,6 +2298,11 @@ function editClient(id) {
   el.directoryClientEmail.value = client.email || '';
   el.directoryAgentName.value = client.agentName || '';
   el.directoryAgentPhone.value = client.agentPhone || '';
+  el.directoryClientAddressLine1.value = client.addressLine1 || '';
+  el.directoryClientAddressLine2.value = client.addressLine2 || '';
+  el.directoryClientCity.value = client.city || '';
+  el.directoryClientPostcode.value = client.postcode || '';
+  el.directoryClientAbn.value = client.abn || '';
   setMessage(el.clientMessage, 'Editing saved client.');
 }
 

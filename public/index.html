@@ -12,7 +12,7 @@
     <link rel="manifest" href="/site.webmanifest" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
-    <link rel="stylesheet" href="/styles.css?v=client-groups" />
+    <link rel="stylesheet" href="/styles.css?v=client-billing-details" />
     <link rel="stylesheet" href="/work/styles.css?v=assignment-photos" />
     <script src="/install.js" defer></script>
   </head>
@@ -326,6 +326,35 @@
               <label>
                 <span>Agent phone</span>
                 <input id="directoryAgentPhone" placeholder="0412 684 209" />
+              </label>
+            </div>
+
+            <div class="form-row two">
+              <label>
+                <span>Client address line 1</span>
+                <input id="directoryClientAddressLine1" placeholder="23 Selborne Street" />
+              </label>
+              <label>
+                <span>Client address line 2</span>
+                <input id="directoryClientAddressLine2" placeholder="Suite 2" />
+              </label>
+            </div>
+
+            <div class="form-row two">
+              <label>
+                <span>Client city</span>
+                <input id="directoryClientCity" placeholder="Burwood" />
+              </label>
+              <label>
+                <span>Client postcode</span>
+                <input id="directoryClientPostcode" inputmode="numeric" placeholder="2134" />
+              </label>
+            </div>
+
+            <div class="form-row two">
+              <label>
+                <span>Client ABN</span>
+                <input id="directoryClientAbn" placeholder="12 345 678 901" />
               </label>
             </div>
 
@@ -681,6 +710,8 @@
           <h3></h3>
           <p class="client-email"></p>
           <p class="client-agent"></p>
+          <p class="client-address"></p>
+          <p class="client-abn"></p>
         </div>
         <div class="directory-actions">
           <button class="ghost-button edit-client-button" type="button">Edit</button>
@@ -758,6 +789,6 @@
 
     <section class="invoice-print-sheet" id="invoicePrintSheet" hidden aria-label="Printable invoice"></section>
 
-    <script src="/app.js?v=client-groups" type="module"></script>
+    <script src="/app.js?v=client-billing-details" type="module"></script>
   </body>
 </html>

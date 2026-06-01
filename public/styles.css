@@ -505,6 +505,10 @@ button:disabled {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.form-row > label:only-child {
+  grid-column: 1 / -1;
+}
+
 .client-panel,
 .photographer-panel {
   display: grid;
@@ -1358,6 +1362,8 @@ button:focus-visible {
 
 .client-email:empty,
 .client-agent:empty,
+.client-address:empty,
+.client-abn:empty,
 .photographer-email:empty,
 .photographer-phone:empty {
   display: none;
