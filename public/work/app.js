@@ -942,7 +942,9 @@ async function notifyAssignment(id) {
   try {
     const data = await workApi.notifyAssignment(id);
     setWorkData(data, { notifyingAssignmentId: "" });
-    if (data.workLarkNotificationMessage) showToast(data.workLarkNotificationMessage);
+    if (data.workInviteMessage || data.workLarkNotificationMessage) {
+      showToast(data.workInviteMessage || data.workLarkNotificationMessage);
+    }
   } catch (error) {
     setUiState({ notifyingAssignmentId: "" });
     showToast(error.message);

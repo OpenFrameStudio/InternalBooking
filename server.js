@@ -231,7 +231,7 @@ const defaultPhotographers = [
 const defaultWorkEmployee = {
   id: "faye",
   name: "Faye",
-  email: parseGuestEmails(workInviteEmailConfig.to)[0] || "",
+  email: parseGuestEmails(workInviteEmailConfig.to)[0] || process.env.FAYE_EMAIL || "faye.w@openframe.studio",
   larkReceiveId: workLarkNotificationConfig.receiveId,
   larkReceiveIdType: workLarkNotificationConfig.receiveIdType,
   role: "Editor / Admin",
@@ -240,7 +240,7 @@ const defaultWorkEmployee = {
 const testWorkEmployee = {
   id: "test",
   name: "Test",
-  email: "",
+  email: process.env.TEST_EMPLOYEE_EMAIL || "",
   larkReceiveId: "",
   larkReceiveIdType: "email",
   role: "Test Employee",
@@ -3262,6 +3262,9 @@ function isInvalidLarkReceiveIdResult(result) {
 
 function larkMessageErrorText(response, result) {
   const message = result?.msg || result?.message || `Lark message failed with ${response.status}.`;
+  if (String(message).toLowerCase().includes("no availability")) {
+    return "Lark bot is not available to this employee yet. Ask them to open or add the OpenFrame Lark app/bot, or use the email invite instead.";
+  }
   if (String(message).includes("contact:user.employee_id:readonly")) {
     return "Lark needs the contact:user.employee_id:readonly permission before it can send notifications by User ID. Add that permission in the Lark Developer app, publish/save it, then retry.";
   }
@@ -3565,6 +3568,14 @@ function workLarkNotificationMessage(summary, context = "saved") {
       : `Work saved, but Lark notification could not send: ${summary.errors[0] || "unknown error"}`;
   }
   if (summary.skipped) {
+    const missing = summary.missing || [];
+    const needsLarkApp = missing.some((item) => ["LARK_APP_ID", "LARK_APP_SECRET", "WORK_LARK_NOTIFICATIONS_ENABLED"].includes(item));
+    if (needsLarkApp) {
+      return context === "manual"
+        ? "Lark notification is not fully configured yet."
+        : "Work saved. Lark notification is not fully configured yet.";
+    }
+
     return context === "manual"
       ? "Add the employee's Lark or email details to notify them in Lark."
       : "Work saved. Add the employee's Lark or email details to notify them in Lark.";
@@ -3578,6 +3589,14 @@ function workAssignmentNotificationMessage(workLarkSummary, workEmailSummary) {
 
   if (workLarkSummary?.sent && workEmailSummary?.skipped) {
     return larkMessage;
+  }
+
+  if (workEmailSummary?.sent && workLarkSummary?.failed) {
+    return `${emailMessage} Lark bot notification could not send: ${workLarkSummary.errors[0] || "unknown error"}`;
+  }
+
+  if (workEmailSummary?.sent && workLarkSummary?.skipped) {
+    return emailMessage;
   }
 
   return [larkMessage, emailMessage].filter(Boolean).join(" ");
@@ -3646,6 +3665,14 @@ function workInviteMessage(summary) {
     return `Work saved, but the invite email could not send: ${summary.errors[0] || "unknown error"}`;
   }
   if (summary.skipped) {
+    const missing = summary.missing || [];
+    if (missing.includes("RESEND_API_KEY")) {
+      return "Work saved. Email invite could not send because RESEND_API_KEY is missing in Render.";
+    }
+    if (missing.includes("WORK_INVITE_EMAIL_ENABLED")) {
+      return "Work saved. Email invite sending is turned off.";
+    }
+
     return `Work saved. Add the employee's email details to send work invite emails from ${workInviteEmailConfig.from}.`;
   }
   return "";
@@ -5127,12 +5154,16 @@ async function handleApi(req, res, url) {
       return;
     }
 
+    const workInvite = await sendWorkInviteEmails(workState, [assignment]);
     const workLarkNotification = await sendWorkLarkNotifications(workState, [assignment]);
+    const workNotificationMessage = workAssignmentNotificationMessage(workLarkNotification, workInvite);
     await saveWorkState(workState);
     sendJson(res, 200, {
       ...visibleWorkStateForUser(workState, currentUser(req)),
+      workInvite,
       workLarkNotification,
       workLarkNotificationMessage: workLarkNotificationMessage(workLarkNotification, "manual"),
+      workInviteMessage: workNotificationMessage,
       user: currentUser(req)
     });
     return;
