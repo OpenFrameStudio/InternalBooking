@@ -175,7 +175,7 @@ let tenantTokenCache = null;
 const sessions = new Map();
 const sessionCookieName = "internalbooking_session";
 const sessionCookieVersion = "v1";
-const sessionMaxAgeSeconds = 7 * 24 * 60 * 60;
+const sessionMaxAgeSeconds = 30 * 24 * 60 * 60;
 const addressSuggestionCache = new Map();
 let lastAddressLookupAt = 0;
 
@@ -4981,7 +4981,8 @@ async function cancelBookingInLark(booking) {
 async function handleApi(req, res, url) {
   if (req.method === "GET" && url.pathname === "/api/session") {
     const user = currentUser(req);
-    sendJson(res, 200, { authenticated: Boolean(user), user });
+    const headers = user ? { "Set-Cookie": buildSessionCookie(req, createSession(user)) } : {};
+    sendJson(res, 200, { authenticated: Boolean(user), user }, headers);
     return;
   }
 
@@ -6353,6 +6354,7 @@ const server = http.createServer(async (req, res) => {
       "/icons/icon-512.png",
       "/install.js",
       "/openframe-logo.png",
+      "/session-keepalive.js",
       "/service-worker.js",
       "/site.webmanifest",
       "/styles.css"
