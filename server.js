@@ -161,12 +161,20 @@ const workDeskOrigins = new Set(
     .map((origin) => origin.trim())
     .filter(Boolean)
 );
+const sessionSigningSecret = process.env.SESSION_SECRET
+  || process.env.AUTH_SECRET
+  || process.env.SUPABASE_SERVICE_ROLE_KEY
+  || larkConfig.appSecret
+  || resendConfig.apiKey
+  || invoiceEmailConfig.pass
+  || authConfig.password;
 const larkMessageReceiveIdTypes = new Set(["open_id", "user_id", "union_id", "email", "chat_id"]);
 const larkInvalidReceiveIdCode = 230034;
 
 let tenantTokenCache = null;
 const sessions = new Map();
 const sessionCookieName = "internalbooking_session";
+const sessionCookieVersion = "v1";
 const sessionMaxAgeSeconds = 7 * 24 * 60 * 60;
 const addressSuggestionCache = new Map();
 let lastAddressLookupAt = 0;
@@ -381,6 +389,19 @@ function cleanupExpiredSessions() {
   }
 }
 
+function signSessionMessage(message) {
+  return crypto
+    .createHmac("sha256", sessionSigningSecret)
+    .update(message)
+    .digest("base64url");
+}
+
+function safeEqualsString(left, right) {
+  const leftBuffer = Buffer.from(String(left || ""));
+  const rightBuffer = Buffer.from(String(right || ""));
+  return leftBuffer.length === rightBuffer.length && crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
 function sessionUserPayload(user) {
   return {
     username: user.username,
@@ -393,18 +414,61 @@ function sessionUserPayload(user) {
   };
 }
 
-function createSession(user) {
-  cleanupExpiredSessions();
-  const token = crypto.randomBytes(32).toString("base64url");
-  sessions.set(token, {
-    expiresAt: Date.now() + sessionMaxAgeSeconds * 1000,
+function createSignedSessionToken(user) {
+  const payload = {
+    exp: Date.now() + sessionMaxAgeSeconds * 1000,
+    username: user.username
+  };
+  const encodedPayload = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const message = `${sessionCookieVersion}.${encodedPayload}`;
+  return `${message}.${signSessionMessage(message)}`;
+}
+
+function readSignedSession(token) {
+  const [version, encodedPayload, signature, extra] = String(token || "").split(".");
+  if (extra || version !== sessionCookieVersion || !encodedPayload || !signature) {
+    return null;
+  }
+
+  const message = `${version}.${encodedPayload}`;
+  if (!safeEqualsString(signature, signSessionMessage(message))) {
+    return null;
+  }
+
+  let payload = null;
+  try {
+    payload = JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8"));
+  } catch {
+    return null;
+  }
+
+  if (!payload?.username || !Number.isFinite(Number(payload.exp)) || Number(payload.exp) <= Date.now()) {
+    return null;
+  }
+
+  const user = baseAuthUser(payload.username);
+  if (!user) {
+    return null;
+  }
+
+  return {
+    expiresAt: Number(payload.exp),
     user: sessionUserPayload(user)
-  });
-  return token;
+  };
+}
+
+function createSession(user) {
+  return createSignedSessionToken(user);
 }
 
 function currentSession(req) {
   const token = getSessionToken(req);
+  const signedSession = readSignedSession(token);
+  if (signedSession) {
+    return signedSession;
+  }
+
+  cleanupExpiredSessions();
   const session = sessions.get(token);
   if (!session) {
     return null;
