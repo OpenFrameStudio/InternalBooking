@@ -2304,6 +2304,8 @@ function editClient(id) {
   el.directoryClientPostcode.value = client.postcode || '';
   el.directoryClientAbn.value = client.abn || '';
   setMessage(el.clientMessage, 'Editing saved client.');
+  el.clientForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  el.directoryClientName.focus({ preventScroll: true });
 }
 
 function editPhotographer(id) {
@@ -2315,6 +2317,8 @@ function editPhotographer(id) {
   el.directoryPhotographerPhone.value = photographer.phone || '';
   el.directoryPhotographerGstIncluded.checked = isTruthy(photographer.gstIncluded);
   setMessage(el.photographerMessage, 'Editing saved photographer.');
+  el.photographerForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  el.directoryPhotographerName.focus({ preventScroll: true });
 }
 
 async function deleteClient(id) {
