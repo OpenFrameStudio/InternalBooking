@@ -117,6 +117,13 @@ const el = {
   invoiceNumberMessage: $('#invoiceNumberMessage'),
   cancelInvoiceNumberButton: $('#cancelInvoiceNumberButton'),
   saveInvoiceNumberButton: $('#saveInvoiceNumberButton'),
+  invoicePriceDialog: $('#invoicePriceDialog'),
+  invoicePriceForm: $('#invoicePriceForm'),
+  invoicePriceList: $('#invoicePriceList'),
+  invoicePriceTotalPreview: $('#invoicePriceTotalPreview'),
+  invoicePriceMessage: $('#invoicePriceMessage'),
+  cancelInvoicePriceButton: $('#cancelInvoicePriceButton'),
+  saveInvoicePriceButton: $('#saveInvoicePriceButton'),
   newClientButton: $('#newClientButton'),
   newPhotographerButton: $('#newPhotographerButton'),
   larkPreview: $('#larkPreview'),
@@ -160,6 +167,7 @@ const state = {
   },
   editingBookingId: '',
   editingInvoiceNumberId: '',
+  editingInvoicePriceId: '',
   restoringDraft: false,
   syncedClientEmail: [],
   syncedPhotographerEmail: [],
@@ -1526,6 +1534,10 @@ function renderInvoices() {
 
     item.querySelector('.print-invoice-button').addEventListener('click', () => printInvoice(invoice.id));
     item.querySelector('.edit-invoice-number-button').addEventListener('click', () => openInvoiceNumberDialog(invoice.id));
+    const editPricesButton = item.querySelector('.edit-invoice-prices-button');
+    editPricesButton.disabled = invoice.status === 'void';
+    editPricesButton.title = invoice.status === 'void' ? 'Voided invoices cannot be edited.' : 'Change this invoice item pricing.';
+    editPricesButton.addEventListener('click', () => openInvoicePriceDialog(invoice.id));
     const editButton = item.querySelector('.edit-invoice-button');
     const sourceBooking = state.bookings.find((booking) => booking.id === invoice.bookingId);
     const canEditSourceBooking = Boolean(invoice.bookingId) && invoice.status !== 'void' && (!sourceBooking || sourceBooking.status !== 'cancelled');
@@ -1723,6 +1735,153 @@ async function saveInvoiceNumber(event) {
   } finally {
     el.saveInvoiceNumberButton.disabled = false;
     el.saveInvoiceNumberButton.textContent = 'Save number';
+  }
+}
+
+function editableInvoiceItems(invoice) {
+  const items = Array.isArray(invoice?.items) ? invoice.items : [];
+  if (items.length) return items;
+
+  const subtotal = Number(invoice?.subtotal || 0);
+  return [{
+    name: 'Service',
+    unitPrice: Number.isFinite(subtotal) && subtotal > 0 ? subtotal : 0
+  }];
+}
+
+function invoicePriceRows() {
+  return [...el.invoicePriceList.querySelectorAll('.invoice-price-row')];
+}
+
+function readInvoicePriceItems() {
+  return invoicePriceRows().map((row) => {
+    const input = row.querySelector('input');
+    return {
+      name: row.dataset.invoiceItemName || 'Service',
+      quantity: 1,
+      unitPrice: Number(input?.value || 0)
+    };
+  });
+}
+
+function updateInvoicePriceTotalPreview() {
+  const subtotal = readInvoicePriceItems().reduce((sum, item) => {
+    return sum + (Number.isFinite(item.unitPrice) ? item.unitPrice : 0);
+  }, 0);
+  const gst = subtotal * 0.1;
+  const total = subtotal + gst;
+  el.invoicePriceTotalPreview.textContent = `${formatMoney(total)} incl. GST (${formatMoney(gst)} GST)`;
+}
+
+function addInvoicePriceRow(item, index) {
+  const row = document.createElement('label');
+  row.className = 'invoice-price-row';
+  row.dataset.invoiceItemName = item.name || `Item ${index + 1}`;
+
+  const label = document.createElement('span');
+  label.className = 'invoice-price-label';
+  label.textContent = row.dataset.invoiceItemName;
+
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.min = '0';
+  input.step = '0.01';
+  input.inputMode = 'decimal';
+  input.required = true;
+  const price = Number(item.unitPrice ?? item.amount ?? 0);
+  input.value = Number.isFinite(price) ? price.toFixed(2) : '0.00';
+  input.setAttribute('aria-label', `${row.dataset.invoiceItemName} price`);
+  input.addEventListener('input', updateInvoicePriceTotalPreview);
+
+  row.append(label, input);
+  el.invoicePriceList.append(row);
+}
+
+function openInvoicePriceDialog(id) {
+  const invoice = state.invoices.find((item) => item.id === id);
+  if (!invoice) {
+    setMessage(el.invoiceMessage, 'Invoice not found.', 'error');
+    return;
+  }
+
+  if (invoice.status === 'void') {
+    setMessage(el.invoiceMessage, 'Voided invoices cannot be edited.', 'error');
+    return;
+  }
+
+  state.editingInvoicePriceId = id;
+  el.invoicePriceForm.reset();
+  el.invoicePriceList.innerHTML = '';
+  editableInvoiceItems(invoice).forEach(addInvoicePriceRow);
+  setMessage(el.invoicePriceMessage, '');
+  el.saveInvoicePriceButton.disabled = false;
+  updateInvoicePriceTotalPreview();
+
+  if (typeof el.invoicePriceDialog.showModal === 'function') {
+    el.invoicePriceDialog.showModal();
+  } else {
+    el.invoicePriceDialog.setAttribute('open', '');
+  }
+
+  requestAnimationFrame(() => {
+    const firstInput = el.invoicePriceList.querySelector('input');
+    firstInput?.focus();
+    firstInput?.select();
+  });
+}
+
+function closeInvoicePriceDialog() {
+  state.editingInvoicePriceId = '';
+  el.invoicePriceForm.reset();
+  el.invoicePriceList.innerHTML = '';
+  setMessage(el.invoicePriceMessage, '');
+
+  if (typeof el.invoicePriceDialog.close === 'function' && el.invoicePriceDialog.open) {
+    el.invoicePriceDialog.close();
+  } else {
+    el.invoicePriceDialog.removeAttribute('open');
+  }
+}
+
+async function saveInvoicePrices(event) {
+  event.preventDefault();
+  const id = state.editingInvoicePriceId;
+  if (!id) return;
+
+  const items = readInvoicePriceItems();
+  if (!items.length) {
+    setMessage(el.invoicePriceMessage, 'Add at least one invoice item.', 'error');
+    return;
+  }
+
+  if (items.some((item) => !Number.isFinite(item.unitPrice) || item.unitPrice < 0)) {
+    setMessage(el.invoicePriceMessage, 'Enter a valid price for every item.', 'error');
+    return;
+  }
+
+  el.saveInvoicePriceButton.disabled = true;
+  el.saveInvoicePriceButton.textContent = 'Saving';
+  try {
+    const { response, data } = await fetchJson(`/api/invoices/${encodeURIComponent(id)}/items`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items })
+    });
+    if (!response.ok) {
+      setMessage(el.invoicePriceMessage, (data.errors || ['Could not save invoice prices.']).join(' '), 'error');
+      return;
+    }
+
+    state.invoices = data.invoices || state.invoices.map((invoice) => invoice.id === id ? data.invoice : invoice);
+    cacheInvoices();
+    renderInvoices();
+    closeInvoicePriceDialog();
+    setMessage(el.invoiceMessage, `${data.invoice?.invoiceNumber || 'Invoice'} prices updated.`, 'success');
+  } catch {
+    setMessage(el.invoicePriceMessage, 'Could not reach the invoice app.', 'error');
+  } finally {
+    el.saveInvoicePriceButton.disabled = false;
+    el.saveInvoicePriceButton.textContent = 'Save prices';
   }
 }
 
@@ -2653,6 +2812,11 @@ el.invoiceNumberForm.addEventListener('submit', saveInvoiceNumber);
 el.cancelInvoiceNumberButton.addEventListener('click', closeInvoiceNumberDialog);
 el.invoiceNumberDialog.addEventListener('click', (event) => {
   if (event.target === el.invoiceNumberDialog) closeInvoiceNumberDialog();
+});
+el.invoicePriceForm.addEventListener('submit', saveInvoicePrices);
+el.cancelInvoicePriceButton.addEventListener('click', closeInvoicePriceDialog);
+el.invoicePriceDialog.addEventListener('click', (event) => {
+  if (event.target === el.invoicePriceDialog) closeInvoicePriceDialog();
 });
 el.manualInvoiceForm.addEventListener('submit', createManualInvoice);
 el.cancelManualInvoiceButton.addEventListener('click', closeManualInvoiceDialog);

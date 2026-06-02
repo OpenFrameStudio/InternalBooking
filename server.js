@@ -1184,6 +1184,16 @@ function calculateGst(subtotal) {
   return normalizeMoney(subtotal * invoiceGstRate);
 }
 
+function calculateInvoiceTotals(items) {
+  const subtotal = normalizeMoney(items.reduce((sum, item) => sum + normalizeMoney(item.amount), 0));
+  const gstAmount = calculateGst(subtotal);
+  return {
+    subtotal,
+    gstAmount,
+    total: normalizeMoney(subtotal + gstAmount)
+  };
+}
+
 function normalizeInvoice(invoice) {
   const items = Array.isArray(invoice?.items)
     ? invoice.items.map((item) => ({
@@ -1230,6 +1240,7 @@ function normalizeInvoice(invoice) {
     sentTo: uniqueEmails(Array.isArray(invoice?.sentTo) ? invoice.sentTo : parseGuestEmails(invoice?.sentTo || "")),
     notes: String(invoice?.notes || ""),
     importedAt: invoice?.importedAt || "",
+    pricesEditedAt: invoice?.pricesEditedAt || "",
     createdAt: invoice?.createdAt || new Date().toISOString(),
     updatedAt: invoice?.updatedAt || invoice?.createdAt || new Date().toISOString()
   };
@@ -1266,6 +1277,32 @@ function bookingInvoiceItems(booking) {
   });
 }
 
+function invoiceItemPriceKey(item) {
+  return String(item?.name || "").trim().toLowerCase();
+}
+
+function mergeBookingInvoiceItemsWithExistingPrices(nextItems, existingItems) {
+  const existingByName = new Map(
+    (Array.isArray(existingItems) ? existingItems : [])
+      .filter((item) => invoiceItemPriceKey(item))
+      .map((item) => [invoiceItemPriceKey(item), item])
+  );
+
+  return nextItems.map((item) => {
+    const existing = existingByName.get(invoiceItemPriceKey(item));
+    if (!existing) return item;
+
+    const quantity = Math.max(1, Number(item.quantity || existing.quantity || 1));
+    const unitPrice = normalizeMoney(existing.unitPrice ?? existing.amount);
+    return {
+      ...item,
+      quantity,
+      unitPrice,
+      amount: normalizeMoney(quantity * unitPrice)
+    };
+  });
+}
+
 function normalizeManualInvoiceItem(item) {
   const name = String(item?.name || "").trim();
   const quantity = Math.max(1, Number(item?.quantity || 1));
@@ -1275,6 +1312,30 @@ function normalizeManualInvoiceItem(item) {
     quantity,
     unitPrice,
     amount: normalizeMoney(quantity * unitPrice)
+  };
+}
+
+function validateEditableInvoiceItems(input) {
+  const errors = [];
+  const items = (Array.isArray(input?.items) ? input.items : [])
+    .map(normalizeManualInvoiceItem)
+    .filter((item) => item.name || item.amount > 0);
+
+  if (!items.length) {
+    errors.push("Add at least one invoice item.");
+  }
+
+  for (const item of items) {
+    if (!item.name) errors.push("Enter a name for each invoice item.");
+    if (item.name.length > 80) errors.push(`${item.name} is too long.`);
+    if (item.unitPrice < 0 || item.amount < 0) errors.push(`${item.name || "Invoice item"} cannot be below $0.`);
+    if (item.amount > 100000) errors.push(`${item.name || "Invoice item"} is too high.`);
+  }
+
+  return {
+    errors,
+    items,
+    ...calculateInvoiceTotals(items)
   };
 }
 
@@ -1317,8 +1378,7 @@ function validateManualInvoice(input, invoices) {
   const issuedAt = Number.isNaN(issuedDate.getTime()) ? new Date() : issuedDate;
   const dueDate = input?.dueAt ? new Date(input.dueAt) : addDays(issuedAt, 7);
   const dueAt = Number.isNaN(dueDate.getTime()) ? addDays(issuedAt, 7) : dueDate;
-  const subtotal = normalizeMoney(items.reduce((sum, item) => sum + item.amount, 0));
-  const gstAmount = calculateGst(subtotal);
+  const { subtotal, gstAmount, total } = calculateInvoiceTotals(items);
   const status = normalizeInvoiceStatus(input?.status);
   const now = new Date().toISOString();
 
@@ -1338,7 +1398,7 @@ function validateManualInvoice(input, invoices) {
       gstRate: invoiceGstRate,
       gstAmount,
       gstIncluded: true,
-      total: normalizeMoney(subtotal + gstAmount),
+      total,
       currency: invoiceCurrency,
       status,
       issuedAt: issuedAt.toISOString(),
@@ -1616,9 +1676,9 @@ function invoiceFromBooking(booking, invoices, existing = null) {
   const now = new Date().toISOString();
   const isPaid = existing?.status === "paid";
   const existingItems = Array.isArray(existing?.items) ? existing.items : [];
-  const items = isPaid ? existingItems : bookingInvoiceItems(booking);
-  const subtotal = normalizeMoney(items.reduce((sum, item) => sum + item.amount, 0));
-  const gstAmount = calculateGst(subtotal);
+  const bookingItems = bookingInvoiceItems(booking);
+  const items = isPaid ? existingItems : mergeBookingInvoiceItemsWithExistingPrices(bookingItems, existingItems);
+  const { subtotal, gstAmount, total } = calculateInvoiceTotals(items);
   const status = booking.status === "cancelled"
     ? (isPaid ? "paid" : "void")
     : (isPaid ? "paid" : "draft");
@@ -1640,7 +1700,7 @@ function invoiceFromBooking(booking, invoices, existing = null) {
     subtotal,
     gstRate: invoiceGstRate,
     gstAmount,
-    total: normalizeMoney(subtotal + gstAmount),
+    total,
     currency: invoiceCurrency,
     status,
     issuedAt: existing?.issuedAt || now,
@@ -1648,6 +1708,7 @@ function invoiceFromBooking(booking, invoices, existing = null) {
     paidAt: existing?.paidAt || "",
     voidedAt: status === "void" ? (existing?.voidedAt || now) : "",
     notes: "Generated from internal booking.",
+    pricesEditedAt: existing?.pricesEditedAt || "",
     createdAt: existing?.createdAt || now,
     updatedAt: now
   });
@@ -5449,6 +5510,48 @@ async function handleApi(req, res, url) {
     const result = importInvoices(invoices, importedRecords);
     await saveInvoices(invoices);
     sendJson(res, 200, { invoices, ...result, total: invoices.length });
+    return;
+  }
+
+  const invoiceItemsMatch = url.pathname.match(/^\/api\/invoices\/([^/]+)\/items$/);
+  if ((req.method === "PATCH" || req.method === "PUT") && invoiceItemsMatch) {
+    if (!hasPermission(req, "manage_invoices")) {
+      sendForbidden(res, "Boss or team leader only.");
+      return;
+    }
+
+    const invoiceId = decodeURIComponent(invoiceItemsMatch[1]);
+    const input = await readBody(req);
+    const { errors, items, subtotal, gstAmount, total } = validateEditableInvoiceItems(input);
+    if (errors.length) {
+      sendJson(res, 400, { errors });
+      return;
+    }
+
+    const invoices = await loadInvoices();
+    const invoice = invoices.find((item) => item.id === invoiceId);
+    if (!invoice) {
+      sendJson(res, 404, { errors: ["Invoice not found."] });
+      return;
+    }
+
+    if (invoice.status === "void") {
+      sendJson(res, 400, { errors: ["Voided invoices cannot be edited."] });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    invoice.items = items;
+    invoice.subtotal = subtotal;
+    invoice.gstRate = invoiceGstRate;
+    invoice.gstAmount = gstAmount;
+    invoice.gstIncluded = true;
+    invoice.total = total;
+    invoice.pricesEditedAt = now;
+    invoice.updatedAt = now;
+    await saveInvoices(invoices);
+    invoices.sort((a, b) => new Date(b.issuedAt) - new Date(a.issuedAt));
+    sendJson(res, 200, { invoice: normalizeInvoice(invoice), invoices });
     return;
   }
 

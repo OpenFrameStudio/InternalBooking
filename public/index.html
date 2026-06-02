@@ -601,6 +601,29 @@
       </form>
     </dialog>
 
+    <dialog id="invoicePriceDialog" aria-labelledby="invoicePriceDialogTitle">
+      <form class="dialog-card password-form" id="invoicePriceForm">
+        <div class="dialog-heading">
+          <div>
+            <p class="eyebrow">Invoice</p>
+            <h2 id="invoicePriceDialogTitle">Edit prices</h2>
+          </div>
+        </div>
+
+        <div class="invoice-price-list" id="invoicePriceList"></div>
+        <p class="invoice-preview-total" id="invoicePriceTotalPreview">$0.00 incl. GST</p>
+        <p class="form-error" id="invoicePriceMessage" role="status"></p>
+
+        <div class="dialog-actions">
+          <span></span>
+          <div>
+            <button class="ghost-button" id="cancelInvoicePriceButton" type="button">Cancel</button>
+            <button class="primary-button" id="saveInvoicePriceButton" type="submit">Save prices</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
     <dialog id="manualInvoiceDialog" aria-labelledby="manualInvoiceDialogTitle">
       <form class="dialog-card password-form" id="manualInvoiceForm">
         <div class="dialog-heading">
@@ -755,6 +778,7 @@
           <button class="ghost-button print-invoice-button" type="button">Download PDF</button>
           <button class="ghost-button edit-invoice-button" type="button">Edit</button>
           <button class="ghost-button edit-invoice-number-button" type="button">Edit number</button>
+          <button class="ghost-button edit-invoice-prices-button" type="button">Edit prices</button>
           <button class="ghost-button send-invoice-button" type="button">Send invoice</button>
           <button class="ghost-button paid-invoice-button" type="button">Mark paid</button>
           <button class="ghost-button danger-button delete-invoice-button" type="button">Delete</button>
@@ -790,6 +814,6 @@
 
     <section class="invoice-print-sheet" id="invoicePrintSheet" hidden aria-label="Printable invoice"></section>
 
-    <script src="/app.js?v=edit-scroll-top" type="module"></script>
+    <script src="/app.js?v=invoice-price-editor" type="module"></script>
   </body>
 </html>

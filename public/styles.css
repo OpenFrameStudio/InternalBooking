@@ -1285,6 +1285,35 @@ button:focus-visible {
   font-weight: 900;
 }
 
+.invoice-price-list {
+  display: grid;
+  gap: 10px;
+}
+
+.invoice-price-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(130px, 0.35fr);
+  gap: 12px;
+  align-items: end;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  padding: 12px;
+}
+
+.invoice-price-label {
+  min-width: 0;
+  color: var(--ink);
+  font-size: 0.96rem;
+  font-weight: 900;
+  overflow-wrap: anywhere;
+}
+
+.invoice-price-row input {
+  min-height: 44px;
+  text-align: right;
+}
+
 .invoice-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1937,6 +1966,7 @@ dialog::backdrop {
 
   .form-row,
   .form-row.two,
+  .invoice-price-row,
   .service-picker {
     grid-template-columns: 1fr;
   }
