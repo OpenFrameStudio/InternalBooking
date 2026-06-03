@@ -1963,7 +1963,67 @@ function drawPdfCell(doc, text, x, y, width, height, options = {}) {
   });
 }
 
-function drawInvoicePdf(doc, invoice) {
+function normalizeBillingMatchValue(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function invoiceBillingClientScore(invoice, client) {
+  let score = 0;
+  const invoiceClientName = normalizeBillingMatchValue(invoice.clientName);
+  const clientName = normalizeBillingMatchValue(client.name);
+  const invoiceAgentName = normalizeBillingMatchValue(invoice.agentName);
+  const clientAgentName = normalizeBillingMatchValue(client.agentName);
+  const invoiceAgentPhone = normalizeBillingMatchValue(invoice.agentPhone).replace(/\D/g, "");
+  const clientAgentPhone = normalizeBillingMatchValue(client.agentPhone).replace(/\D/g, "");
+  const invoiceEmails = new Set(parseGuestEmails(invoice.clientEmail || "").map(normalizeBillingMatchValue));
+  const clientEmails = parseGuestEmails(client.email || "").map(normalizeBillingMatchValue);
+
+  if (invoiceClientName && clientName && invoiceClientName === clientName) score += 6;
+  if (invoiceClientName && clientName && (invoiceClientName.includes(clientName) || clientName.includes(invoiceClientName))) score += 3;
+  if (invoiceAgentName && clientAgentName && invoiceAgentName === clientAgentName) score += 3;
+  if (invoiceAgentPhone && clientAgentPhone && invoiceAgentPhone === clientAgentPhone) score += 3;
+  if (clientEmails.some((email) => invoiceEmails.has(email))) score += 4;
+  return score;
+}
+
+async function findInvoiceBillingClient(invoice) {
+  try {
+    const clients = await loadClients();
+    return clients
+      .map((client) => ({ client, score: invoiceBillingClientScore(invoice, client) }))
+      .filter((item) => item.score > 0)
+      .sort((a, b) => b.score - a.score)[0]?.client || null;
+  } catch {
+    return null;
+  }
+}
+
+function invoiceBillingLines(invoice, client = null) {
+  const cityLine = [client?.city, client?.postcode].filter(Boolean).join(" ");
+  const clientAddressLines = [client?.addressLine1, client?.addressLine2, cityLine].filter(Boolean);
+  const invoiceAddressLines = String(invoice.billingAddress || "")
+    .split(/\r?\n|,\s*/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const billingName = String(invoice.billingName || client?.name || invoice.clientName || "").trim();
+  const billingEmail = String(client?.email || invoice.clientEmail || "").trim();
+  const billingAbn = String(client?.abn || invoice.clientAbn || invoice.abn || "").trim();
+  const agentLine = invoice.agentName || invoice.agentPhone
+    ? `Agent: ${formatContact(invoice.agentName, invoice.agentPhone)}`
+    : "";
+
+  const lines = [
+    billingName,
+    ...(clientAddressLines.length ? clientAddressLines : invoiceAddressLines),
+    billingAbn ? `ABN: ${billingAbn}` : "",
+    billingEmail ? `Email: ${billingEmail}` : "",
+    agentLine
+  ].filter(Boolean);
+
+  return lines.length ? lines : [invoice.propertyAddress || "Client"];
+}
+
+function drawInvoicePdf(doc, invoice, billingClient = null) {
   const pageWidth = doc.page.width;
   const margin = 52;
   const logoPath = path.join(publicDir, "openframe-logo.png");
@@ -1997,7 +2057,7 @@ function drawInvoicePdf(doc, invoice) {
 
   const billingX = 324;
   doc.font("Helvetica-Bold").fontSize(13).text("BILLING TO", billingX, 242);
-  doc.font("Helvetica").fontSize(10.5).text(invoice.propertyAddress || invoice.clientName || "Client", billingX, 269, {
+  doc.font("Helvetica").fontSize(10.5).text(invoiceBillingLines(invoice, billingClient).join("\n"), billingX, 269, {
     width: pageWidth - margin - billingX,
     height: 82,
     ellipsis: true
@@ -2095,7 +2155,8 @@ async function createInvoicePdfBuffer(invoice) {
     doc.on("error", reject);
   });
 
-  drawInvoicePdf(doc, invoice);
+  const billingClient = await findInvoiceBillingClient(invoice);
+  drawInvoicePdf(doc, invoice, billingClient);
   doc.end();
   return finished;
 }
