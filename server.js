@@ -24,6 +24,7 @@ const invoicesFile = path.join(dataDir, "invoices.json");
 const wagesFile = path.join(dataDir, "wages.json");
 const employeeWagesFile = path.join(dataDir, "employee-wages.json");
 const usersFile = path.join(dataDir, "users.json");
+const sendLogsFile = path.join(dataDir, "send-logs.json");
 const seedFiles = {
   bookings: path.join(bundledDataDir, "bookings.json"),
   clients: path.join(bundledDataDir, "clients.json"),
@@ -32,7 +33,8 @@ const seedFiles = {
   invoices: path.join(bundledDataDir, "invoices.json"),
   wages: path.join(bundledDataDir, "wages.json"),
   employeeWages: path.join(bundledDataDir, "employee-wages.json"),
-  users: path.join(bundledDataDir, "users.json")
+  users: path.join(bundledDataDir, "users.json"),
+  sendLogs: path.join(bundledDataDir, "send-logs.json")
 };
 const supabaseStorage = {
   url: (process.env.SUPABASE_URL || process.env.SUPABASE_PROJECT_URL || "").replace(/\/$/, ""),
@@ -328,6 +330,12 @@ const dataFiles = {
     file: usersFile,
     seedFile: seedFiles.users,
     supabaseKey: "users",
+    fallback: []
+  },
+  sendLogs: {
+    file: sendLogsFile,
+    seedFile: seedFiles.sendLogs,
+    supabaseKey: "send_logs",
     fallback: []
   }
 };
@@ -733,6 +741,77 @@ async function loadEmployeeWages() {
 
 async function saveEmployeeWages(employeeWages) {
   await writeStoredJson(dataFiles.employeeWages, normalizeEmployeeWages(employeeWages));
+}
+
+function normalizeSendLog(log = {}) {
+  const type = ["invoice", "wage", "calendar_invite", "work_notification", "work_email"].includes(log.type)
+    ? log.type
+    : "send";
+  const status = ["success", "failed", "skipped"].includes(log.status) ? log.status : "failed";
+  const recipients = Array.isArray(log.recipients)
+    ? uniqueEmails(log.recipients.map((email) => String(email || "").trim()).filter(Boolean))
+    : uniqueEmails(parseGuestEmails(log.recipients || ""));
+
+  return {
+    id: String(log.id || crypto.randomUUID()),
+    type,
+    status,
+    title: String(log.title || "").trim().slice(0, 160),
+    detail: String(log.detail || "").trim().slice(0, 240),
+    provider: String(log.provider || "").trim().slice(0, 80),
+    from: String(log.from || "").trim().slice(0, 160),
+    recipients,
+    relatedId: String(log.relatedId || "").trim().slice(0, 120),
+    relatedNumber: String(log.relatedNumber || "").trim().slice(0, 80),
+    error: String(log.error || "").trim().slice(0, 700),
+    createdAt: log.createdAt || new Date().toISOString()
+  };
+}
+
+function normalizeSendLogs(logs) {
+  return Array.isArray(logs)
+    ? logs.map(normalizeSendLog).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 200)
+    : [];
+}
+
+async function loadSendLogs() {
+  return normalizeSendLogs(await readStoredJson(dataFiles.sendLogs));
+}
+
+async function saveSendLogs(logs) {
+  await writeStoredJson(dataFiles.sendLogs, normalizeSendLogs(logs));
+}
+
+async function appendSendLogs(inputs) {
+  try {
+    const nextLogs = (Array.isArray(inputs) ? inputs : [inputs])
+      .filter(Boolean)
+      .map((input) => normalizeSendLog({
+        ...input,
+        id: input?.id || crypto.randomUUID(),
+        createdAt: input?.createdAt || new Date().toISOString()
+      }));
+
+    if (!nextLogs.length) {
+      return [];
+    }
+
+    const logs = await loadSendLogs();
+    await saveSendLogs([...nextLogs, ...logs]);
+    return nextLogs;
+  } catch (error) {
+    console.warn("Could not save send log:", error.message || error);
+    return [];
+  }
+}
+
+async function appendSendLog(input) {
+  const [log] = await appendSendLogs([input]);
+  return log || null;
+}
+
+function canViewSendLogs(req) {
+  return ["manage_invoices", "manage_wages", "manage_bookings", "manage_work"].some((permission) => hasPermission(req, permission));
 }
 
 function normalizeWorkEmployee(employee = {}, fallback = {}) {
@@ -3654,6 +3733,7 @@ async function sendWorkInviteEmail(assignment, workState) {
 }
 
 async function sendWorkLarkNotifications(workState, assignments) {
+  const sendLogs = [];
   const summary = {
     attempted: assignments.length,
     sent: 0,
@@ -3677,6 +3757,15 @@ async function sendWorkLarkNotifications(workState, assignments) {
         assignment.larkNotifySentAt = now;
         assignment.larkNotifyTo = recipient;
         assignment.larkNotifyError = "";
+        sendLogs.push({
+          type: "work_notification",
+          status: "success",
+          title: `Work notification: ${assignment.title}`,
+          detail: workEmployeeForAssignment(workState, assignment).name,
+          provider: "lark",
+          recipients: [recipient],
+          relatedId: assignment.id
+        });
       } else {
         summary.skipped += 1;
         summary.missing = [...new Set([...summary.missing, ...(result.missing || [])])];
@@ -3684,6 +3773,15 @@ async function sendWorkLarkNotifications(workState, assignments) {
         assignment.larkNotifyError = result.missing?.length
           ? `Missing ${result.missing.join(", ")}`
           : "Lark work notifications are not configured.";
+        sendLogs.push({
+          type: "work_notification",
+          status: "skipped",
+          title: `Work notification: ${assignment.title}`,
+          detail: workEmployeeForAssignment(workState, assignment).name,
+          provider: "lark",
+          relatedId: assignment.id,
+          error: assignment.larkNotifyError
+        });
       }
     } catch (error) {
       summary.failed += 1;
@@ -3691,13 +3789,25 @@ async function sendWorkLarkNotifications(workState, assignments) {
       summary.errors.push(message);
       assignment.larkNotifyStatus = "failed";
       assignment.larkNotifyError = message;
+      sendLogs.push({
+        type: "work_notification",
+        status: "failed",
+        title: `Work notification: ${assignment.title}`,
+        detail: workEmployeeForAssignment(workState, assignment).name,
+        provider: "lark",
+        recipients: [workEmployeeForAssignment(workState, assignment).larkReceiveId].filter(Boolean),
+        relatedId: assignment.id,
+        error: message
+      });
     }
   }
 
+  await appendSendLogs(sendLogs);
   return summary;
 }
 
 async function sendWorkInviteEmails(workState, assignments) {
+  const sendLogs = [];
   const summary = {
     attempted: assignments.length,
     sent: 0,
@@ -3721,6 +3831,16 @@ async function sendWorkInviteEmails(workState, assignments) {
         assignment.inviteTo = result.recipients.join(", ");
         assignment.inviteEmailFrom = workInviteEmailConfig.from;
         assignment.inviteError = "";
+        sendLogs.push({
+          type: "work_email",
+          status: "success",
+          title: `Work email: ${assignment.title}`,
+          detail: workEmployeeForAssignment(workState, assignment).name,
+          provider: "resend",
+          from: workInviteEmailConfig.from,
+          recipients: result.recipients,
+          relatedId: assignment.id
+        });
       } else {
         summary.skipped += 1;
         summary.missing = uniqueEmails([...summary.missing, ...(result.missing || [])]);
@@ -3729,6 +3849,16 @@ async function sendWorkInviteEmails(workState, assignments) {
         assignment.inviteError = result.missing?.length
           ? `Missing ${result.missing.join(", ")}`
           : "Work invite email is not configured.";
+        sendLogs.push({
+          type: "work_email",
+          status: "skipped",
+          title: `Work email: ${assignment.title}`,
+          detail: workEmployeeForAssignment(workState, assignment).name,
+          provider: "resend",
+          from: workInviteEmailConfig.from,
+          relatedId: assignment.id,
+          error: assignment.inviteError
+        });
       }
     } catch (error) {
       summary.failed += 1;
@@ -3737,9 +3867,21 @@ async function sendWorkInviteEmails(workState, assignments) {
       assignment.inviteStatus = "failed";
       assignment.inviteEmailFrom = workInviteEmailConfig.from;
       assignment.inviteError = message;
+      sendLogs.push({
+        type: "work_email",
+        status: "failed",
+        title: `Work email: ${assignment.title}`,
+        detail: workEmployeeForAssignment(workState, assignment).name,
+        provider: "resend",
+        from: workInviteEmailConfig.from,
+        recipients: workInviteRecipients(workState, assignment),
+        relatedId: assignment.id,
+        error: message
+      });
     }
   }
 
+  await appendSendLogs(sendLogs);
   return summary;
 }
 
@@ -3815,6 +3957,15 @@ async function trySendWorkCompletionLarkNotification(workState, assignment, comp
       assignment.completionNotifySentAt = now;
       assignment.completionNotifyTo = recipient;
       assignment.completionNotifyError = "";
+      await appendSendLog({
+        type: "work_notification",
+        status: "success",
+        title: `Completion notification: ${assignment.title}`,
+        detail: completedBy?.name || completedBy?.username || "Employee",
+        provider: "lark",
+        recipients: [recipient],
+        relatedId: assignment.id
+      });
     } else {
       summary.skipped = 1;
       summary.missing = result.missing || [];
@@ -3822,6 +3973,15 @@ async function trySendWorkCompletionLarkNotification(workState, assignment, comp
       assignment.completionNotifyError = result.missing?.length
         ? `Missing ${result.missing.join(", ")}`
         : "Completion Lark notification is not configured.";
+      await appendSendLog({
+        type: "work_notification",
+        status: "skipped",
+        title: `Completion notification: ${assignment.title}`,
+        detail: completedBy?.name || completedBy?.username || "Employee",
+        provider: "lark",
+        relatedId: assignment.id,
+        error: assignment.completionNotifyError
+      });
     }
   } catch (error) {
     summary.failed = 1;
@@ -3829,6 +3989,16 @@ async function trySendWorkCompletionLarkNotification(workState, assignment, comp
     summary.errors = [message];
     assignment.completionNotifyStatus = "failed";
     assignment.completionNotifyError = message;
+    await appendSendLog({
+      type: "work_notification",
+      status: "failed",
+      title: `Completion notification: ${assignment.title}`,
+      detail: completedBy?.name || completedBy?.username || "Employee",
+      provider: "lark",
+      recipients: [workCompletionLarkReceiveId()].filter(Boolean),
+      relatedId: assignment.id,
+      error: message
+    });
   }
 
   return summary;
@@ -4097,6 +4267,17 @@ async function trySendBookingCalendarInviteEmail(booking, method = "REQUEST", re
       booking.calendarInviteStatus = "not_configured";
       booking.calendarInviteError = `Missing ${missing.join(", ")}`;
     }
+    await appendSendLog({
+      type: "calendar_invite",
+      status: "skipped",
+      title: `Calendar invite: ${booking.propertyAddress || "Booking"}`,
+      detail: method === "CANCEL" ? "Cancellation invite" : "Booking invite",
+      provider: "resend",
+      from: calendarInviteEmailConfig.from,
+      recipients,
+      relatedId: booking.id,
+      error: `Missing ${missing.join(", ")}`
+    });
     return { sent: false, skipped: true, missing };
   }
 
@@ -4135,14 +4316,36 @@ async function trySendBookingCalendarInviteEmail(booking, method = "REQUEST", re
       booking.calendarInviteEmailFrom = calendarInviteEmailConfig.from;
       booking.calendarInviteError = null;
     }
+    await appendSendLog({
+      type: "calendar_invite",
+      status: "success",
+      title: `Calendar invite: ${booking.propertyAddress || "Booking"}`,
+      detail: `${methodValue} ${formatCalendarInviteWindow(booking)}`,
+      provider: "resend",
+      from: calendarInviteEmailConfig.from,
+      recipients,
+      relatedId: booking.id
+    });
     return { sent: true, recipients };
   } catch (error) {
+    const message = error.message || "Could not send calendar invite email.";
     if (shouldTrack) {
       booking.calendarInviteStatus = "failed";
       booking.calendarInviteEmailFrom = calendarInviteEmailConfig.from;
-      booking.calendarInviteError = error.message || "Could not send calendar invite email.";
+      booking.calendarInviteError = message;
     }
-    return { sent: false, failed: true, error: error.message || "Could not send calendar invite email." };
+    await appendSendLog({
+      type: "calendar_invite",
+      status: "failed",
+      title: `Calendar invite: ${booking.propertyAddress || "Booking"}`,
+      detail: `${methodValue} ${formatCalendarInviteWindow(booking)}`,
+      provider: "resend",
+      from: calendarInviteEmailConfig.from,
+      recipients,
+      relatedId: booking.id,
+      error: message
+    });
+    return { sent: false, failed: true, error: message };
   }
 }
 
@@ -5200,6 +5403,24 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  if (url.pathname === "/api/send-logs") {
+    if (!canViewSendLogs(req)) {
+      sendForbidden(res, "Boss or team leader only.");
+      return;
+    }
+
+    if (req.method === "GET") {
+      sendJson(res, 200, { logs: await loadSendLogs() });
+      return;
+    }
+
+    if (req.method === "DELETE") {
+      await saveSendLogs([]);
+      sendJson(res, 200, { logs: [], message: "Sending logs cleared." });
+      return;
+    }
+  }
+
   if (req.method === "POST" && url.pathname === "/api/cleanup/past-bookings-invoices") {
     if (!hasPermission(req, "manage_bookings") || !hasPermission(req, "manage_invoices")) {
       sendForbidden(res, "Boss only.");
@@ -5710,7 +5931,20 @@ async function handleApi(req, res, url) {
     try {
       await sendInvoiceEmail(invoice, recipients);
     } catch (error) {
-      sendJson(res, 502, { errors: [invoiceEmailErrorMessage(error)] });
+      const message = invoiceEmailErrorMessage(error);
+      await appendSendLog({
+        type: "invoice",
+        status: "failed",
+        title: `Invoice ${invoice.invoiceNumber}`,
+        detail: invoice.propertyAddress || invoice.clientName || "",
+        provider: invoiceEmailProvider,
+        from: invoiceEmailConfig.from,
+        recipients,
+        relatedId: invoice.id,
+        relatedNumber: invoice.invoiceNumber,
+        error: message
+      });
+      sendJson(res, 502, { errors: [message] });
       return;
     }
 
@@ -5718,6 +5952,17 @@ async function handleApi(req, res, url) {
     invoice.sentTo = recipients;
     invoice.updatedAt = invoice.sentAt;
     await saveInvoices(invoices);
+    await appendSendLog({
+      type: "invoice",
+      status: "success",
+      title: `Invoice ${invoice.invoiceNumber}`,
+      detail: invoice.propertyAddress || invoice.clientName || "",
+      provider: invoiceEmailProvider,
+      from: invoiceEmailConfig.from,
+      recipients,
+      relatedId: invoice.id,
+      relatedNumber: invoice.invoiceNumber
+    });
     invoices.sort((a, b) => new Date(b.issuedAt) - new Date(a.issuedAt));
     sendJson(res, 200, { invoice, invoices, message: `Invoice sent to ${recipients.join(", ")}.` });
     return;
@@ -5946,7 +6191,20 @@ async function handleApi(req, res, url) {
     try {
       await sendWageEmail(wage, recipients);
     } catch (error) {
-      sendJson(res, 502, { errors: [invoiceEmailErrorMessage(error)] });
+      const message = invoiceEmailErrorMessage(error);
+      await appendSendLog({
+        type: "wage",
+        status: "failed",
+        title: `Wage ${wage.wageNumber}`,
+        detail: wage.propertyAddress || wage.photographerName || "",
+        provider: invoiceEmailProvider,
+        from: invoiceEmailConfig.from,
+        recipients,
+        relatedId: wage.id,
+        relatedNumber: wage.wageNumber,
+        error: message
+      });
+      sendJson(res, 502, { errors: [message] });
       return;
     }
 
@@ -5954,6 +6212,17 @@ async function handleApi(req, res, url) {
     wage.sentTo = recipients;
     wage.updatedAt = wage.sentAt;
     await saveWages(wages);
+    await appendSendLog({
+      type: "wage",
+      status: "success",
+      title: `Wage ${wage.wageNumber}`,
+      detail: wage.propertyAddress || wage.photographerName || "",
+      provider: invoiceEmailProvider,
+      from: invoiceEmailConfig.from,
+      recipients,
+      relatedId: wage.id,
+      relatedNumber: wage.wageNumber
+    });
     wages.sort((a, b) => new Date(b.issuedAt) - new Date(a.issuedAt));
     sendJson(res, 200, { wage, wages, message: `Proforma sent to ${recipients.join(", ")}.` });
     return;

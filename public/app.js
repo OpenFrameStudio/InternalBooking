@@ -95,6 +95,11 @@ const el = {
   wageTotalValue: $('#wageTotalValue'),
   syncWagesButton: $('#syncWagesButton'),
   refreshWagesButton: $('#refreshWagesButton'),
+  sendLogSection: $('#sendLogSection'),
+  sendLogList: $('#sendLogList'),
+  sendLogTemplate: $('#sendLogTemplate'),
+  refreshSendLogsButton: $('#refreshSendLogsButton'),
+  clearSendLogsButton: $('#clearSendLogsButton'),
   invoicePrintSheet: $('#invoicePrintSheet'),
   refreshButton: $('#refreshButton'),
   testLarkButton: $('#testLarkButton'),
@@ -152,6 +157,7 @@ const state = {
   photographers: [],
   invoices: [],
   wages: [],
+  sendLogs: [],
   workAssignments: [],
   bookingForm: {
     selectedClientId: '',
@@ -207,6 +213,7 @@ const timeFormatter = new Intl.DateTimeFormat('en-AU', { hour: 'numeric', minute
 const monthFormatter = new Intl.DateTimeFormat('en-AU', { month: 'short', timeZone: bookingTimeZone });
 const dayFormatter = new Intl.DateTimeFormat('en-AU', { day: '2-digit', timeZone: bookingTimeZone });
 const invoiceDateFormatter = new Intl.DateTimeFormat('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
+const sendLogTimeFormatter = new Intl.DateTimeFormat('en-AU', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', timeZone: bookingTimeZone });
 const currencyFormatter = new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' });
 const manualInvoiceServicePrices = {
   Photography: 150,
@@ -339,6 +346,7 @@ function refreshLiveData() {
     loadBookings(),
     loadInvoices(),
     loadWages(),
+    loadSendLogs(),
     loadWorkAssignments()
   ]);
 }
@@ -372,11 +380,16 @@ function userHasPermission(permission) {
   return Boolean(state.user?.permissions?.includes(permission));
 }
 
+function userCanViewSendLogs() {
+  return ['manage_invoices', 'manage_wages', 'manage_bookings', 'manage_work'].some(userHasPermission);
+}
+
 function applyAppAccess() {
   el.appLinks.forEach((link) => {
     link.hidden = !userCanAccess(link.dataset.appLink);
   });
   el.testLarkButton.hidden = !userHasPermission('manage_bookings');
+  el.sendLogSection.hidden = !userCanViewSendLogs();
 
   if (!userCanAccess('clients') && window.location.pathname === '/clients') {
     setRoute('/bookings');
@@ -1399,6 +1412,72 @@ function wageRecipientEmails(wage) {
   return uniqueEmails(parseEmails(wage.photographerEmail || '')).filter(isEmail);
 }
 
+function formatSendLogTime(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 'Time unknown' : sendLogTimeFormatter.format(date);
+}
+
+function sendLogTypeLabel(type) {
+  return {
+    invoice: 'Invoice email',
+    wage: 'Wage proforma',
+    calendar_invite: 'Calendar invite',
+    work_notification: 'Lark notification',
+    work_email: 'Work email'
+  }[type] || 'Send';
+}
+
+function sendLogStatusLabel(status) {
+  return {
+    success: 'Sent',
+    failed: 'Failed',
+    skipped: 'Skipped'
+  }[status] || 'Failed';
+}
+
+function sendLogMeta(log) {
+  const parts = [
+    log.provider ? `Provider: ${log.provider}` : '',
+    log.from ? `From: ${log.from}` : '',
+    Array.isArray(log.recipients) && log.recipients.length ? `To: ${log.recipients.join(', ')}` : ''
+  ].filter(Boolean);
+  return parts.join(' - ');
+}
+
+function renderSendLogs() {
+  if (!userCanViewSendLogs() || !el.sendLogList) return;
+
+  el.sendLogList.innerHTML = '';
+  const logs = [...state.sendLogs].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+  if (!logs.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty-state';
+    empty.textContent = 'No sending logs yet. Invoice, wage, calendar invite, and work notification attempts will appear here.';
+    el.sendLogList.append(empty);
+    return;
+  }
+
+  for (const log of logs) {
+    const item = el.sendLogTemplate.content.firstElementChild.cloneNode(true);
+    item.querySelector('h3').textContent = `${sendLogTypeLabel(log.type)} - ${log.title || log.relatedNumber || 'Untitled send'}`;
+    const status = item.querySelector('.send-log-status');
+    status.textContent = sendLogStatusLabel(log.status);
+    status.classList.toggle('success', log.status === 'success');
+    status.classList.toggle('failed', log.status === 'failed');
+    status.classList.toggle('skipped', log.status === 'skipped');
+    item.querySelector('.send-log-detail').textContent = log.detail || '';
+    item.querySelector('.send-log-meta').textContent = sendLogMeta(log);
+    const errorLine = item.querySelector('.send-log-error');
+    errorLine.textContent = log.error || '';
+    errorLine.hidden = !log.error;
+    const time = item.querySelector('time');
+    time.dateTime = log.createdAt || '';
+    time.textContent = formatSendLogTime(log.createdAt);
+    el.sendLogList.append(item);
+  }
+}
+
 function updateInvoiceStats() {
   const drafts = state.invoices.filter((invoice) => invoice.status === 'draft');
   const paid = state.invoices.filter((invoice) => invoice.status === 'paid');
@@ -2191,6 +2270,40 @@ async function loadWages() {
   }
 }
 
+async function loadSendLogs() {
+  if (!userCanViewSendLogs()) return;
+
+  try {
+    const { response, data } = await fetchJson('/api/send-logs');
+    if (!response.ok) return;
+    state.sendLogs = Array.isArray(data.logs) ? data.logs : [];
+    renderSendLogs();
+  } catch {
+    renderSendLogs();
+  }
+}
+
+async function clearSendLogs() {
+  if (!userCanViewSendLogs()) return;
+  if (!window.confirm('Clear all sending logs?')) return;
+
+  el.clearSendLogsButton.disabled = true;
+  try {
+    const { response, data } = await fetchJson('/api/send-logs', { method: 'DELETE' });
+    if (!response.ok) {
+      setMessage(el.invoiceMessage, (data.errors || ['Could not clear sending logs.']).join(' '), 'error');
+      return;
+    }
+    state.sendLogs = [];
+    renderSendLogs();
+    setMessage(el.invoiceMessage, data.message || 'Sending logs cleared.', 'success');
+  } catch {
+    setMessage(el.invoiceMessage, 'Could not reach the sending log service.', 'error');
+  } finally {
+    el.clearSendLogsButton.disabled = false;
+  }
+}
+
 async function syncWages() {
   if (!userCanAccess('wages')) return;
   el.syncWagesButton.disabled = true;
@@ -2244,6 +2357,8 @@ async function sendInvoice(id) {
     setMessage(el.invoiceMessage, data.message || 'Invoice sent.', 'success');
   } catch {
     setMessage(el.invoiceMessage, 'Could not reach the invoice email sender.', 'error');
+  } finally {
+    loadSendLogs();
   }
 }
 
@@ -2279,6 +2394,8 @@ async function sendWage(id) {
     setMessage(el.wageMessage, data.message || 'Proforma sent.', 'success');
   } catch {
     setMessage(el.wageMessage, 'Could not reach the wage email sender.', 'error');
+  } finally {
+    loadSendLogs();
   }
 }
 
@@ -2797,6 +2914,8 @@ el.invoiceClientFilter.addEventListener('input', () => {
   state.invoiceFilters.query = el.invoiceClientFilter.value;
   renderInvoices();
 });
+el.refreshSendLogsButton.addEventListener('click', loadSendLogs);
+el.clearSendLogsButton.addEventListener('click', clearSendLogs);
 el.refreshWagesButton.addEventListener('click', loadWages);
 el.syncWagesButton.addEventListener('click', syncWages);
 el.testLarkButton.addEventListener('click', testLark);

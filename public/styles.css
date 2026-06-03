@@ -1077,7 +1077,8 @@ button:focus-visible {
 .client-list,
 .photographer-list,
 .invoice-list,
-.wage-list {
+.wage-list,
+.send-log-list {
   display: grid;
   gap: 10px;
 }
@@ -1256,6 +1257,89 @@ button:focus-visible {
 .invoice-status.void {
   color: var(--red);
   background: rgba(166, 64, 58, 0.1);
+}
+
+.section-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.send-log-section {
+  background:
+    linear-gradient(90deg, rgba(55, 103, 143, 0.035), transparent 42%),
+    rgba(251, 252, 250, 0.95);
+}
+
+.send-log-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: start;
+  padding: 14px 16px;
+  border: 1px solid rgba(21, 24, 22, 0.1);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 8px 22px rgba(22, 29, 25, 0.04);
+}
+
+.send-log-title-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.send-log-title-row h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.send-log-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  border-radius: 999px;
+  padding: 2px 9px;
+  color: var(--blue);
+  background: rgba(55, 103, 143, 0.1);
+  font-size: 0.74rem;
+  font-weight: 900;
+}
+
+.send-log-status.success {
+  color: var(--accent-dark);
+  background: rgba(17, 122, 93, 0.12);
+}
+
+.send-log-status.failed {
+  color: var(--red);
+  background: rgba(166, 64, 58, 0.1);
+}
+
+.send-log-status.skipped {
+  color: #946319;
+  background: rgba(217, 157, 69, 0.16);
+}
+
+.send-log-item p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-weight: 650;
+}
+
+.send-log-error {
+  color: var(--red) !important;
+  font-weight: 850 !important;
+}
+
+.send-log-item time {
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 850;
+  white-space: nowrap;
 }
 
 .invoice-total {
@@ -1982,6 +2066,7 @@ dialog::backdrop {
   .client-panel-header,
   .photographer-panel-header,
   .client-save-row,
+  .section-actions,
   .invitation-summary {
     align-items: stretch;
     flex-direction: column;
@@ -2092,6 +2177,7 @@ dialog::backdrop {
 
   .client-item,
   .photographer-item,
+  .send-log-item,
   .invoice-stats,
   .invoice-filters {
     grid-template-columns: 1fr;

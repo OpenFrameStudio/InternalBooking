@@ -12,7 +12,7 @@
     <link rel="manifest" href="/site.webmanifest" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
-    <link rel="stylesheet" href="/styles.css?v=client-billing-details" />
+    <link rel="stylesheet" href="/styles.css?v=send-logs" />
     <link rel="stylesheet" href="/work/styles.css?v=assignment-photos" />
     <script src="/install.js" defer></script>
     <script src="/session-keepalive.js?v=monthly-session" defer></script>
@@ -490,6 +490,21 @@
 
           <div class="invoice-list" id="invoiceList"></div>
         </section>
+
+        <section class="list-section send-log-section" id="sendLogSection" aria-label="Sending logs">
+          <div class="section-header">
+            <div>
+              <p class="eyebrow">Activity</p>
+              <h2>Sending logs</h2>
+            </div>
+            <div class="section-actions">
+              <button class="ghost-button" id="refreshSendLogsButton" type="button">Refresh logs</button>
+              <button class="ghost-button danger-button" id="clearSendLogsButton" type="button">Clear logs</button>
+            </div>
+          </div>
+
+          <div class="send-log-list" id="sendLogList"></div>
+        </section>
       </section>
 
       <section class="app-page" id="wagesPage" hidden>
@@ -812,8 +827,23 @@
       </article>
     </template>
 
+    <template id="sendLogTemplate">
+      <article class="send-log-item">
+        <div>
+          <div class="send-log-title-row">
+            <h3></h3>
+            <span class="send-log-status"></span>
+          </div>
+          <p class="send-log-detail"></p>
+          <p class="send-log-meta"></p>
+          <p class="send-log-error"></p>
+        </div>
+        <time></time>
+      </article>
+    </template>
+
     <section class="invoice-print-sheet" id="invoicePrintSheet" hidden aria-label="Printable invoice"></section>
 
-    <script src="/app.js?v=invoice-price-editor" type="module"></script>
+    <script src="/app.js?v=send-logs" type="module"></script>
   </body>
 </html>
