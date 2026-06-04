@@ -114,6 +114,15 @@ const workCompletionLarkNotificationConfig = {
     || "barry.gao@openframe.studio",
   subjectPrefix: process.env.WORK_COMPLETION_LARK_NOTIFICATION_PREFIX || "Work finished"
 };
+const workCompletionEmailConfig = {
+  enabled: normalizeEnvBoolean(process.env.WORK_COMPLETION_EMAIL_ENABLED, true),
+  to: process.env.WORK_COMPLETION_EMAIL_TO || process.env.BOSS_EMAIL || "barry.gao@openframe.studio",
+  from: process.env.WORK_COMPLETION_EMAIL_FROM || invoiceEmailConfig.from,
+  replyTo: process.env.WORK_COMPLETION_EMAIL_REPLY_TO || invoiceEmailConfig.replyTo,
+  bcc: process.env.WORK_COMPLETION_EMAIL_BCC || "",
+  subjectPrefix: process.env.WORK_COMPLETION_EMAIL_SUBJECT_PREFIX || "Work finished",
+  timeoutMs: Number.isFinite(invoiceEmailTimeoutMs) ? invoiceEmailTimeoutMs : 15_000
+};
 const calendarInviteEmailConfig = {
   enabled: normalizeEnvBoolean(process.env.CALENDAR_INVITE_EMAIL_ENABLED, true),
   from: process.env.CALENDAR_INVITE_EMAIL_FROM || invoiceEmailConfig.from,
@@ -930,6 +939,11 @@ function normalizeWorkState(raw) {
         completionNotifySentAt: assignment.completionNotifySentAt || "",
         completionNotifyTo: String(assignment.completionNotifyTo || ""),
         completionNotifyError: String(assignment.completionNotifyError || ""),
+        completionEmailStatus: ["sent", "failed", "not_configured"].includes(assignment.completionEmailStatus) ? assignment.completionEmailStatus : "",
+        completionEmailSentAt: assignment.completionEmailSentAt || "",
+        completionEmailTo: uniqueEmails(parseGuestEmails(assignment.completionEmailTo || "")).join(", "),
+        completionEmailFrom: String(assignment.completionEmailFrom || ""),
+        completionEmailError: String(assignment.completionEmailError || ""),
         completedAt: assignment.completedAt || "",
         createdAt: assignment.createdAt || new Date().toISOString(),
         updatedAt: assignment.updatedAt || assignment.createdAt || new Date().toISOString()
@@ -1093,6 +1107,11 @@ function validateWorkAssignment(input, existing = null, workState = null) {
       completionNotifySentAt: existing?.completionNotifySentAt || "",
       completionNotifyTo: existing?.completionNotifyTo || "",
       completionNotifyError: existing?.completionNotifyError || "",
+      completionEmailStatus: existing?.completionEmailStatus || "",
+      completionEmailSentAt: existing?.completionEmailSentAt || "",
+      completionEmailTo: existing?.completionEmailTo || "",
+      completionEmailFrom: existing?.completionEmailFrom || "",
+      completionEmailError: existing?.completionEmailError || "",
       completedAt: existing?.completedAt || "",
       createdAt: existing?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString()
@@ -1200,6 +1219,11 @@ function assignmentFromBooking(booking, existing = null) {
     completionNotifySentAt: existing?.completionNotifySentAt || "",
     completionNotifyTo: existing?.completionNotifyTo || "",
     completionNotifyError: existing?.completionNotifyError || "",
+    completionEmailStatus: existing?.completionEmailStatus || "",
+    completionEmailSentAt: existing?.completionEmailSentAt || "",
+    completionEmailTo: existing?.completionEmailTo || "",
+    completionEmailFrom: existing?.completionEmailFrom || "",
+    completionEmailError: existing?.completionEmailError || "",
     completedAt: existing?.completedAt || "",
     createdAt: existing?.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString()
@@ -3425,6 +3449,23 @@ function isWorkCompletionLarkNotificationConfigured() {
   return workCompletionLarkNotificationMissingSettings().length === 0;
 }
 
+function workCompletionEmailRecipients() {
+  return uniqueEmails(parseGuestEmails(workCompletionEmailConfig.to)).filter(isValidEmail);
+}
+
+function workCompletionEmailMissingSettings() {
+  const missing = [];
+  if (!workCompletionEmailConfig.enabled) missing.push("WORK_COMPLETION_EMAIL_ENABLED");
+  if (!resendConfig.apiKey) missing.push("RESEND_API_KEY");
+  if (!workCompletionEmailRecipients().length) missing.push("WORK_COMPLETION_EMAIL_TO");
+  if (!workCompletionEmailConfig.from) missing.push("WORK_COMPLETION_EMAIL_FROM");
+  return missing;
+}
+
+function isWorkCompletionEmailConfigured() {
+  return workCompletionEmailMissingSettings().length === 0;
+}
+
 function formatWorkInviteDueDate(assignment) {
   const dueDate = parseDateValue(assignment.dueDate);
   if (Number.isNaN(dueDate.getTime())) return assignment.dueDate || "Not set";
@@ -3517,6 +3558,54 @@ function buildWorkCompletionLarkNotificationText(assignment, workState, complete
 
   lines.push("Open work desk:", `${publicAppUrl}/work/`);
   return lines.join("\n");
+}
+
+function buildWorkCompletionEmailSubject(assignment) {
+  return `${workCompletionEmailConfig.subjectPrefix}: ${assignment.title}`;
+}
+
+function buildWorkCompletionEmailText(assignment, workState, completedBy) {
+  const employee = workEmployeeForAssignment(workState, assignment);
+  const completedByName = completedBy?.name || employee?.name || "Employee";
+  const lines = [
+    `${completedByName} marked this work as finished.`,
+    "",
+    `Work: ${assignment.title}`,
+    `Completed by: ${completedByName}`,
+    `Assigned to: ${employee?.name || "Employee"}`,
+    `Due: ${formatWorkInviteDueDate(assignment)}`,
+    `Priority: ${assignment.priority}`,
+    ""
+  ];
+
+  if (assignment.notes) {
+    lines.push("Details:", assignment.notes, "");
+  }
+
+  lines.push("Open work desk:", `${publicAppUrl}/work/`, "", "OpenFrame Studio");
+  return lines.join("\n");
+}
+
+function buildWorkCompletionEmailHtml(assignment, workState, completedBy) {
+  const employee = workEmployeeForAssignment(workState, assignment);
+  const completedByName = completedBy?.name || employee?.name || "Employee";
+  const notes = assignment.notes
+    ? `<p><strong>Details:</strong><br />${escapeHtmlForEmail(assignment.notes).replace(/\n/g, "<br />")}</p>`
+    : "";
+
+  return `
+    <div style="font-family:Arial,sans-serif;color:#111611;line-height:1.5">
+      <p><strong>${escapeHtmlForEmail(completedByName)}</strong> marked this work as finished.</p>
+      <p><strong>Work:</strong> ${escapeHtmlForEmail(assignment.title)}</p>
+      <p><strong>Completed by:</strong> ${escapeHtmlForEmail(completedByName)}</p>
+      <p><strong>Assigned to:</strong> ${escapeHtmlForEmail(employee?.name || "Employee")}</p>
+      <p><strong>Due:</strong> ${escapeHtmlForEmail(formatWorkInviteDueDate(assignment))}</p>
+      <p><strong>Priority:</strong> ${escapeHtmlForEmail(assignment.priority)}</p>
+      ${notes}
+      <p><a href="${escapeHtmlForEmail(`${publicAppUrl}/work/`)}">Open the work desk</a></p>
+      <p>OpenFrame Studio</p>
+    </div>
+  `;
 }
 
 function isInvalidLarkReceiveIdResult(result) {
@@ -3705,6 +3794,31 @@ async function sendWorkCompletionLarkNotification(assignment, workState, complet
     receiveIdType: resolvedOpenId ? "open_id" : receiveIdType,
     messageId: result.data?.message_id || result.data?.messageId || ""
   };
+}
+
+async function sendWorkCompletionEmail(assignment, workState, completedBy) {
+  const missing = workCompletionEmailMissingSettings();
+  if (missing.length) {
+    return { sent: false, skipped: true, missing };
+  }
+
+  const recipients = workCompletionEmailRecipients();
+  const bcc = uniqueEmails(parseGuestEmails(workCompletionEmailConfig.bcc)).filter(isValidEmail);
+  const payload = {
+    from: workCompletionEmailConfig.from,
+    to: recipients,
+    subject: buildWorkCompletionEmailSubject(assignment),
+    text: buildWorkCompletionEmailText(assignment, workState, completedBy),
+    html: buildWorkCompletionEmailHtml(assignment, workState, completedBy),
+    reply_to: workCompletionEmailConfig.replyTo
+  };
+
+  if (bcc.length) {
+    payload.bcc = bcc;
+  }
+
+  await sendResendEmail(payload, workCompletionEmailConfig.timeoutMs, "Work completion email request timed out.");
+  return { sent: true, recipients };
 }
 
 async function sendWorkInviteEmail(assignment, workState) {
@@ -4004,12 +4118,111 @@ async function trySendWorkCompletionLarkNotification(workState, assignment, comp
   return summary;
 }
 
-function workCompletionNotificationMessage(summary) {
-  if (!summary?.attempted) return "";
-  if (summary.sent) return "Completion notification sent to Barry.";
-  if (summary.failed) return `Finished, but Barry's Lark notification could not send: ${summary.errors[0] || "unknown error"}`;
-  if (summary.skipped) return "Finished. Add WORK_COMPLETION_LARK_RECEIVE_ID or BOSS_LARK_RECEIVE_ID in Render to notify Barry in Lark.";
-  return "";
+async function trySendWorkCompletionEmailNotification(workState, assignment, completedBy) {
+  const summary = {
+    attempted: completedBy?.role === "employee" ? 1 : 0,
+    sent: 0,
+    skipped: 0,
+    failed: 0,
+    recipients: [],
+    errors: [],
+    missing: []
+  };
+
+  if (!summary.attempted) {
+    return summary;
+  }
+
+  try {
+    const result = await sendWorkCompletionEmail(assignment, workState, completedBy);
+    const now = new Date().toISOString();
+
+    if (result.sent) {
+      summary.sent = 1;
+      summary.recipients = result.recipients;
+      assignment.completionEmailStatus = "sent";
+      assignment.completionEmailSentAt = now;
+      assignment.completionEmailTo = result.recipients.join(", ");
+      assignment.completionEmailFrom = workCompletionEmailConfig.from;
+      assignment.completionEmailError = "";
+      await appendSendLog({
+        type: "work_email",
+        status: "success",
+        title: `Completion email: ${assignment.title}`,
+        detail: completedBy?.name || completedBy?.username || "Employee",
+        provider: "resend",
+        from: workCompletionEmailConfig.from,
+        recipients: result.recipients,
+        relatedId: assignment.id
+      });
+    } else {
+      summary.skipped = 1;
+      summary.missing = result.missing || [];
+      assignment.completionEmailStatus = "not_configured";
+      assignment.completionEmailFrom = workCompletionEmailConfig.from;
+      assignment.completionEmailError = result.missing?.length
+        ? `Missing ${result.missing.join(", ")}`
+        : "Completion email is not configured.";
+      await appendSendLog({
+        type: "work_email",
+        status: "skipped",
+        title: `Completion email: ${assignment.title}`,
+        detail: completedBy?.name || completedBy?.username || "Employee",
+        provider: "resend",
+        from: workCompletionEmailConfig.from,
+        recipients: workCompletionEmailRecipients(),
+        relatedId: assignment.id,
+        error: assignment.completionEmailError
+      });
+    }
+  } catch (error) {
+    summary.failed = 1;
+    const message = error.message || "Could not send completion email.";
+    summary.errors = [message];
+    assignment.completionEmailStatus = "failed";
+    assignment.completionEmailFrom = workCompletionEmailConfig.from;
+    assignment.completionEmailTo = workCompletionEmailRecipients().join(", ");
+    assignment.completionEmailError = message;
+    await appendSendLog({
+      type: "work_email",
+      status: "failed",
+      title: `Completion email: ${assignment.title}`,
+      detail: completedBy?.name || completedBy?.username || "Employee",
+      provider: "resend",
+      from: workCompletionEmailConfig.from,
+      recipients: workCompletionEmailRecipients(),
+      relatedId: assignment.id,
+      error: message
+    });
+  }
+
+  return summary;
+}
+
+function workCompletionNotificationMessage(larkSummary, emailSummary = null) {
+  const messages = [];
+
+  if (emailSummary?.attempted) {
+    if (emailSummary.sent) {
+      messages.push(`Completion email sent to ${emailSummary.recipients.join(", ")}.`);
+    } else if (emailSummary.failed) {
+      messages.push(`Finished, but Barry's completion email could not send: ${emailSummary.errors[0] || "unknown error"}`);
+    } else if (emailSummary.skipped) {
+      messages.push("Finished. Add RESEND_API_KEY in Render to email Barry when work is finished.");
+    }
+  }
+
+  if (larkSummary?.attempted) {
+    if (larkSummary.sent) {
+      messages.push("Lark completion notification sent to Barry.");
+    } else if (larkSummary.failed) {
+      messages.push(`Lark completion notification could not send: ${larkSummary.errors[0] || "unknown error"}`);
+    } else if (larkSummary.skipped) {
+      messages.push("Add WORK_COMPLETION_LARK_RECEIVE_ID or BOSS_LARK_RECEIVE_ID in Render to notify Barry in Lark.");
+    }
+  }
+
+  return messages.join(" ");
 }
 
 function workInviteMessage(summary) {
@@ -5352,6 +5565,8 @@ async function handleApi(req, res, url) {
       workCompletionLarkNotificationConfigured: isWorkCompletionLarkNotificationConfigured(),
       workCompletionLarkNotificationsEnabled: workCompletionLarkNotificationConfig.enabled,
       workCompletionLarkReceiveIdType: workCompletionLarkReceiveIdType(),
+      workCompletionEmailConfigured: isWorkCompletionEmailConfigured(),
+      workCompletionEmailTo: workCompletionEmailRecipients().join(", "),
       calendarInviteEmailConfigured: isCalendarInviteEmailConfigured(),
       calendarInviteEmailFrom: calendarInviteEmailConfig.from,
       larkNotificationsEnabled: shouldUseLarkCalendarNotifications(),
@@ -5605,6 +5820,11 @@ async function handleApi(req, res, url) {
       completedAssignment,
       currentUser(req)
     );
+    const workCompletionEmailNotification = await trySendWorkCompletionEmailNotification(
+      workState,
+      completedAssignment,
+      currentUser(req)
+    );
     workState.assignments = workState.assignments.map((item) =>
       item.id === assignmentId ? completedAssignment : item
     );
@@ -5612,7 +5832,8 @@ async function handleApi(req, res, url) {
     sendJson(res, 200, {
       ...visibleWorkStateForUser(workState, currentUser(req)),
       workCompletionNotification,
-      workCompletionNotificationMessage: workCompletionNotificationMessage(workCompletionNotification),
+      workCompletionEmailNotification,
+      workCompletionNotificationMessage: workCompletionNotificationMessage(workCompletionNotification, workCompletionEmailNotification),
       user: currentUser(req)
     });
     return;
