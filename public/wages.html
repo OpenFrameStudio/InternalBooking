@@ -124,7 +124,17 @@
               <p class="eyebrow">Employee sheet</p>
               <h2>Staff wages</h2>
             </div>
-            <div class="wage-total-pill" id="employeeWageTotal">฿0 THB</div>
+            <div class="wage-header-tools">
+              <label class="wage-status-filter">
+                <span>Status</span>
+                <select id="employeeWageStatusFilter">
+                  <option value="all">All</option>
+                  <option value="draft">Unpaid</option>
+                  <option value="paid">Paid</option>
+                </select>
+              </label>
+              <div class="wage-total-pill" id="employeeWageTotal">฿0 THB</div>
+            </div>
           </div>
           <div class="invoice-list wage-list" id="employeeWageList"></div>
         </section>
@@ -168,6 +178,14 @@
               <p class="eyebrow">Contractor sheet</p>
               <h2>Photographers</h2>
             </div>
+            <label class="wage-status-filter">
+              <span>Status</span>
+              <select id="contractorWageStatusFilter">
+                <option value="all">All</option>
+                <option value="draft">Unpaid</option>
+                <option value="paid">Paid</option>
+              </select>
+            </label>
           </div>
 
           <div class="invoice-list wage-list" id="wageList"></div>

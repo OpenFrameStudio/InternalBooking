@@ -94,6 +94,38 @@
   padding: 0 18px;
 }
 
+.wage-header-tools {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+.wage-status-filter {
+  display: grid;
+  gap: 6px;
+  min-width: 150px;
+}
+
+.wage-status-filter span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 950;
+  letter-spacing: 0;
+}
+
+.wage-status-filter select {
+  min-height: 42px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 850;
+  padding: 0 12px;
+}
+
 .employee-wage-form textarea {
   resize: vertical;
 }

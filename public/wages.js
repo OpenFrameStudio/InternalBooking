@@ -17,6 +17,7 @@ const el = {
   employeeWageTotal: $("#employeeWageTotal"),
   employeeWageList: $("#employeeWageList"),
   employeeWageTemplate: $("#employeeWageTemplate"),
+  employeeWageStatusFilter: $("#employeeWageStatusFilter"),
   newEmployeeWageButton: $("#newEmployeeWageButton"),
   wageList: $("#wageList"),
   wageTemplate: $("#wageTemplate"),
@@ -24,6 +25,7 @@ const el = {
   wageDraftCount: $("#wageDraftCount"),
   wagePaidCount: $("#wagePaidCount"),
   wageTotalValue: $("#wageTotalValue"),
+  contractorWageStatusFilter: $("#contractorWageStatusFilter"),
   syncWagesButton: $("#syncWagesButton"),
   refreshWagesButton: $("#refreshWagesButton"),
   logoutButton: $("#logoutButton"),
@@ -35,7 +37,11 @@ const el = {
 const state = {
   activeSheet: "employees",
   employeeWages: [],
-  contractorWages: []
+  contractorWages: [],
+  wageFilters: {
+    employees: "all",
+    contractors: "all"
+  }
 };
 
 const moneyFormatters = new Map();
@@ -199,19 +205,30 @@ function fillEmployeeForm(wage) {
   el.employeeWageForm.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+function wageMatchesStatus(wage, status) {
+  return status === "all" || (wage.status || "draft") === status;
+}
+
+function wageEmptyMessage(kind, status) {
+  if (status === "draft") return kind === "employee" ? "No unpaid employee wages right now." : "No unpaid contractor wages right now.";
+  if (status === "paid") return kind === "employee" ? "No paid employee wages yet." : "No paid contractor wages yet.";
+  return kind === "employee" ? "No employee wages yet." : "No contractor wages yet. Sync bookings to create photographer proformas.";
+}
+
 function renderEmployeeWages() {
   el.employeeWageList.innerHTML = "";
-  const wages = [...state.employeeWages].sort((a, b) => a.employeeName.localeCompare(b.employeeName));
-  const activeTotal = wages
+  const allWages = [...state.employeeWages].sort((a, b) => a.employeeName.localeCompare(b.employeeName));
+  const wages = allWages.filter((wage) => wageMatchesStatus(wage, state.wageFilters.employees));
+  const activeTotal = allWages
     .filter((wage) => wage.status !== "void")
     .reduce((sum, wage) => sum + Number(wage.amount || wage.total || 0), 0);
-  const currency = wages.find((wage) => wage.status !== "void")?.currency || "THB";
+  const currency = allWages.find((wage) => wage.status !== "void")?.currency || "THB";
   el.employeeWageTotal.textContent = `${formatMoney(activeTotal, currency)} ${currency}`;
 
   if (!wages.length) {
     const empty = document.createElement("p");
     empty.className = "empty-state";
-    empty.textContent = "No employee wages yet.";
+    empty.textContent = wageEmptyMessage("employee", state.wageFilters.employees);
     el.employeeWageList.append(empty);
     return;
   }
@@ -262,13 +279,15 @@ function updateContractorStats() {
 
 function renderContractorWages() {
   el.wageList.innerHTML = "";
-  const wages = [...state.contractorWages].sort((a, b) => new Date(b.issuedAt) - new Date(a.issuedAt));
+  const wages = [...state.contractorWages]
+    .filter((wage) => wageMatchesStatus(wage, state.wageFilters.contractors))
+    .sort((a, b) => new Date(b.issuedAt) - new Date(a.issuedAt));
   updateContractorStats();
 
   if (!wages.length) {
     const empty = document.createElement("p");
     empty.className = "empty-state";
-    empty.textContent = "No contractor wages yet. Sync bookings to create photographer proformas.";
+    empty.textContent = wageEmptyMessage("contractor", state.wageFilters.contractors);
     el.wageList.append(empty);
     return;
   }
@@ -500,6 +519,14 @@ function wireEvents() {
   el.tabs.forEach((tab) => tab.addEventListener("click", () => setActiveSheet(tab.dataset.sheet)));
   el.employeeWageForm.addEventListener("submit", saveEmployeeWage);
   el.newEmployeeWageButton.addEventListener("click", () => resetEmployeeForm());
+  el.employeeWageStatusFilter.addEventListener("change", () => {
+    state.wageFilters.employees = el.employeeWageStatusFilter.value;
+    renderEmployeeWages();
+  });
+  el.contractorWageStatusFilter.addEventListener("change", () => {
+    state.wageFilters.contractors = el.contractorWageStatusFilter.value;
+    renderContractorWages();
+  });
   el.refreshWagesButton.addEventListener("click", loadContractorWages);
   el.syncWagesButton.addEventListener("click", syncContractorWages);
   el.downloadFinancialYearButton.addEventListener("click", downloadFinancialYearExport);
