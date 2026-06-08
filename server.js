@@ -7003,6 +7003,7 @@ const server = http.createServer(async (req, res) => {
     const publicAssets = new Set([
       "/apple-touch-icon.png",
       "/favicon-32.png",
+      "/favicon-48.png",
       "/favicon.ico",
       "/icons/icon-192.png",
       "/icons/icon-512.png",

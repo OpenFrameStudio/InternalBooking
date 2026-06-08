@@ -1,7 +1,9 @@
-const CACHE_NAME = "openframe-internal-v1";
+const CACHE_NAME = "openframe-internal-v2";
 const STATIC_ASSETS = [
   "/apple-touch-icon.png",
   "/favicon-32.png",
+  "/favicon-48.png",
+  "/favicon.ico",
   "/icons/icon-192.png",
   "/icons/icon-512.png",
   "/install.js",
