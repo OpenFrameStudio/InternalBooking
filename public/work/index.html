@@ -13,11 +13,11 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
     <link rel="stylesheet" href="/styles.css" />
-    <link rel="stylesheet" href="/work/styles.css?v=work-notify" />
+    <link rel="stylesheet" href="/work/styles.css?v=faye-history" />
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
     <script src="/install.js" defer></script>
     <script src="/session-keepalive.js?v=monthly-session" defer></script>
-    <script src="/work/app.js?v=work-email-fallback" type="module"></script>
+    <script src="/work/app.js?v=faye-history" type="module"></script>
   </head>
   <body>
     <main class="shell">
@@ -63,6 +63,34 @@
                 <small>finished</small>
               </div>
             </div>
+
+            <section class="faye-history-panel" aria-label="Faye past work">
+              <div class="history-panel-header">
+                <div>
+                  <p class="eyebrow">Faye past work</p>
+                  <h2>Completed history</h2>
+                </div>
+                <strong id="fayeLatestDone">No finished work yet</strong>
+              </div>
+
+              <div class="history-metrics">
+                <div>
+                  <span id="fayeDoneCount">0</span>
+                  <small>done</small>
+                </div>
+                <div>
+                  <span id="fayeDoneThisMonthCount">0</span>
+                  <small>this month</small>
+                </div>
+              </div>
+
+              <label class="history-search">
+                <span>Search Faye's past work</span>
+                <input id="fayeHistorySearchInput" type="search" placeholder="Title, notes, date" autocomplete="off" />
+              </label>
+
+              <div class="faye-history-list" id="fayeHistoryList"></div>
+            </section>
           </aside>
 
           <section class="booking-surface">
@@ -132,6 +160,10 @@
               <label class="service-option">
                 <input name="workFilter" type="radio" data-filter="done" />
                 <span><strong>Finished</strong></span>
+              </label>
+              <label class="service-option">
+                <input name="workFilter" type="radio" data-filter="faye-done" />
+                <span><strong>Faye Past</strong></span>
               </label>
             </fieldset>
 

@@ -40,6 +40,11 @@ const el = {
   employeeRole: $("#employeeRole"),
   employeeStatusDot: $("#employeeStatusDot"),
   enableMessagesButton: $("#enableMessagesButton"),
+  fayeDoneCount: $("#fayeDoneCount"),
+  fayeDoneThisMonthCount: $("#fayeDoneThisMonthCount"),
+  fayeHistoryList: $("#fayeHistoryList"),
+  fayeHistorySearchInput: $("#fayeHistorySearchInput"),
+  fayeLatestDone: $("#fayeLatestDone"),
   filterButtons: $$("[data-filter]"),
   logoutButton: $("#logoutButton"),
   messageList: $("#messageList"),
@@ -83,6 +88,7 @@ const state = {
     assignmentError: "",
     assignmentNoticeDismissedSignature: readWorkNoticeDismissedSignature(),
     bookingSyncStatus: initialBookingSyncStatus,
+    fayeHistoryQuery: "",
     filter: "open",
     loggingOut: false,
     notifyingAssignmentId: "",
@@ -275,6 +281,7 @@ async function loadWork() {
 }
 
 function parseISODate(value) {
+  if (!value) return new Date(NaN);
   const [year, month, day] = value.split("-").map(Number);
   return new Date(year, month - 1, day);
 }
@@ -299,6 +306,17 @@ function formatMessageTime(value) {
   }).format(new Date(value));
 }
 
+function formatHistoryDate(value) {
+  if (!value) return "No completion date";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "No completion date";
+  return new Intl.DateTimeFormat("en-AU", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).format(date);
+}
+
 function formatFileSize(bytes) {
   const size = Number(bytes || 0);
   if (size < 1024) return `${Math.max(0, Math.round(size))} B`;
@@ -317,6 +335,35 @@ function isToday(dateISO) {
 
 function isOverdue(assignment) {
   return assignment.status !== "done" && parseISODate(assignment.dueDate) < parseISODate(toISODate(new Date()));
+}
+
+function assignmentCompletedTime(assignment) {
+  const value = assignment.completedAt || assignment.updatedAt || assignment.createdAt || "";
+  const time = new Date(value).getTime();
+  return Number.isNaN(time) ? 0 : time;
+}
+
+function fayePastAssignments() {
+  return [...state.assignments]
+    .filter((assignment) => assignment.employeeId === defaultWorkEmployeeId && assignment.status === "done")
+    .sort((a, b) => assignmentCompletedTime(b) - assignmentCompletedTime(a));
+}
+
+function assignmentSearchText(assignment) {
+  const assignee = employeeById(assignment.employeeId);
+  return [
+    assignment.title,
+    assignment.notes,
+    assignment.priority,
+    assignment.status,
+    assignment.dueDate,
+    assignment.completedAt,
+    assignment.createdAt,
+    assignment.updatedAt,
+    assignment.source,
+    assignment.sourceId,
+    assignee?.name,
+  ].join(" ").toLowerCase();
 }
 
 function priorityWeight(priority) {
@@ -368,6 +415,7 @@ function getNotificationPermission() {
 function render() {
   renderProfile();
   renderMetrics();
+  renderFayeHistory();
   renderAssignmentNotice();
   renderRoleAccess();
   renderFilters();
@@ -416,6 +464,65 @@ function renderMetrics() {
   el.summaryLine.textContent = `${open.length} open - ${dueToday.length} due today - ${overdue.length} overdue`;
 }
 
+function renderFayeHistory() {
+  const completed = fayePastAssignments();
+  const query = state.ui.fayeHistoryQuery.trim().toLowerCase();
+  const visible = query
+    ? completed.filter((assignment) => assignmentSearchText(assignment).includes(query))
+    : completed;
+  const monthKey = toISODate(new Date()).slice(0, 7);
+  const completedThisMonth = completed.filter((assignment) => {
+    const value = assignment.completedAt || assignment.updatedAt || "";
+    return value.slice(0, 7) === monthKey;
+  });
+
+  el.fayeDoneCount.textContent = completed.length;
+  el.fayeDoneThisMonthCount.textContent = completedThisMonth.length;
+  el.fayeLatestDone.textContent = completed.length
+    ? formatHistoryDate(completed[0].completedAt || completed[0].updatedAt)
+    : "No finished work yet";
+
+  if (el.fayeHistorySearchInput.value !== state.ui.fayeHistoryQuery) {
+    el.fayeHistorySearchInput.value = state.ui.fayeHistoryQuery;
+  }
+
+  if (!completed.length) {
+    el.fayeHistoryList.innerHTML = `
+      <div class="history-empty">
+        <strong>No past work yet</strong>
+        <span>Finished work assigned to Faye will appear here.</span>
+      </div>
+    `;
+    return;
+  }
+
+  if (!visible.length) {
+    el.fayeHistoryList.innerHTML = `
+      <div class="history-empty">
+        <strong>No matches</strong>
+        <span>Try a different title, note, or date.</span>
+      </div>
+    `;
+    return;
+  }
+
+  el.fayeHistoryList.replaceChildren(...visible.slice(0, 8).map((assignment) => {
+    const item = document.createElement("button");
+    item.className = "history-item";
+    item.type = "button";
+    item.dataset.historyAssignment = assignment.id;
+    item.innerHTML = `
+      <strong></strong>
+      <span class="history-date"></span>
+      <span class="history-notes"></span>
+    `;
+    item.querySelector("strong").textContent = assignment.title;
+    item.querySelector(".history-date").textContent = formatHistoryDate(assignment.completedAt || assignment.updatedAt);
+    item.querySelector(".history-notes").textContent = assignment.notes || "No details added.";
+    return item;
+  }));
+}
+
 function renderAssignmentNotice() {
   const open = getOpenAssignments();
   const signature = workNoticeSignature(open);
@@ -450,12 +557,18 @@ function renderFilters() {
 function getVisibleAssignments() {
   return [...state.assignments]
     .filter((assignment) => {
+      if (state.ui.filter === "faye-done") {
+        return assignment.employeeId === defaultWorkEmployeeId && assignment.status === "done";
+      }
       if (state.ui.filter === "done") return assignment.status === "done";
       if (state.ui.filter === "overdue") return isOverdue(assignment);
       if (state.ui.filter === "open") return assignment.status !== "done";
       return true;
     })
     .sort((a, b) => {
+      if (state.ui.filter === "faye-done" || state.ui.filter === "done") {
+        return assignmentCompletedTime(b) - assignmentCompletedTime(a);
+      }
       if (a.status !== b.status) return a.status === "done" ? 1 : -1;
       if (a.dueDate !== b.dueDate) return a.dueDate.localeCompare(b.dueDate);
       return priorityWeight(b.priority) - priorityWeight(a.priority);
@@ -474,6 +587,7 @@ function renderAssignments() {
     `;
     const emptyMessages = {
       done: "No finished work yet.",
+      "faye-done": "No finished work assigned to Faye yet.",
       overdue: "No overdue work.",
       open: "Ready for the next assignment."
     };
@@ -1077,6 +1191,22 @@ function wireEvents() {
   el.filterButtons.forEach((button) => {
     button.addEventListener("change", () => {
       setUiState({ filter: button.dataset.filter });
+    });
+  });
+
+  el.fayeHistorySearchInput.addEventListener("input", () => {
+    setUiState({ fayeHistoryQuery: el.fayeHistorySearchInput.value });
+  });
+
+  el.fayeHistoryList.addEventListener("click", (event) => {
+    const target = event.target.closest("[data-history-assignment]");
+    if (!target) return;
+
+    setUiState({ filter: "faye-done" });
+    window.requestAnimationFrame(() => {
+      const escapedId = CSS.escape(target.dataset.historyAssignment);
+      const card = el.assignmentList.querySelector(`[data-assignment-id="${escapedId}"]`);
+      card?.scrollIntoView({ behavior: "smooth", block: "center" });
     });
   });
 
