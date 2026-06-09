@@ -166,6 +166,20 @@ const authUsers = [
     permissions: ["complete_work"]
   }
 ];
+const accountRoleOptions = [
+  {
+    value: "boss",
+    label: "Boss / Team Leader",
+    apps: ["bookings", "clients", "photographers", "work", "invoices", "wages"],
+    permissions: ["manage_bookings", "manage_directory", "manage_work", "sync_work_bookings", "view_work_messages", "manage_invoices", "manage_wages"]
+  },
+  {
+    value: "employee",
+    label: "Employee",
+    apps: ["bookings", "work"],
+    permissions: ["complete_work"]
+  }
+];
 const workDeskOrigins = new Set(
   (process.env.WORK_DESK_ORIGINS || "http://127.0.0.1:4173,http://localhost:4173")
     .split(",")
@@ -419,23 +433,83 @@ function safeEqualsString(left, right) {
   return leftBuffer.length === rightBuffer.length && crypto.timingSafeEqual(leftBuffer, rightBuffer);
 }
 
+function accountRoleOption(value) {
+  return accountRoleOptions.find((option) => option.value === value) || null;
+}
+
+function normalizeAccountRole(value) {
+  return accountRoleOption(String(value || "").trim())?.value || "";
+}
+
+function canChangeAccountRole(user) {
+  return (user?.baseRole || user?.role) === "boss";
+}
+
+function userWithAccountRole(user, roleValue = "") {
+  const baseRole = user?.baseRole || user?.role || "";
+  const roleMode = canChangeAccountRole({ ...user, baseRole })
+    ? (normalizeAccountRole(roleValue) || normalizeAccountRole(user?.roleMode) || normalizeAccountRole(baseRole) || baseRole)
+    : baseRole;
+  const roleOption = accountRoleOption(roleMode) || accountRoleOption(baseRole);
+
+  if (!roleOption) {
+    return {
+      ...user,
+      baseRole,
+      roleMode: baseRole,
+      canChangeRole: false,
+      roleOptions: []
+    };
+  }
+
+  const roleCanChange = canChangeAccountRole({ ...user, baseRole });
+  const usesBaseRole = roleOption.value === baseRole;
+
+  return {
+    ...user,
+    name: usesBaseRole ? (user.name || user.username) : roleOption.label,
+    role: roleOption.value,
+    label: roleOption.label,
+    baseRole,
+    roleMode: roleOption.value,
+    canChangeRole: roleCanChange,
+    roleOptions: roleCanChange
+      ? accountRoleOptions.map(({ value, label }) => ({ value, label }))
+      : [],
+    employeeId: roleOption.value === "employee" ? (user.employeeId || defaultWorkEmployee.id) : (user.employeeId || ""),
+    apps: [...roleOption.apps],
+    permissions: [...roleOption.permissions]
+  };
+}
+
 function sessionUserPayload(user) {
   return {
     username: user.username,
     role: user.role,
+    baseRole: user.baseRole || user.role,
+    roleMode: user.roleMode || user.role,
     label: user.label,
     name: user.name || user.username,
     employeeId: user.employeeId || "",
     apps: Array.isArray(user.apps) ? user.apps : [],
-    permissions: Array.isArray(user.permissions) ? user.permissions : []
+    permissions: Array.isArray(user.permissions) ? user.permissions : [],
+    canChangeRole: Boolean(user.canChangeRole),
+    roleOptions: Array.isArray(user.roleOptions) ? user.roleOptions : []
   };
 }
 
 function createSignedSessionToken(user) {
+  const baseRole = user?.baseRole || user?.role || "";
+  const roleMode = normalizeAccountRole(user?.roleMode);
   const payload = {
     exp: Date.now() + sessionMaxAgeSeconds * 1000,
     username: user.username
   };
+
+  if (roleMode && roleMode !== baseRole) {
+    payload.roleMode = roleMode;
+  }
+
   const encodedPayload = Buffer.from(JSON.stringify(payload)).toString("base64url");
   const message = `${sessionCookieVersion}.${encodedPayload}`;
   return `${message}.${signSessionMessage(message)}`;
@@ -470,7 +544,7 @@ function readSignedSession(token) {
 
   return {
     expiresAt: Number(payload.exp),
-    user: sessionUserPayload(user)
+    user: sessionUserPayload(userWithAccountRole(user, payload.roleMode))
   };
 }
 
@@ -5615,6 +5689,32 @@ async function handleApi(req, res, url) {
     await updateAuthUserPassword(user.username, newPassword);
     expireOtherSessionsForUser(user.username, getSessionToken(req));
     sendJson(res, 200, { ok: true, message: "Password updated." });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/change-role") {
+    const user = currentUser(req);
+    if (!user?.canChangeRole) {
+      sendForbidden(res, "Boss or team leader only.");
+      return;
+    }
+
+    const input = await readBody(req);
+    const role = normalizeAccountRole(input.role);
+    if (!role) {
+      sendJson(res, 400, { errors: ["Choose a valid role."] });
+      return;
+    }
+
+    const baseUser = baseAuthUser(user.username);
+    if (!baseUser) {
+      sendJson(res, 404, { errors: ["Account was not found."] });
+      return;
+    }
+
+    const nextUser = userWithAccountRole(baseUser, role);
+    const token = createSession(nextUser);
+    sendJson(res, 200, { ok: true, user: sessionUserPayload(nextUser) }, { "Set-Cookie": buildSessionCookie(req, token) });
     return;
   }
 

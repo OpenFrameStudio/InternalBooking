@@ -16,11 +16,11 @@
     <link rel="icon" type="image/png" sizes="48x48" href="/favicon-48.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
     <link rel="stylesheet" href="/styles.css" />
-    <link rel="stylesheet" href="/settings.css" />
+    <link rel="stylesheet" href="/settings.css?v=role-settings" />
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
     <script src="/install.js" defer></script>
     <script src="/session-keepalive.js?v=monthly-session" defer></script>
-    <script src="/settings.js" type="module"></script>
+    <script src="/settings.js?v=role-settings" type="module"></script>
   </head>
   <body class="settings-body">
     <main class="settings-shell">
@@ -67,6 +67,14 @@
               <dd id="accountApps">-</dd>
             </div>
           </dl>
+          <form class="settings-form settings-role-form" id="roleForm" hidden>
+            <label>
+              <span>Account role</span>
+              <select id="roleSelect"></select>
+            </label>
+            <p class="settings-message" id="roleMessage" role="status"></p>
+            <button class="settings-submit" id="saveRoleButton" type="submit">Save role</button>
+          </form>
         </article>
 
         <article class="settings-panel">

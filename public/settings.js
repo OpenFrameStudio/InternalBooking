@@ -1,7 +1,8 @@
 const state = {
   user: null,
   status: null,
-  savingPassword: false
+  savingPassword: false,
+  savingRole: false
 };
 
 const el = {
@@ -9,6 +10,10 @@ const el = {
   accountLogin: document.querySelector("#accountLogin"),
   accountRole: document.querySelector("#accountRole"),
   accountApps: document.querySelector("#accountApps"),
+  roleForm: document.querySelector("#roleForm"),
+  roleSelect: document.querySelector("#roleSelect"),
+  roleMessage: document.querySelector("#roleMessage"),
+  saveRoleButton: document.querySelector("#saveRoleButton"),
   statusList: document.querySelector("#statusList"),
   passwordForm: document.querySelector("#passwordForm"),
   currentPassword: document.querySelector("#currentPasswordInput"),
@@ -62,6 +67,34 @@ function renderAccount() {
   el.accountApps.textContent = Array.isArray(user.apps) && user.apps.length
     ? user.apps.map(appLabel).join(", ")
     : "-";
+  renderRoleForm();
+}
+
+function renderRoleForm() {
+  const user = state.user || {};
+  const roleOptions = Array.isArray(user.roleOptions) ? user.roleOptions : [];
+  el.roleForm.hidden = !user.canChangeRole || roleOptions.length === 0;
+  if (el.roleForm.hidden) return;
+
+  const currentOptions = [...el.roleSelect.options].map((option) => option.value).join("|");
+  const nextOptions = roleOptions.map((option) => option.value).join("|");
+  if (currentOptions !== nextOptions) {
+    el.roleSelect.replaceChildren(...roleOptions.map((option) => {
+      const item = document.createElement("option");
+      item.value = option.value;
+      item.textContent = option.label;
+      return item;
+    }));
+  }
+
+  el.roleSelect.value = user.roleMode || user.role || "";
+  updateRoleButton();
+}
+
+function updateRoleButton() {
+  const user = state.user || {};
+  el.saveRoleButton.disabled = state.savingRole || el.roleSelect.value === (user.roleMode || user.role || "");
+  el.saveRoleButton.textContent = state.savingRole ? "Saving" : "Save role";
 }
 
 function statusRows() {
@@ -94,6 +127,35 @@ function renderStatus() {
 function setPasswordMessage(message, type = "") {
   el.passwordMessage.textContent = message;
   el.passwordMessage.className = `settings-message${type ? ` ${type}` : ""}`;
+}
+
+function setRoleMessage(message, type = "") {
+  el.roleMessage.textContent = message;
+  el.roleMessage.className = `settings-message${type ? ` ${type}` : ""}`;
+}
+
+async function changeRole(event) {
+  event.preventDefault();
+  if (state.savingRole) return;
+
+  state.savingRole = true;
+  updateRoleButton();
+  setRoleMessage("Saving role...");
+
+  try {
+    const data = await apiFetch("/api/change-role", {
+      method: "POST",
+      body: JSON.stringify({ role: el.roleSelect.value })
+    });
+    state.user = data.user || state.user;
+    renderAccount();
+    setRoleMessage("Role updated.", "success");
+  } catch (error) {
+    setRoleMessage(error.message || "Role could not be changed.", "error");
+  } finally {
+    state.savingRole = false;
+    updateRoleButton();
+  }
 }
 
 async function changePassword(event) {
@@ -159,6 +221,11 @@ async function loadSettings() {
 }
 
 el.passwordForm.addEventListener("submit", changePassword);
+el.roleForm.addEventListener("submit", changeRole);
+el.roleSelect.addEventListener("change", () => {
+  setRoleMessage("");
+  updateRoleButton();
+});
 el.logoutButton.addEventListener("click", logout);
 
 await loadSettings();
