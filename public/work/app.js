@@ -43,8 +43,11 @@ const el = {
   fayeDoneCount: $("#fayeDoneCount"),
   fayeDoneThisMonthCount: $("#fayeDoneThisMonthCount"),
   fayeHistoryList: $("#fayeHistoryList"),
+  fayeHistoryMonthLabel: $("#fayeHistoryMonthLabel"),
   fayeHistorySearchInput: $("#fayeHistorySearchInput"),
   fayeLatestDone: $("#fayeLatestDone"),
+  fayeNextMonthButton: $("#fayeNextMonthButton"),
+  fayePreviousMonthButton: $("#fayePreviousMonthButton"),
   filterButtons: $$("[data-filter]"),
   logoutButton: $("#logoutButton"),
   messageList: $("#messageList"),
@@ -88,6 +91,7 @@ const state = {
     assignmentError: "",
     assignmentNoticeDismissedSignature: readWorkNoticeDismissedSignature(),
     bookingSyncStatus: initialBookingSyncStatus,
+    fayeHistoryMonth: currentMonthKey(),
     fayeHistoryQuery: "",
     filter: "open",
     loggingOut: false,
@@ -317,6 +321,49 @@ function formatHistoryDate(value) {
   }).format(date);
 }
 
+function currentMonthKey() {
+  return toISODate(new Date()).slice(0, 7);
+}
+
+function normalizeMonthKey(value) {
+  const monthKey = String(value || "");
+  return /^\d{4}-\d{2}$/.test(monthKey) ? monthKey : currentMonthKey();
+}
+
+function monthDate(monthKey) {
+  const [year, month] = normalizeMonthKey(monthKey).split("-").map(Number);
+  return new Date(year, month - 1, 1);
+}
+
+function addMonths(monthKey, amount) {
+  const date = monthDate(monthKey);
+  date.setMonth(date.getMonth() + amount);
+  return toISODate(date).slice(0, 7);
+}
+
+function formatMonthLabel(monthKey) {
+  return formatDate(monthDate(monthKey), { month: "long", year: "numeric" });
+}
+
+function monthKeyFromValue(value) {
+  const raw = String(value || "");
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw.slice(0, 7);
+
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return "";
+  return toISODate(date).slice(0, 7);
+}
+
+function selectedFayeHistoryMonth() {
+  return normalizeMonthKey(state.ui.fayeHistoryMonth);
+}
+
+function assignmentHistoryMonthKey(assignment) {
+  return monthKeyFromValue(
+    assignment.completedAt || assignment.updatedAt || assignment.createdAt || assignment.dueDate
+  );
+}
+
 function formatFileSize(bytes) {
   const size = Number(bytes || 0);
   if (size < 1024) return `${Math.max(0, Math.round(size))} B`;
@@ -467,17 +514,20 @@ function renderMetrics() {
 function renderFayeHistory() {
   const completed = fayePastAssignments();
   const query = state.ui.fayeHistoryQuery.trim().toLowerCase();
+  const selectedMonth = selectedFayeHistoryMonth();
+  const currentMonth = currentMonthKey();
+  const completedMonths = [...new Set(completed.map(assignmentHistoryMonthKey).filter(Boolean))].sort();
+  const earliestMonth = completedMonths[0] || currentMonth;
+  const completedInMonth = completed.filter((assignment) => assignmentHistoryMonthKey(assignment) === selectedMonth);
   const visible = query
-    ? completed.filter((assignment) => assignmentSearchText(assignment).includes(query))
-    : completed;
-  const monthKey = toISODate(new Date()).slice(0, 7);
-  const completedThisMonth = completed.filter((assignment) => {
-    const value = assignment.completedAt || assignment.updatedAt || "";
-    return value.slice(0, 7) === monthKey;
-  });
+    ? completedInMonth.filter((assignment) => assignmentSearchText(assignment).includes(query))
+    : completedInMonth;
 
   el.fayeDoneCount.textContent = completed.length;
-  el.fayeDoneThisMonthCount.textContent = completedThisMonth.length;
+  el.fayeDoneThisMonthCount.textContent = completedInMonth.length;
+  el.fayeHistoryMonthLabel.textContent = formatMonthLabel(selectedMonth);
+  el.fayePreviousMonthButton.disabled = !completed.length || selectedMonth <= earliestMonth;
+  el.fayeNextMonthButton.disabled = selectedMonth >= currentMonth;
   el.fayeLatestDone.textContent = completed.length
     ? formatHistoryDate(completed[0].completedAt || completed[0].updatedAt)
     : "No finished work yet";
@@ -496,10 +546,20 @@ function renderFayeHistory() {
     return;
   }
 
+  if (!completedInMonth.length) {
+    el.fayeHistoryList.innerHTML = `
+      <div class="history-empty">
+        <strong>No work in ${formatMonthLabel(selectedMonth)}</strong>
+        <span>Use the arrows to check another month.</span>
+      </div>
+    `;
+    return;
+  }
+
   if (!visible.length) {
     el.fayeHistoryList.innerHTML = `
       <div class="history-empty">
-        <strong>No matches</strong>
+        <strong>No matches in ${formatMonthLabel(selectedMonth)}</strong>
         <span>Try a different title, note, or date.</span>
       </div>
     `;
@@ -558,7 +618,11 @@ function getVisibleAssignments() {
   return [...state.assignments]
     .filter((assignment) => {
       if (state.ui.filter === "faye-done") {
-        return assignment.employeeId === defaultWorkEmployeeId && assignment.status === "done";
+        return (
+          assignment.employeeId === defaultWorkEmployeeId &&
+          assignment.status === "done" &&
+          assignmentHistoryMonthKey(assignment) === selectedFayeHistoryMonth()
+        );
       }
       if (state.ui.filter === "done") return assignment.status === "done";
       if (state.ui.filter === "overdue") return isOverdue(assignment);
@@ -587,7 +651,7 @@ function renderAssignments() {
     `;
     const emptyMessages = {
       done: "No finished work yet.",
-      "faye-done": "No finished work assigned to Faye yet.",
+      "faye-done": `No Faye work finished in ${formatMonthLabel(selectedFayeHistoryMonth())}.`,
       overdue: "No overdue work.",
       open: "Ready for the next assignment."
     };
@@ -1180,6 +1244,12 @@ function refreshIcons() {
   }
 }
 
+function changeFayeHistoryMonth(amount) {
+  setUiState({
+    fayeHistoryMonth: addMonths(selectedFayeHistoryMonth(), amount),
+  });
+}
+
 function wireEvents() {
   el.logoutButton.addEventListener("click", logout);
   el.addAssignmentButton.addEventListener("click", () => openAssignmentDialog());
@@ -1197,6 +1267,9 @@ function wireEvents() {
   el.fayeHistorySearchInput.addEventListener("input", () => {
     setUiState({ fayeHistoryQuery: el.fayeHistorySearchInput.value });
   });
+
+  el.fayePreviousMonthButton.addEventListener("click", () => changeFayeHistoryMonth(-1));
+  el.fayeNextMonthButton.addEventListener("click", () => changeFayeHistoryMonth(1));
 
   el.fayeHistoryList.addEventListener("click", (event) => {
     const target = event.target.closest("[data-history-assignment]");

@@ -131,6 +131,31 @@
   text-transform: uppercase;
 }
 
+.history-month-nav {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 40px;
+  align-items: center;
+  gap: 8px;
+}
+
+.history-month-nav strong {
+  min-width: 0;
+  border: 1px solid rgba(17, 122, 93, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.58);
+  color: var(--ink);
+  padding: 10px 12px;
+  font-size: 0.9rem;
+  font-weight: 900;
+  line-height: 1.2;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.history-month-button {
+  min-height: 40px;
+}
+
 .history-search {
   display: grid;
   gap: 7px;
@@ -326,6 +351,7 @@
 
 :root[data-theme="dark"] .faye-history-panel,
 :root[data-theme="dark"] .history-metrics div,
+:root[data-theme="dark"] .history-month-nav strong,
 :root[data-theme="dark"] .history-item,
 :root[data-theme="dark"] .history-empty {
   border-color: rgba(90, 212, 173, 0.18);

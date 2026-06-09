@@ -16,11 +16,11 @@
     <link rel="icon" type="image/png" sizes="48x48" href="/favicon-48.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
     <link rel="stylesheet" href="/styles.css" />
-    <link rel="stylesheet" href="/work/styles.css?v=faye-history" />
+    <link rel="stylesheet" href="/work/styles.css?v=faye-months" />
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
     <script src="/install.js" defer></script>
     <script src="/session-keepalive.js?v=monthly-session" defer></script>
-    <script src="/work/app.js?v=faye-history" type="module"></script>
+    <script src="/work/app.js?v=faye-months" type="module"></script>
   </head>
   <body>
     <main class="shell">
@@ -83,8 +83,18 @@
                 </div>
                 <div>
                   <span id="fayeDoneThisMonthCount">0</span>
-                  <small>this month</small>
+                  <small>in month</small>
                 </div>
+              </div>
+
+              <div class="history-month-nav" aria-label="Faye history month">
+                <button class="ghost-button icon-ghost history-month-button" id="fayePreviousMonthButton" type="button" title="Previous month" aria-label="Previous month">
+                  <i data-lucide="chevron-left"></i>
+                </button>
+                <strong id="fayeHistoryMonthLabel" aria-live="polite">This month</strong>
+                <button class="ghost-button icon-ghost history-month-button" id="fayeNextMonthButton" type="button" title="Next month" aria-label="Next month">
+                  <i data-lucide="chevron-right"></i>
+                </button>
               </div>
 
               <label class="history-search">
