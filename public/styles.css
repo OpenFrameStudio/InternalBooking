@@ -1254,6 +1254,11 @@ button:focus-visible {
   background: rgba(17, 122, 93, 0.12);
 }
 
+.invoice-status.pending-send {
+  color: #8a5a00;
+  background: rgba(245, 166, 35, 0.16);
+}
+
 .invoice-status.void {
   color: var(--red);
   background: rgba(166, 64, 58, 0.1);

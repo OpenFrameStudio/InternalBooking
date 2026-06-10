@@ -1383,6 +1383,16 @@ function invoiceStatusLabel(status) {
   }[status] || 'Draft';
 }
 
+function invoiceIsPendingSend(invoice) {
+  return invoice?.status === 'draft' && !invoice?.sentAt;
+}
+
+function invoiceListStatusLabel(invoice) {
+  if (invoiceIsPendingSend(invoice)) return 'Pending send';
+  if (invoice.status === 'draft') return 'Not paid';
+  return invoiceStatusLabel(invoice.status);
+}
+
 function invoiceBookingLabel(invoice) {
   const start = new Date(invoice.bookingStartAt);
   if (Number.isNaN(start.getTime())) return invoice.propertyAddress || 'Booking';
@@ -1495,6 +1505,10 @@ function updateWageStats() {
 }
 
 function invoiceMatchesFilters(invoice) {
+  if (state.invoiceFilters.status === 'pending-send') {
+    return invoiceIsPendingSend(invoice);
+  }
+
   if (state.invoiceFilters.status !== 'all' && invoice.status !== state.invoiceFilters.status) {
     return false;
   }
@@ -1590,9 +1604,11 @@ function renderInvoices() {
     item.classList.toggle('paid', invoice.status === 'paid');
     item.classList.toggle('void', invoice.status === 'void');
     item.querySelector('h3').textContent = `${invoice.invoiceNumber} - ${invoice.propertyAddress || 'Booking invoice'}`;
-    item.querySelector('.invoice-status').textContent = invoiceStatusLabel(invoice.status);
-    item.querySelector('.invoice-status').classList.toggle('paid', invoice.status === 'paid');
-    item.querySelector('.invoice-status').classList.toggle('void', invoice.status === 'void');
+    const status = item.querySelector('.invoice-status');
+    status.textContent = invoiceListStatusLabel(invoice);
+    status.classList.toggle('paid', invoice.status === 'paid');
+    status.classList.toggle('void', invoice.status === 'void');
+    status.classList.toggle('pending-send', invoiceIsPendingSend(invoice));
     item.querySelector('.invoice-client').textContent = [invoice.clientName, invoice.agentName].filter(Boolean).join(' - ') || 'No client saved';
     item.querySelector('.invoice-booking').textContent = `Issued ${formatInvoiceDate(invoice.issuedAt)} - due ${formatInvoiceDate(invoice.dueAt)}`;
     item.querySelector('.invoice-services').textContent = [
