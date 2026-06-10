@@ -15,7 +15,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="48x48" href="/favicon-48.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
-    <link rel="stylesheet" href="/styles.css?v=pending-send" />
+    <link rel="stylesheet" href="/styles.css?v=booking-agent-save-2" />
     <link rel="stylesheet" href="/work/styles.css?v=assignment-photos" />
     <script src="/install.js" defer></script>
     <script src="/session-keepalive.js?v=monthly-session" defer></script>
@@ -144,6 +144,10 @@
                 </div>
 
                 <p class="helper-text">Client and agent emails are included in guest emails automatically.</p>
+                <div class="client-save-row" id="bookingClientSaveRow" hidden>
+                  <button class="ghost-button" id="saveBookingClientButton" type="button">Save agent</button>
+                  <p id="bookingClientSaveMessage" role="status"></p>
+                </div>
               </section>
 
               <fieldset class="service-picker">
@@ -848,6 +852,6 @@
 
     <section class="invoice-print-sheet" id="invoicePrintSheet" hidden aria-label="Printable invoice"></section>
 
-    <script src="/app.js?v=pending-send" type="module"></script>
+    <script src="/app.js?v=booking-agent-save-2" type="module"></script>
   </body>
 </html>
