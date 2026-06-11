@@ -691,10 +691,7 @@ button:disabled {
 
 .client-save-row {
   display: flex;
-  align-items: center;
-  gap: 12px;
   justify-content: flex-start;
-  flex-wrap: wrap;
 }
 
 .helper-text {
@@ -966,7 +963,6 @@ button:focus-visible {
 }
 
 #formMessage,
-#bookingClientSaveMessage,
 #clientMessage,
 #photographerMessage,
 #invoiceMessage,
@@ -980,7 +976,6 @@ button:focus-visible {
 }
 
 #formMessage.error,
-#bookingClientSaveMessage.error,
 #clientMessage.error,
 #photographerMessage.error,
 #invoiceMessage.error,
@@ -991,7 +986,6 @@ button:focus-visible {
 }
 
 #formMessage.success,
-#bookingClientSaveMessage.success,
 #clientMessage.success,
 #photographerMessage.success,
 #invoiceMessage.success,

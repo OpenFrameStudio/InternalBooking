@@ -18,9 +18,6 @@ const el = {
   propertyAddress: $('#propertyAddressInput'),
   formMessage: $('#formMessage'),
   clientMessage: $('#clientMessage'),
-  bookingClientSaveRow: $('#bookingClientSaveRow'),
-  bookingClientSaveButton: $('#saveBookingClientButton'),
-  bookingClientSaveMessage: $('#bookingClientSaveMessage'),
   photographerMessage: $('#photographerMessage'),
   date: $('#dateInput'),
   time: $('#timeInput'),
@@ -391,7 +388,6 @@ function applyAppAccess() {
   el.appLinks.forEach((link) => {
     link.hidden = !userCanAccess(link.dataset.appLink);
   });
-  el.bookingClientSaveRow.hidden = !userCanAccess('clients');
   el.testLarkButton.hidden = !userHasPermission('manage_bookings');
   el.sendLogSection.hidden = !userCanViewSendLogs();
 
@@ -2486,58 +2482,6 @@ async function updateWageStatus(id, status) {
   }
 }
 
-function bookingClientPayload() {
-  return {
-    id: state.bookingForm.selectedClientId || undefined,
-    name: el.clientName.value.trim(),
-    email: el.clientEmail.value.trim(),
-    agentName: el.agentName.value.trim(),
-    agentPhone: el.agentPhone.value.trim()
-  };
-}
-
-async function saveBookingClient() {
-  const payload = bookingClientPayload();
-  if (!payload.name) {
-    setMessage(el.bookingClientSaveMessage, 'Enter the agency or client name before saving.', 'error');
-    el.clientName.focus();
-    return;
-  }
-
-  el.bookingClientSaveButton.disabled = true;
-  el.bookingClientSaveButton.textContent = 'Saving';
-  setMessage(el.bookingClientSaveMessage, 'Saving agent...');
-
-  try {
-    const { response, data } = await fetchJson('/api/clients', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    if (!response.ok) {
-      setMessage(el.bookingClientSaveMessage, (data.errors || ['Could not save agent.']).join(' '), 'error');
-      return;
-    }
-
-    state.clients = data.clients || state.clients;
-    writeStored(storageKeys.clients, state.clients);
-    updateBookingFormState({
-      selectedClientId: data.client.id,
-      clientSearchQuery: data.client ? clientOptionLabel(data.client) : '',
-      clientSearchOpen: false
-    }, { renderSelections: false });
-    renderClientOptions();
-    renderClientList();
-    applySelectedClient();
-    setMessage(el.bookingClientSaveMessage, 'Agent saved.', 'success');
-  } catch {
-    setMessage(el.bookingClientSaveMessage, 'Could not reach the client directory.', 'error');
-  } finally {
-    el.bookingClientSaveButton.disabled = false;
-    el.bookingClientSaveButton.textContent = 'Save agent';
-  }
-}
-
 async function saveDirectoryClient(event) {
   event.preventDefault();
   const payload = {
@@ -3056,10 +3000,6 @@ document.addEventListener('keydown', (event) => {
 el.clientEmail.addEventListener('input', () => syncManagedGuestEmail(el.clientEmail, 'syncedClientEmail'));
 el.clientEmail.addEventListener('change', () => syncManagedGuestEmail(el.clientEmail, 'syncedClientEmail'));
 el.clientEmail.addEventListener('blur', () => syncManagedGuestEmail(el.clientEmail, 'syncedClientEmail'));
-el.saveBookingClientButton.addEventListener('click', saveBookingClient);
-[el.clientName, el.clientEmail, el.agentName, el.agentPhone].forEach((input) => {
-  input.addEventListener('input', () => setMessage(el.bookingClientSaveMessage, ''));
-});
 el.photographerEmail.addEventListener('input', () => syncManagedGuestEmail(el.photographerEmail, 'syncedPhotographerEmail'));
 el.photographerEmail.addEventListener('change', () => syncManagedGuestEmail(el.photographerEmail, 'syncedPhotographerEmail'));
 el.photographerEmail.addEventListener('blur', () => syncManagedGuestEmail(el.photographerEmail, 'syncedPhotographerEmail'));
