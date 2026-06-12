@@ -54,8 +54,7 @@ function appLabel(app) {
     clients: "Clients",
     photographers: "Photographers",
     work: "Work",
-    invoices: "Invoices",
-    wages: "Wages"
+    invoices: "Invoices"
   }[app] || app;
 }
 
@@ -103,7 +102,6 @@ function statusRows() {
     ["Lark calendar", status.larkConfigured],
     ["Booking invite email", status.calendarInviteEmailConfigured],
     ["Invoice email", status.invoiceEmailConfigured],
-    ["Wage proforma email", status.wageEmailConfigured],
     ["Work Lark notifications", status.workLarkNotificationConfigured],
     ["Supabase storage", status.supabaseConfigured],
     ["Calendar notifications", status.larkNotificationsEnabled]

@@ -21,13 +21,6 @@ const appCatalog = [
     tone: "violet",
   },
   {
-    id: "wages",
-    name: "Wages",
-    href: "/wages",
-    icon: "banknote",
-    tone: "green",
-  },
-  {
     id: "clients",
     name: "Clients",
     href: "/clients",
