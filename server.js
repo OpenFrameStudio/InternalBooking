@@ -2376,13 +2376,14 @@ function drawInvoicePdf(doc, invoice, billingClient = null) {
   });
 
   const tableX = margin;
-  const tableY = 392;
+  const itemRows = invoicePdfItems(invoice);
+  const hasMultipleRows = itemRows.length > 1;
+  const tableY = hasMultipleRows ? 370 : 392;
   const columnWidths = [182, 82, 112, 115];
-  const rowHeight = 58;
-  const headerHeight = 34;
+  const rowHeight = itemRows.length > 3 ? 36 : (hasMultipleRows ? 44 : 58);
+  const headerHeight = hasMultipleRows ? 30 : 34;
   const tableWidth = columnWidths.reduce((sum, width) => sum + width, 0);
   const headers = ["PRODUCT", "QUANTITY", "PRICE", "SUBTOTAL"];
-  const itemRows = invoicePdfItems(invoice);
 
   doc.rect(tableX, tableY, tableWidth, headerHeight).fill("#e7e7e7");
   doc.fillColor("#000").font("Helvetica-Bold").fontSize(10);
@@ -2392,7 +2393,7 @@ function drawInvoicePdf(doc, invoice, billingClient = null) {
     cursorX += columnWidths[index];
   });
 
-  doc.font("Helvetica").fontSize(10);
+  doc.font("Helvetica").fontSize(hasMultipleRows ? 9 : 10);
   itemRows.forEach((item, index) => {
     cursorX = tableX;
     const rowY = tableY + headerHeight + index * rowHeight;
@@ -2407,10 +2408,10 @@ function drawInvoicePdf(doc, invoice, billingClient = null) {
   });
 
   const tableBottom = tableY + headerHeight + itemRows.length * rowHeight;
-  const totalY = Math.max(524, tableBottom + 46);
+  const totalY = hasMultipleRows ? Math.max(556, tableBottom + 34) : Math.max(524, tableBottom + 46);
 
   doc.save();
-  const stampY = Math.max(559, totalY + 42);
+  const stampY = hasMultipleRows ? Math.max(584, tableBottom + 44) : Math.max(559, totalY + 42);
   doc.rotate(-10, { origin: [140, stampY + 16] });
   doc.rect(110, stampY, 96, 30).lineWidth(2).stroke("#f5a623");
   doc.fillColor("#f5a623").font("Helvetica-Bold").fontSize(18).text(invoice.status === "paid" ? "PAID" : invoice.status === "void" ? "VOID" : "UNPAID", 118, stampY + 6);
@@ -2418,7 +2419,7 @@ function drawInvoicePdf(doc, invoice, billingClient = null) {
 
   const totalX = 324;
   const totalW = 219;
-  const totalRowH = 33;
+  const totalRowH = hasMultipleRows ? 30 : 33;
   const totalRows = [
     ["Total", formatInvoiceMoney(invoice.subtotal)],
     ["GST (10%)", formatInvoiceMoney(invoice.gstAmount)],
@@ -2434,7 +2435,9 @@ function drawInvoicePdf(doc, invoice, billingClient = null) {
     drawPdfCell(doc, value, totalX + totalW / 2, y, totalW / 2, totalRowH, { align: "center" });
   });
 
-  const paymentY = Math.max(676, totalY + totalRowH * totalRows.length + 62);
+  const paymentY = hasMultipleRows
+    ? Math.max(686, tableBottom + 78)
+    : Math.max(676, totalY + totalRowH * totalRows.length + 62);
   doc.font("Helvetica-Bold").fontSize(13).fillColor("#000").text("PAYMENT INFORMATION", margin, paymentY);
   doc.font("Helvetica").fontSize(10.5).fillColor("#787878");
   [
