@@ -84,14 +84,9 @@ const el = {
   manualInvoiceAgent: $('#manualInvoiceAgentInput'),
   manualInvoiceAgentPhone: $('#manualInvoiceAgentPhoneInput'),
   manualInvoiceProperty: $('#manualInvoicePropertyInput'),
-  manualInvoiceServicesFieldset: $('#manualInvoiceServicesFieldset'),
-  manualInvoiceServiceInputs: $$('input[name=invoiceServices]'),
-  manualInvoiceCustomItem: $('#manualInvoiceCustomItemInput'),
-  manualInvoiceCustomAmount: $('#manualInvoiceCustomAmountInput'),
-  manualInvoiceCustomRow: $('#manualInvoiceCustomRow'),
-  manualInvoicePriceFieldset: $('#manualInvoicePriceFieldset'),
-  manualInvoicePriceList: $('#manualInvoicePriceList'),
-  manualInvoicePriceTotalPreview: $('#manualInvoicePriceTotalPreview'),
+  manualInvoiceItemsFieldset: $('#manualInvoiceItemsFieldset'),
+  manualInvoiceItemList: $('#manualInvoiceItemList'),
+  addManualInvoiceItemButton: $('#addManualInvoiceItemButton'),
   manualInvoiceTotalPreview: $('#manualInvoiceTotalPreview'),
   manualInvoiceMessage: $('#manualInvoiceMessage'),
   cancelManualInvoiceButton: $('#cancelManualInvoiceButton'),
@@ -1420,11 +1415,6 @@ function invoiceBookingLabel(invoice) {
   return `${invoice.propertyAddress || 'Booking'} - ${dateFormatter.format(start)}, ${timeFormatter.format(start)}`;
 }
 
-function invoiceProductDescription(invoice) {
-  const serviceNames = (invoice.items || []).map((item) => item.name).filter(Boolean).join(' + ');
-  return [invoice.propertyAddress || 'Booking', serviceNames].filter(Boolean).join('\n');
-}
-
 function invoiceStampLabel(invoice) {
   if (invoice.status === 'paid') return 'PAID';
   if (invoice.status === 'void') return 'VOID';
@@ -1615,7 +1605,7 @@ function renderInvoices() {
     empty.className = 'empty-state';
     empty.textContent = state.invoices.length
       ? 'No invoices match this filter.'
-      : 'No invoices yet. Create or sync booking invoices and they will appear here.';
+      : 'No invoices yet. Create an invoice or sync booking invoices and they will appear here.';
     el.invoiceList.append(empty);
     return;
   }
@@ -1677,7 +1667,10 @@ function renderInvoices() {
 
 function upsertStateInvoice(invoice) {
   if (!invoice || !userCanAccess('invoices')) return;
-  const index = state.invoices.findIndex((item) => item.id === invoice.id || item.bookingId === invoice.bookingId);
+  const index = state.invoices.findIndex((item) => (
+    item.id === invoice.id
+    || (invoice.bookingId && item.bookingId === invoice.bookingId)
+  ));
   if (index >= 0) state.invoices[index] = invoice;
   else state.invoices.unshift(invoice);
   cacheInvoices();
@@ -1924,54 +1917,6 @@ function addInvoicePriceRow(item, index) {
   el.invoicePriceList.append(row);
 }
 
-function manualInvoicePriceRows() {
-  return [...el.manualInvoicePriceList.querySelectorAll('.invoice-price-row')];
-}
-
-function readManualInvoicePriceItems() {
-  return manualInvoicePriceRows().map((row) => {
-    const input = row.querySelector('input');
-    return {
-      name: row.dataset.invoiceItemName || 'Service',
-      quantity: 1,
-      unitPrice: Number(input?.value || 0)
-    };
-  });
-}
-
-function updateManualInvoicePriceTotalPreview() {
-  const subtotal = readManualInvoicePriceItems().reduce((sum, item) => {
-    return sum + (Number.isFinite(item.unitPrice) ? item.unitPrice : 0);
-  }, 0);
-  const gst = subtotal * 0.1;
-  const total = subtotal + gst;
-  el.manualInvoicePriceTotalPreview.textContent = `${formatMoney(total)} incl. GST (${formatMoney(gst)} GST)`;
-}
-
-function addManualInvoicePriceRow(item, index) {
-  const row = document.createElement('label');
-  row.className = 'invoice-price-row';
-  row.dataset.invoiceItemName = item.name || `Item ${index + 1}`;
-
-  const label = document.createElement('span');
-  label.className = 'invoice-price-label';
-  label.textContent = row.dataset.invoiceItemName;
-
-  const input = document.createElement('input');
-  input.type = 'number';
-  input.min = '0';
-  input.step = '0.01';
-  input.inputMode = 'decimal';
-  input.required = true;
-  const price = Number(item.unitPrice ?? item.amount ?? 0);
-  input.value = Number.isFinite(price) ? price.toFixed(2) : '0.00';
-  input.setAttribute('aria-label', `${row.dataset.invoiceItemName} price`);
-  input.addEventListener('input', updateManualInvoicePriceTotalPreview);
-
-  row.append(label, input);
-  el.manualInvoicePriceList.append(row);
-}
-
 function openInvoicePriceDialog(id) {
   const invoice = state.invoices.find((item) => item.id === id);
   if (!invoice) {
@@ -2060,43 +2005,107 @@ async function saveInvoicePrices(event) {
   }
 }
 
-function manualInvoiceItems() {
-  const serviceItems = el.manualInvoiceServiceInputs
-    .filter((input) => input.checked)
-    .map((input) => ({
-      name: input.value,
-      quantity: 1,
-      unitPrice: manualInvoiceServicePrices[input.value] || 0
-    }));
-  const customName = el.manualInvoiceCustomItem.value.trim();
-  const customAmount = Number(el.manualInvoiceCustomAmount.value || 0);
-  if (customName || customAmount > 0) {
-    serviceItems.push({
-      name: customName,
-      quantity: 1,
-      unitPrice: Number.isFinite(customAmount) ? customAmount : 0
-    });
-  }
-  return serviceItems;
+function manualInvoiceItemRows() {
+  return [...el.manualInvoiceItemList.querySelectorAll('.invoice-line-row')];
+}
+
+function readManualInvoiceItems() {
+  return manualInvoiceItemRows().map((row) => ({
+    name: row.querySelector('[data-field="name"]')?.value.trim() || '',
+    quantity: Number(row.querySelector('[data-field="quantity"]')?.value || 0),
+    unitPrice: Number(row.querySelector('[data-field="unitPrice"]')?.value || 0)
+  }));
 }
 
 function updateManualInvoiceTotal() {
-  const subtotal = manualInvoiceItems().reduce((sum, item) => sum + Number(item.unitPrice || 0), 0);
-  const total = subtotal * 1.1;
-  el.manualInvoiceTotalPreview.textContent = `${formatMoney(total)} incl. GST`;
+  const subtotal = readManualInvoiceItems().reduce((sum, item) => {
+    const quantity = Number.isFinite(item.quantity) ? item.quantity : 0;
+    const unitPrice = Number.isFinite(item.unitPrice) ? item.unitPrice : 0;
+    return sum + quantity * unitPrice;
+  }, 0);
+  const gst = subtotal * 0.1;
+  const total = subtotal + gst;
+  el.manualInvoiceTotalPreview.textContent = `${formatMoney(total)} incl. GST (${formatMoney(gst)} GST)`;
 }
 
-function setManualInvoiceItemControlsHidden(hidden) {
-  el.manualInvoiceServicesFieldset.hidden = hidden;
-  el.manualInvoiceCustomRow.hidden = hidden;
-  el.manualInvoiceTotalPreview.hidden = hidden;
+function updateManualInvoiceRemoveButtons() {
+  const rows = manualInvoiceItemRows();
+  rows.forEach((row) => {
+    const removeButton = row.querySelector('.remove-invoice-item-button');
+    if (removeButton) removeButton.disabled = rows.length <= 1;
+  });
 }
 
-function setManualInvoicePriceControlsHidden(hidden) {
-  el.manualInvoicePriceFieldset.hidden = hidden;
-  if (hidden) {
-    el.manualInvoicePriceList.innerHTML = '';
+function addManualInvoiceItemRow(item = {}, index = manualInvoiceItemRows().length) {
+  const row = document.createElement('div');
+  row.className = 'invoice-line-row';
+
+  const nameLabel = document.createElement('label');
+  const nameText = document.createElement('span');
+  nameText.textContent = 'Product / service';
+  const nameInput = document.createElement('input');
+  nameInput.type = 'text';
+  nameInput.autocomplete = 'off';
+  nameInput.required = true;
+  nameInput.dataset.field = 'name';
+  nameInput.value = item.name || '';
+  nameLabel.append(nameText, nameInput);
+
+  const quantityLabel = document.createElement('label');
+  const quantityText = document.createElement('span');
+  quantityText.textContent = 'Qty';
+  const quantityInput = document.createElement('input');
+  quantityInput.type = 'number';
+  quantityInput.min = '0.01';
+  quantityInput.step = '0.01';
+  quantityInput.inputMode = 'decimal';
+  quantityInput.required = true;
+  quantityInput.dataset.field = 'quantity';
+  const quantity = Number(item.quantity ?? 1);
+  quantityInput.value = Number.isFinite(quantity) && quantity > 0 ? String(quantity) : '1';
+  quantityLabel.append(quantityText, quantityInput);
+
+  const priceLabel = document.createElement('label');
+  const priceText = document.createElement('span');
+  priceText.textContent = 'Price';
+  const priceInput = document.createElement('input');
+  priceInput.type = 'number';
+  priceInput.min = '0';
+  priceInput.step = '0.01';
+  priceInput.inputMode = 'decimal';
+  priceInput.required = true;
+  priceInput.dataset.field = 'unitPrice';
+  const price = Number(item.unitPrice ?? item.amount ?? 0);
+  priceInput.value = Number.isFinite(price) ? price.toFixed(2) : '0.00';
+  priceLabel.append(priceText, priceInput);
+
+  const removeButton = document.createElement('button');
+  removeButton.className = 'ghost-button danger-button remove-invoice-item-button';
+  removeButton.type = 'button';
+  removeButton.textContent = 'Remove';
+  removeButton.addEventListener('click', () => {
+    row.remove();
+    updateManualInvoiceRemoveButtons();
+    updateManualInvoiceTotal();
+  });
+
+  row.append(nameLabel, quantityLabel, priceLabel, removeButton);
+  el.manualInvoiceItemList.append(row);
+  [nameInput, quantityInput, priceInput].forEach((input) => input.addEventListener('input', updateManualInvoiceTotal));
+  updateManualInvoiceRemoveButtons();
+  updateManualInvoiceTotal();
+
+  if (index > 0) {
+    requestAnimationFrame(() => nameInput.focus());
   }
+}
+
+function resetManualInvoiceItems(items = []) {
+  el.manualInvoiceItemList.innerHTML = '';
+  const rows = items.length ? items : [{ name: 'Photography', quantity: 1, unitPrice: manualInvoiceServicePrices.Photography }];
+  rows.forEach(addManualInvoiceItemRow);
+  updateManualInvoiceRemoveButtons();
+  updateManualInvoiceTotal();
 }
 
 function openManualInvoiceDialog(invoice = null) {
@@ -2112,21 +2121,10 @@ function openManualInvoiceDialog(invoice = null) {
   el.manualInvoiceAgent.value = isEditing ? (invoice.agentName || '') : '';
   el.manualInvoiceAgentPhone.value = isEditing ? (invoice.agentPhone || '') : '';
   el.manualInvoiceProperty.value = isEditing ? (invoice.propertyAddress || '') : '';
-  el.manualInvoiceServiceInputs.forEach((input) => {
-    input.checked = !isEditing && input.value === 'Photography';
-  });
-  el.manualInvoiceCustomItem.value = '';
-  el.manualInvoiceCustomAmount.value = '';
-  setManualInvoiceItemControlsHidden(isEditing);
-  setManualInvoicePriceControlsHidden(!isEditing);
-  if (isEditing) {
-    editableInvoiceItems(invoice).forEach(addManualInvoicePriceRow);
-    updateManualInvoicePriceTotalPreview();
-  }
+  resetManualInvoiceItems(isEditing ? editableInvoiceItems(invoice) : []);
   setMessage(el.manualInvoiceMessage, '');
   el.saveManualInvoiceButton.disabled = false;
   el.saveManualInvoiceButton.textContent = isEditing ? 'Save invoice' : 'Create invoice';
-  updateManualInvoiceTotal();
 
   if (typeof el.manualInvoiceDialog.showModal === 'function') {
     el.manualInvoiceDialog.showModal();
@@ -2142,8 +2140,7 @@ function closeManualInvoiceDialog() {
   el.manualInvoiceForm.reset();
   el.manualInvoiceDialogTitle.textContent = 'Create invoice';
   el.manualInvoiceNumber.disabled = false;
-  setManualInvoiceItemControlsHidden(false);
-  setManualInvoicePriceControlsHidden(true);
+  el.manualInvoiceItemList.innerHTML = '';
   setMessage(el.manualInvoiceMessage, '');
 
   if (typeof el.manualInvoiceDialog.close === 'function' && el.manualInvoiceDialog.open) {
@@ -2157,74 +2154,41 @@ async function createManualInvoice(event) {
   event.preventDefault();
   const editingInvoiceId = state.editingInvoiceId;
   const isEditing = Boolean(editingInvoiceId);
-  if (isEditing && !el.manualInvoiceClient.value.trim()) {
+  if (!el.manualInvoiceClient.value.trim()) {
     setMessage(el.manualInvoiceMessage, 'Enter the client name.', 'error');
     return;
   }
-  if (isEditing && !el.manualInvoiceProperty.value.trim()) {
-    setMessage(el.manualInvoiceMessage, 'Enter the property or invoice description.', 'error');
+  if (!el.manualInvoiceProperty.value.trim()) {
+    setMessage(el.manualInvoiceMessage, 'Enter the job or invoice description.', 'error');
     return;
   }
 
-  if (isEditing) {
-    const items = readManualInvoicePriceItems();
-    if (!items.length) {
-      setMessage(el.manualInvoiceMessage, 'Add at least one invoice item.', 'error');
-      return;
-    }
-
-    if (items.some((item) => !Number.isFinite(item.unitPrice) || item.unitPrice < 0)) {
-      setMessage(el.manualInvoiceMessage, 'Enter a valid price for every item.', 'error');
-      return;
-    }
-
-    el.saveManualInvoiceButton.disabled = true;
-    el.saveManualInvoiceButton.textContent = 'Saving';
-    try {
-      const { response, data } = await fetchJson(`/api/invoices/${encodeURIComponent(editingInvoiceId)}/details`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          invoiceNumber: el.manualInvoiceNumber.value,
-          issuedAt: el.manualInvoiceDate.value,
-          clientName: el.manualInvoiceClient.value,
-          clientEmail: el.manualInvoiceEmail.value,
-          agentName: el.manualInvoiceAgent.value,
-          agentPhone: el.manualInvoiceAgentPhone.value,
-          propertyAddress: el.manualInvoiceProperty.value,
-          items
-        })
-      });
-      if (!response.ok) {
-        setMessage(el.manualInvoiceMessage, (data.errors || ['Could not save invoice.']).join(' '), 'error');
-        return;
-      }
-
-      state.invoices = data.invoices || state.invoices.map((invoice) => invoice.id === editingInvoiceId ? data.invoice : invoice);
-      cacheInvoices();
-      renderInvoices();
-      closeManualInvoiceDialog();
-      setMessage(el.invoiceMessage, `${data.invoice?.invoiceNumber || 'Invoice'} updated.`, 'success');
-    } catch {
-      setMessage(el.manualInvoiceMessage, 'Could not reach the invoice app.', 'error');
-    } finally {
-      el.saveManualInvoiceButton.disabled = false;
-      el.saveManualInvoiceButton.textContent = state.editingInvoiceId ? 'Save invoice' : 'Create invoice';
-    }
-    return;
-  }
-
-  const items = manualInvoiceItems();
+  const items = readManualInvoiceItems().filter((item) => item.name || item.unitPrice > 0);
   if (!items.length) {
-    setMessage(el.manualInvoiceMessage, 'Choose an item or add an extra item.', 'error');
+    setMessage(el.manualInvoiceMessage, 'Add at least one invoice item.', 'error');
+    return;
+  }
+
+  if (items.some((item) => !item.name)) {
+    setMessage(el.manualInvoiceMessage, 'Enter a product or service name for every item.', 'error');
+    return;
+  }
+
+  if (items.some((item) => !Number.isFinite(item.quantity) || item.quantity <= 0)) {
+    setMessage(el.manualInvoiceMessage, 'Enter a valid quantity for every item.', 'error');
+    return;
+  }
+
+  if (items.some((item) => !Number.isFinite(item.unitPrice) || item.unitPrice < 0)) {
+    setMessage(el.manualInvoiceMessage, 'Enter a valid price for every item.', 'error');
     return;
   }
 
   el.saveManualInvoiceButton.disabled = true;
-  el.saveManualInvoiceButton.textContent = 'Creating';
+  el.saveManualInvoiceButton.textContent = isEditing ? 'Saving' : 'Creating';
   try {
-    const { response, data } = await fetchJson('/api/invoices', {
-      method: 'POST',
+    const { response, data } = await fetchJson(isEditing ? `/api/invoices/${encodeURIComponent(editingInvoiceId)}/details` : '/api/invoices', {
+      method: isEditing ? 'PATCH' : 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         invoiceNumber: el.manualInvoiceNumber.value,
@@ -2238,20 +2202,22 @@ async function createManualInvoice(event) {
       })
     });
     if (!response.ok) {
-      setMessage(el.manualInvoiceMessage, (data.errors || ['Could not create invoice.']).join(' '), 'error');
+      setMessage(el.manualInvoiceMessage, (data.errors || [`Could not ${isEditing ? 'save' : 'create'} invoice.`]).join(' '), 'error');
       return;
     }
 
-    state.invoices = data.invoices || [data.invoice, ...state.invoices].filter(Boolean);
+    state.invoices = data.invoices || (isEditing
+      ? state.invoices.map((invoice) => invoice.id === editingInvoiceId ? data.invoice : invoice)
+      : [data.invoice, ...state.invoices].filter(Boolean));
     cacheInvoices();
     renderInvoices();
     closeManualInvoiceDialog();
-    setMessage(el.invoiceMessage, `${data.invoice?.invoiceNumber || 'Invoice'} created.`, 'success');
+    setMessage(el.invoiceMessage, `${data.invoice?.invoiceNumber || 'Invoice'} ${isEditing ? 'updated' : 'created'}.`, 'success');
   } catch {
     setMessage(el.manualInvoiceMessage, 'Could not reach the invoice app.', 'error');
   } finally {
     el.saveManualInvoiceButton.disabled = false;
-    el.saveManualInvoiceButton.textContent = 'Create invoice';
+    el.saveManualInvoiceButton.textContent = isEditing ? 'Save invoice' : 'Create invoice';
   }
 }
 
@@ -3119,9 +3085,7 @@ el.cancelManualInvoiceButton.addEventListener('click', closeManualInvoiceDialog)
 el.manualInvoiceDialog.addEventListener('click', (event) => {
   if (event.target === el.manualInvoiceDialog) closeManualInvoiceDialog();
 });
-el.manualInvoiceServiceInputs.forEach((input) => input.addEventListener('change', updateManualInvoiceTotal));
-el.manualInvoiceCustomItem.addEventListener('input', updateManualInvoiceTotal);
-el.manualInvoiceCustomAmount.addEventListener('input', updateManualInvoiceTotal);
+el.addManualInvoiceItemButton.addEventListener('click', () => addManualInvoiceItemRow({ name: '', quantity: 1, unitPrice: 0 }));
 el.logoutButton.addEventListener('click', logout);
 el.mainAssignmentNoticeButton?.addEventListener('click', viewOpenWorkAssignments);
 el.clientDropdownButton.addEventListener('click', () => {

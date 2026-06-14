@@ -1419,6 +1419,35 @@ button:focus-visible {
   text-align: right;
 }
 
+.invoice-line-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(86px, 0.28fr) minmax(120px, 0.36fr) auto;
+  gap: 12px;
+  align-items: end;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  padding: 12px;
+}
+
+.invoice-line-row label {
+  min-width: 0;
+}
+
+.invoice-line-row input {
+  min-height: 44px;
+}
+
+.invoice-line-row input[data-field="quantity"],
+.invoice-line-row input[data-field="unitPrice"] {
+  text-align: right;
+}
+
+.invoice-line-row .remove-invoice-item-button {
+  min-height: 44px;
+  white-space: nowrap;
+}
+
 .invoice-actions {
   display: flex;
   flex-wrap: wrap;
@@ -2071,6 +2100,7 @@ dialog::backdrop {
 
   .form-row,
   .form-row.two,
+  .invoice-line-row,
   .invoice-price-row,
   .service-picker {
     grid-template-columns: 1fr;

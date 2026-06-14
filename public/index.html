@@ -437,8 +437,8 @@
           <div class="surface-header">
             <div>
               <p class="eyebrow">Invoice desk</p>
-              <h2>Invoices from bookings</h2>
-              <p class="surface-subtitle">Draft invoices are created automatically when a booking is confirmed.</p>
+              <h2>Invoices</h2>
+              <p class="surface-subtitle">Create invoices manually or sync draft invoices from confirmed bookings.</p>
             </div>
             <a class="ghost-button nav-button" href="/bookings" data-route="/bookings">Back to bookings</a>
           </div>
@@ -674,55 +674,24 @@
 
         <div class="form-row two">
           <label>
-            <span>Agent name</span>
+            <span>Contact / agent name</span>
             <input id="manualInvoiceAgentInput" type="text" autocomplete="name" />
           </label>
           <label>
-            <span>Agent phone</span>
+            <span>Contact phone</span>
             <input id="manualInvoiceAgentPhoneInput" type="tel" autocomplete="tel" />
           </label>
         </div>
 
         <label>
-          <span>Property / invoice description</span>
-          <input id="manualInvoicePropertyInput" type="text" autocomplete="street-address" required />
+          <span>Job / invoice description</span>
+          <input id="manualInvoicePropertyInput" type="text" autocomplete="off" required />
         </label>
 
-        <fieldset class="service-picker" id="manualInvoiceServicesFieldset">
+        <fieldset class="invoice-price-edit" id="manualInvoiceItemsFieldset">
           <legend>Items</legend>
-          <label class="service-option">
-            <input name="invoiceServices" type="checkbox" value="Photography" checked />
-            <span><strong>Photography $150</strong></span>
-          </label>
-          <label class="service-option">
-            <input name="invoiceServices" type="checkbox" value="Floorplan" />
-            <span><strong>Floorplan $75</strong></span>
-          </label>
-          <label class="service-option">
-            <input name="invoiceServices" type="checkbox" value="Drone" />
-            <span><strong>Drone $100</strong></span>
-          </label>
-          <label class="service-option">
-            <input name="invoiceServices" type="checkbox" value="Siteplan" />
-            <span><strong>Siteplan $25</strong></span>
-          </label>
-        </fieldset>
-
-        <div class="form-row two" id="manualInvoiceCustomRow">
-          <label>
-            <span>Extra item</span>
-            <input id="manualInvoiceCustomItemInput" type="text" autocomplete="off" placeholder="Optional" />
-          </label>
-          <label>
-            <span>Extra amount</span>
-            <input id="manualInvoiceCustomAmountInput" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00" />
-          </label>
-        </div>
-
-        <fieldset class="invoice-price-edit" id="manualInvoicePriceFieldset" hidden>
-          <legend>Prices</legend>
-          <div class="invoice-price-list" id="manualInvoicePriceList"></div>
-          <p class="invoice-preview-total" id="manualInvoicePriceTotalPreview">$0.00 incl. GST</p>
+          <div class="invoice-price-list" id="manualInvoiceItemList"></div>
+          <button class="ghost-button" id="addManualInvoiceItemButton" type="button">Add item</button>
         </fieldset>
 
         <p class="invoice-preview-total" id="manualInvoiceTotalPreview">$165.00 incl. GST</p>

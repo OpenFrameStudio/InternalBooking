@@ -1357,6 +1357,11 @@ function normalizeMoney(value) {
   return Number.isFinite(number) ? Math.round(number * 100) / 100 : 0;
 }
 
+function normalizeQuantity(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.round(number * 100) / 100 : 0;
+}
+
 function calculateGst(subtotal) {
   return normalizeMoney(subtotal * invoiceGstRate);
 }
@@ -1373,12 +1378,17 @@ function calculateInvoiceTotals(items) {
 
 function normalizeInvoice(invoice) {
   const items = Array.isArray(invoice?.items)
-    ? invoice.items.map((item) => ({
-        name: String(item.name || "Service").trim() || "Service",
-        quantity: Math.max(1, Number(item.quantity || 1)),
-        unitPrice: normalizeMoney(item.unitPrice),
-        amount: normalizeMoney(item.amount ?? Number(item.quantity || 1) * Number(item.unitPrice || 0))
-      }))
+    ? invoice.items.map((item) => {
+        const quantity = normalizeQuantity(item.quantity ?? 1);
+        const safeQuantity = quantity > 0 ? quantity : 1;
+        const unitPrice = normalizeMoney(item.unitPrice ?? item.price ?? (item.amount ? Number(item.amount) / safeQuantity : 0));
+        return {
+          name: String(item.name || "Service").trim() || "Service",
+          quantity: safeQuantity,
+          unitPrice,
+          amount: normalizeMoney(item.amount ?? safeQuantity * unitPrice)
+        };
+      })
     : [];
   const subtotal = normalizeMoney(invoice?.subtotal ?? items.reduce((sum, item) => sum + item.amount, 0));
   const gstRate = Number.isFinite(Number(invoice?.gstRate)) ? Number(invoice.gstRate) : invoiceGstRate;
@@ -1483,7 +1493,7 @@ function mergeBookingInvoiceItemsWithExistingPrices(nextItems, existingItems) {
 
 function normalizeManualInvoiceItem(item) {
   const name = String(item?.name || "").trim();
-  const quantity = Math.max(1, Number(item?.quantity || 1));
+  const quantity = normalizeQuantity(item?.quantity ?? 1);
   const unitPrice = normalizeMoney(item?.unitPrice ?? item?.price ?? item?.amount);
   return {
     name,
@@ -1506,6 +1516,7 @@ function validateEditableInvoiceItems(input) {
   for (const item of items) {
     if (!item.name) errors.push("Enter a name for each invoice item.");
     if (item.name.length > 80) errors.push(`${item.name} is too long.`);
+    if (!(item.quantity > 0)) errors.push(`${item.name || "Invoice item"} needs a quantity above 0.`);
     if (item.unitPrice < 0 || item.amount < 0) errors.push(`${item.name || "Invoice item"} cannot be below $0.`);
     if (item.amount > 100000) errors.push(`${item.name || "Invoice item"} is too high.`);
   }
@@ -1539,6 +1550,7 @@ function validateManualInvoice(input, invoices) {
   }
   for (const item of items) {
     if (!item.name) errors.push("Enter a name for each invoice item.");
+    if (!(item.quantity > 0)) errors.push(`${item.name || "Invoice item"} needs a quantity above 0.`);
     if (!(item.amount > 0)) errors.push(`${item.name || "Invoice item"} needs an amount above $0.`);
   }
   if (!items.length) errors.push("Add at least one invoice item.");
@@ -2144,9 +2156,33 @@ function formatInvoiceDocumentDate(value) {
   return date.toISOString().slice(0, 10);
 }
 
-function invoiceProductDescription(invoice) {
-  const serviceNames = (invoice.items || []).map((item) => item.name).filter(Boolean).join(" + ");
-  return [invoice.propertyAddress || "Booking", serviceNames].filter(Boolean).join("\n");
+function formatInvoiceQuantity(value) {
+  const quantity = normalizeQuantity(value ?? 1);
+  if (Number.isInteger(quantity)) return String(quantity);
+  return quantity.toLocaleString("en-AU", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2
+  });
+}
+
+function invoicePdfItems(invoice) {
+  const items = Array.isArray(invoice?.items) && invoice.items.length
+    ? invoice.items
+    : [{ name: "Service", quantity: 1, unitPrice: invoice.subtotal || invoice.total || 0, amount: invoice.subtotal || invoice.total || 0 }];
+  const description = String(invoice?.propertyAddress || "").trim();
+
+  return items.map((item) => {
+    const quantity = normalizeQuantity(item.quantity || 1) || 1;
+    const unitPrice = normalizeMoney(item.unitPrice ?? item.price ?? (item.amount ? Number(item.amount) / quantity : 0));
+    const amount = normalizeMoney(item.amount ?? quantity * unitPrice);
+    const name = String(item.name || "Service").trim() || "Service";
+    return {
+      product: [description, name].filter(Boolean).join("\n"),
+      quantity,
+      unitPrice,
+      amount
+    };
+  });
 }
 
 function invoiceFileName(invoice) {
@@ -2330,7 +2366,7 @@ function drawInvoicePdf(doc, invoice, billingClient = null) {
   const headerHeight = 34;
   const tableWidth = columnWidths.reduce((sum, width) => sum + width, 0);
   const headers = ["PRODUCT", "QUANTITY", "PRICE", "SUBTOTAL"];
-  const product = invoiceProductDescription(invoice);
+  const itemRows = invoicePdfItems(invoice);
 
   doc.rect(tableX, tableY, tableWidth, headerHeight).fill("#e7e7e7");
   doc.fillColor("#000").font("Helvetica-Bold").fontSize(10);
@@ -2341,25 +2377,30 @@ function drawInvoicePdf(doc, invoice, billingClient = null) {
   });
 
   doc.font("Helvetica").fontSize(10);
-  cursorX = tableX;
-  const rowY = tableY + headerHeight;
-  drawPdfCell(doc, product, cursorX, rowY, columnWidths[0], rowHeight, { align: "center" });
-  cursorX += columnWidths[0];
-  drawPdfCell(doc, "1", cursorX, rowY, columnWidths[1], rowHeight, { align: "center" });
-  cursorX += columnWidths[1];
-  drawPdfCell(doc, formatInvoiceMoney(invoice.subtotal), cursorX, rowY, columnWidths[2], rowHeight, { align: "right" });
-  cursorX += columnWidths[2];
-  drawPdfCell(doc, formatInvoiceMoney(invoice.subtotal), cursorX, rowY, columnWidths[3], rowHeight, { align: "right" });
-  doc.moveTo(tableX, rowY + rowHeight).lineTo(tableX + tableWidth, rowY + rowHeight).lineWidth(1.2).stroke("#000");
+  itemRows.forEach((item, index) => {
+    cursorX = tableX;
+    const rowY = tableY + headerHeight + index * rowHeight;
+    drawPdfCell(doc, item.product, cursorX, rowY, columnWidths[0], rowHeight, { align: "center" });
+    cursorX += columnWidths[0];
+    drawPdfCell(doc, formatInvoiceQuantity(item.quantity), cursorX, rowY, columnWidths[1], rowHeight, { align: "center" });
+    cursorX += columnWidths[1];
+    drawPdfCell(doc, formatInvoiceMoney(item.unitPrice), cursorX, rowY, columnWidths[2], rowHeight, { align: "right" });
+    cursorX += columnWidths[2];
+    drawPdfCell(doc, formatInvoiceMoney(item.amount), cursorX, rowY, columnWidths[3], rowHeight, { align: "right" });
+    doc.moveTo(tableX, rowY + rowHeight).lineTo(tableX + tableWidth, rowY + rowHeight).lineWidth(1.2).stroke("#000");
+  });
+
+  const tableBottom = tableY + headerHeight + itemRows.length * rowHeight;
+  const totalY = Math.max(524, tableBottom + 46);
 
   doc.save();
-  doc.rotate(-10, { origin: [140, 575] });
-  doc.rect(110, 559, 96, 30).lineWidth(2).stroke("#f5a623");
-  doc.fillColor("#f5a623").font("Helvetica-Bold").fontSize(18).text(invoice.status === "paid" ? "PAID" : invoice.status === "void" ? "VOID" : "UNPAID", 118, 565);
+  const stampY = Math.max(559, totalY + 42);
+  doc.rotate(-10, { origin: [140, stampY + 16] });
+  doc.rect(110, stampY, 96, 30).lineWidth(2).stroke("#f5a623");
+  doc.fillColor("#f5a623").font("Helvetica-Bold").fontSize(18).text(invoice.status === "paid" ? "PAID" : invoice.status === "void" ? "VOID" : "UNPAID", 118, stampY + 6);
   doc.restore();
 
   const totalX = 324;
-  const totalY = 524;
   const totalW = 219;
   const totalRowH = 33;
   const totalRows = [
@@ -2377,7 +2418,8 @@ function drawInvoicePdf(doc, invoice, billingClient = null) {
     drawPdfCell(doc, value, totalX + totalW / 2, y, totalW / 2, totalRowH, { align: "center" });
   });
 
-  doc.font("Helvetica-Bold").fontSize(13).fillColor("#000").text("PAYMENT INFORMATION", margin, 676);
+  const paymentY = Math.max(676, totalY + totalRowH * totalRows.length + 62);
+  doc.font("Helvetica-Bold").fontSize(13).fillColor("#000").text("PAYMENT INFORMATION", margin, paymentY);
   doc.font("Helvetica").fontSize(10.5).fillColor("#787878");
   [
     "Bank Transfer:",
@@ -2385,7 +2427,7 @@ function drawInvoicePdf(doc, invoice, billingClient = null) {
     "BSB: 062-128",
     "Account: 11440602",
     `Please reference ${invoice.invoiceNumber} for the payment`
-  ].forEach((line, index) => doc.text(line, margin, 704 + index * 17, {
+  ].forEach((line, index) => doc.text(line, margin, paymentY + 28 + index * 17, {
     width: pageWidth - margin * 2,
     height: 16,
     ellipsis: true
