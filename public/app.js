@@ -1634,7 +1634,6 @@ function renderInvoices() {
     item.querySelector('.invoice-total small').textContent = `${invoice.currency || 'AUD'} incl. GST`;
 
     item.querySelector('.preview-invoice-button').addEventListener('click', () => previewInvoice(invoice.id));
-    item.querySelector('.print-invoice-button').addEventListener('click', () => printInvoice(invoice.id));
     const editPricesButton = item.querySelector('.edit-invoice-prices-button');
     editPricesButton.disabled = invoice.status === 'void';
     editPricesButton.title = invoice.status === 'void' ? 'Voided invoices cannot be edited.' : 'Change this invoice item pricing.';
