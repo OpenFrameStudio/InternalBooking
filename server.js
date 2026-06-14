@@ -1969,6 +1969,57 @@ function syncInvoicesFromBookings(invoices, bookings) {
   return { created, updated, total: invoices.length };
 }
 
+function completedBookingAssignments(workState) {
+  const assignments = Array.isArray(workState?.assignments) ? workState.assignments : [];
+  return new Map(
+    assignments
+      .filter((assignment) => (
+        assignment.status === "done"
+        && assignment.source === "booking"
+        && assignment.sourceId
+      ))
+      .map((assignment) => [assignment.sourceId, assignment])
+  );
+}
+
+function applyCompletedJobDatesToInvoices(invoices, workState) {
+  const assignmentsByBookingId = completedBookingAssignments(workState);
+  let updated = 0;
+
+  for (const invoice of invoices) {
+    const assignment = assignmentsByBookingId.get(invoice.bookingId);
+    if (!assignment) continue;
+
+    const completedDate = new Date(assignment.completedAt || assignment.updatedAt || "");
+    if (Number.isNaN(completedDate.getTime())) continue;
+
+    const issuedAt = completedDate.toISOString();
+    const dueAt = addDays(completedDate, 7).toISOString();
+    if (invoice.issuedAt === issuedAt && invoice.dueAt === dueAt) continue;
+
+    invoice.issuedAt = issuedAt;
+    invoice.dueAt = dueAt;
+    invoice.updatedAt = new Date().toISOString();
+    updated += 1;
+  }
+
+  return { updated };
+}
+
+async function syncInvoiceDatesFromCompletedJobs(invoices, workState = null, options = {}) {
+  try {
+    const { persist = true } = options;
+    const resolvedWorkState = workState || await loadWorkState();
+    const result = applyCompletedJobDatesToInvoices(invoices, resolvedWorkState);
+    if (persist && result.updated) {
+      await saveInvoices(invoices);
+    }
+    return result;
+  } catch {
+    return { updated: 0 };
+  }
+}
+
 function bookingHasPassed(booking, now = Date.now()) {
   const endSource = booking?.endAt || (
     booking?.startAt && booking?.durationMinutes
@@ -5961,6 +6012,8 @@ async function handleApi(req, res, url) {
       item.id === assignmentId ? completedAssignment : item
     );
     await saveWorkState(workState);
+    const invoices = await loadInvoices();
+    await syncInvoiceDatesFromCompletedJobs(invoices, workState);
     sendJson(res, 200, {
       ...visibleWorkStateForUser(workState, currentUser(req)),
       workCompletionNotification,
@@ -6056,6 +6109,7 @@ async function handleApi(req, res, url) {
 
   if (req.method === "GET" && url.pathname === "/api/invoices") {
     const invoices = await loadInvoices();
+    await syncInvoiceDatesFromCompletedJobs(invoices);
     invoices.sort((a, b) => new Date(b.issuedAt) - new Date(a.issuedAt));
     sendJson(res, 200, { invoices });
     return;
@@ -6096,6 +6150,7 @@ async function handleApi(req, res, url) {
       sendJson(res, 404, { errors: ["Invoice not found."] });
       return;
     }
+    await syncInvoiceDatesFromCompletedJobs(invoices);
 
     try {
       const pdf = await createInvoicePdfBuffer(invoice);
@@ -6124,6 +6179,7 @@ async function handleApi(req, res, url) {
     const invoices = await loadInvoices();
     const bookings = await loadBookings();
     const result = syncInvoicesFromBookings(invoices, bookings);
+    await syncInvoiceDatesFromCompletedJobs(invoices, null, { persist: false });
     await saveInvoices(invoices);
     invoices.sort((a, b) => new Date(b.issuedAt) - new Date(a.issuedAt));
     sendJson(res, 200, { invoices, ...result });
@@ -6186,6 +6242,7 @@ async function handleApi(req, res, url) {
     invoice.total = total;
     invoice.pricesEditedAt = now;
     invoice.updatedAt = now;
+    await syncInvoiceDatesFromCompletedJobs(invoices, null, { persist: false });
     await saveInvoices(invoices);
     invoices.sort((a, b) => new Date(b.issuedAt) - new Date(a.issuedAt));
     sendJson(res, 200, { invoice: normalizeInvoice(invoice), invoices });
@@ -6247,6 +6304,7 @@ async function handleApi(req, res, url) {
       invoice.total = itemValidation.total;
       invoice.pricesEditedAt = now;
     }
+    await syncInvoiceDatesFromCompletedJobs(invoices, null, { persist: false });
     await saveInvoices(invoices);
     invoices.sort((a, b) => new Date(b.issuedAt) - new Date(a.issuedAt));
     sendJson(res, 200, { invoice: normalizeInvoice(invoice), invoices });
@@ -6285,6 +6343,7 @@ async function handleApi(req, res, url) {
 
     invoice.invoiceNumber = invoiceNumber;
     invoice.updatedAt = new Date().toISOString();
+    await syncInvoiceDatesFromCompletedJobs(invoices, null, { persist: false });
     await saveInvoices(invoices);
     invoices.sort((a, b) => new Date(b.issuedAt) - new Date(a.issuedAt));
     sendJson(res, 200, { invoice, invoices });
@@ -6343,6 +6402,7 @@ async function handleApi(req, res, url) {
       sendJson(res, 400, { errors: ["Add a valid client email before sending this invoice."] });
       return;
     }
+    await syncInvoiceDatesFromCompletedJobs(invoices);
 
     try {
       await sendInvoiceEmail(invoice, recipients);
@@ -6404,6 +6464,7 @@ async function handleApi(req, res, url) {
     invoice.updatedAt = new Date().toISOString();
     invoice.paidAt = invoice.status === "paid" ? (invoice.paidAt || invoice.updatedAt) : "";
     invoice.voidedAt = invoice.status === "void" ? (invoice.voidedAt || invoice.updatedAt) : "";
+    await syncInvoiceDatesFromCompletedJobs(invoices, null, { persist: false });
     await saveInvoices(invoices);
     invoices.sort((a, b) => new Date(b.issuedAt) - new Date(a.issuedAt));
     sendJson(res, 200, { invoice, invoices });
