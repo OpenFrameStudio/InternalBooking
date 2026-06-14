@@ -6225,11 +6225,17 @@ async function handleApi(req, res, url) {
       return;
     }
 
-    const { errors, details } = validateEditableInvoiceDetails(input, invoice);
+    const detailValidation = validateEditableInvoiceDetails(input, invoice);
+    const itemValidation = Array.isArray(input?.items) ? validateEditableInvoiceItems(input) : null;
+    const errors = [
+      ...detailValidation.errors,
+      ...(itemValidation?.errors || [])
+    ];
     if (errors.length) {
       sendJson(res, 400, { errors });
       return;
     }
+    const { details } = detailValidation;
 
     const duplicate = invoices.find((item) =>
       item.id !== invoiceId && String(item.invoiceNumber || "").trim().toUpperCase() === details.invoiceNumber
@@ -6244,6 +6250,15 @@ async function handleApi(req, res, url) {
       detailsEditedAt: now,
       updatedAt: now
     });
+    if (itemValidation) {
+      invoice.items = itemValidation.items;
+      invoice.subtotal = itemValidation.subtotal;
+      invoice.gstRate = invoiceGstRate;
+      invoice.gstAmount = itemValidation.gstAmount;
+      invoice.gstIncluded = true;
+      invoice.total = itemValidation.total;
+      invoice.pricesEditedAt = now;
+    }
     await saveInvoices(invoices);
     invoices.sort((a, b) => new Date(b.issuedAt) - new Date(a.issuedAt));
     sendJson(res, 200, { invoice: normalizeInvoice(invoice), invoices });

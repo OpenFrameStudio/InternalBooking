@@ -15,7 +15,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="48x48" href="/favicon-48.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
-    <link rel="stylesheet" href="/styles.css?v=pending-send" />
+    <link rel="stylesheet" href="/styles.css?v=invoice-edit-prices" />
     <link rel="stylesheet" href="/work/styles.css?v=assignment-photos" />
     <script src="/install.js" defer></script>
     <script src="/session-keepalive.js?v=monthly-session" defer></script>
@@ -719,6 +719,12 @@
           </label>
         </div>
 
+        <fieldset class="invoice-price-edit" id="manualInvoicePriceFieldset" hidden>
+          <legend>Prices</legend>
+          <div class="invoice-price-list" id="manualInvoicePriceList"></div>
+          <p class="invoice-preview-total" id="manualInvoicePriceTotalPreview">$0.00 incl. GST</p>
+        </fieldset>
+
         <p class="invoice-preview-total" id="manualInvoiceTotalPreview">$165.00 incl. GST</p>
         <p class="form-error" id="manualInvoiceMessage" role="status"></p>
 
@@ -806,7 +812,6 @@
         <div class="invoice-actions">
           <button class="ghost-button preview-invoice-button" type="button">Preview PDF</button>
           <button class="ghost-button edit-invoice-button" type="button">Edit</button>
-          <button class="ghost-button edit-invoice-prices-button" type="button">Edit prices</button>
           <button class="ghost-button send-invoice-button" type="button">Send invoice</button>
           <button class="ghost-button paid-invoice-button" type="button">Mark paid</button>
           <button class="ghost-button danger-button delete-invoice-button" type="button">Delete</button>
@@ -857,6 +862,6 @@
 
     <section class="invoice-print-sheet" id="invoicePrintSheet" hidden aria-label="Printable invoice"></section>
 
-    <script src="/app.js?v=invoice-preview-only" type="module"></script>
+    <script src="/app.js?v=invoice-edit-prices" type="module"></script>
   </body>
 </html>

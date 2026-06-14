@@ -1379,6 +1379,11 @@ button:focus-visible {
   gap: 10px;
 }
 
+.invoice-price-edit {
+  display: grid;
+  gap: 10px;
+}
+
 .invoice-price-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(130px, 0.35fr);

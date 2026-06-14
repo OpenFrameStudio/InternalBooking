@@ -89,6 +89,9 @@ const el = {
   manualInvoiceCustomItem: $('#manualInvoiceCustomItemInput'),
   manualInvoiceCustomAmount: $('#manualInvoiceCustomAmountInput'),
   manualInvoiceCustomRow: $('#manualInvoiceCustomRow'),
+  manualInvoicePriceFieldset: $('#manualInvoicePriceFieldset'),
+  manualInvoicePriceList: $('#manualInvoicePriceList'),
+  manualInvoicePriceTotalPreview: $('#manualInvoicePriceTotalPreview'),
   manualInvoiceTotalPreview: $('#manualInvoiceTotalPreview'),
   manualInvoiceMessage: $('#manualInvoiceMessage'),
   cancelManualInvoiceButton: $('#cancelManualInvoiceButton'),
@@ -1634,10 +1637,6 @@ function renderInvoices() {
     item.querySelector('.invoice-total small').textContent = `${invoice.currency || 'AUD'} incl. GST`;
 
     item.querySelector('.preview-invoice-button').addEventListener('click', () => previewInvoice(invoice.id));
-    const editPricesButton = item.querySelector('.edit-invoice-prices-button');
-    editPricesButton.disabled = invoice.status === 'void';
-    editPricesButton.title = invoice.status === 'void' ? 'Voided invoices cannot be edited.' : 'Change this invoice item pricing.';
-    editPricesButton.addEventListener('click', () => openInvoicePriceDialog(invoice.id));
     const editButton = item.querySelector('.edit-invoice-button');
     editButton.disabled = invoice.status === 'void';
     editButton.title = invoice.status === 'void'
@@ -1909,6 +1908,54 @@ function addInvoicePriceRow(item, index) {
   el.invoicePriceList.append(row);
 }
 
+function manualInvoicePriceRows() {
+  return [...el.manualInvoicePriceList.querySelectorAll('.invoice-price-row')];
+}
+
+function readManualInvoicePriceItems() {
+  return manualInvoicePriceRows().map((row) => {
+    const input = row.querySelector('input');
+    return {
+      name: row.dataset.invoiceItemName || 'Service',
+      quantity: 1,
+      unitPrice: Number(input?.value || 0)
+    };
+  });
+}
+
+function updateManualInvoicePriceTotalPreview() {
+  const subtotal = readManualInvoicePriceItems().reduce((sum, item) => {
+    return sum + (Number.isFinite(item.unitPrice) ? item.unitPrice : 0);
+  }, 0);
+  const gst = subtotal * 0.1;
+  const total = subtotal + gst;
+  el.manualInvoicePriceTotalPreview.textContent = `${formatMoney(total)} incl. GST (${formatMoney(gst)} GST)`;
+}
+
+function addManualInvoicePriceRow(item, index) {
+  const row = document.createElement('label');
+  row.className = 'invoice-price-row';
+  row.dataset.invoiceItemName = item.name || `Item ${index + 1}`;
+
+  const label = document.createElement('span');
+  label.className = 'invoice-price-label';
+  label.textContent = row.dataset.invoiceItemName;
+
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.min = '0';
+  input.step = '0.01';
+  input.inputMode = 'decimal';
+  input.required = true;
+  const price = Number(item.unitPrice ?? item.amount ?? 0);
+  input.value = Number.isFinite(price) ? price.toFixed(2) : '0.00';
+  input.setAttribute('aria-label', `${row.dataset.invoiceItemName} price`);
+  input.addEventListener('input', updateManualInvoicePriceTotalPreview);
+
+  row.append(label, input);
+  el.manualInvoicePriceList.append(row);
+}
+
 function openInvoicePriceDialog(id) {
   const invoice = state.invoices.find((item) => item.id === id);
   if (!invoice) {
@@ -2029,6 +2076,13 @@ function setManualInvoiceItemControlsHidden(hidden) {
   el.manualInvoiceTotalPreview.hidden = hidden;
 }
 
+function setManualInvoicePriceControlsHidden(hidden) {
+  el.manualInvoicePriceFieldset.hidden = hidden;
+  if (hidden) {
+    el.manualInvoicePriceList.innerHTML = '';
+  }
+}
+
 function openManualInvoiceDialog(invoice = null) {
   const isEditing = Boolean(invoice?.id);
   state.editingInvoiceId = isEditing ? invoice.id : '';
@@ -2048,6 +2102,11 @@ function openManualInvoiceDialog(invoice = null) {
   el.manualInvoiceCustomItem.value = '';
   el.manualInvoiceCustomAmount.value = '';
   setManualInvoiceItemControlsHidden(isEditing);
+  setManualInvoicePriceControlsHidden(!isEditing);
+  if (isEditing) {
+    editableInvoiceItems(invoice).forEach(addManualInvoicePriceRow);
+    updateManualInvoicePriceTotalPreview();
+  }
   setMessage(el.manualInvoiceMessage, '');
   el.saveManualInvoiceButton.disabled = false;
   el.saveManualInvoiceButton.textContent = isEditing ? 'Save invoice' : 'Create invoice';
@@ -2068,6 +2127,7 @@ function closeManualInvoiceDialog() {
   el.manualInvoiceDialogTitle.textContent = 'Create invoice';
   el.manualInvoiceNumber.disabled = false;
   setManualInvoiceItemControlsHidden(false);
+  setManualInvoicePriceControlsHidden(true);
   setMessage(el.manualInvoiceMessage, '');
 
   if (typeof el.manualInvoiceDialog.close === 'function' && el.manualInvoiceDialog.open) {
@@ -2091,6 +2151,17 @@ async function createManualInvoice(event) {
   }
 
   if (isEditing) {
+    const items = readManualInvoicePriceItems();
+    if (!items.length) {
+      setMessage(el.manualInvoiceMessage, 'Add at least one invoice item.', 'error');
+      return;
+    }
+
+    if (items.some((item) => !Number.isFinite(item.unitPrice) || item.unitPrice < 0)) {
+      setMessage(el.manualInvoiceMessage, 'Enter a valid price for every item.', 'error');
+      return;
+    }
+
     el.saveManualInvoiceButton.disabled = true;
     el.saveManualInvoiceButton.textContent = 'Saving';
     try {
@@ -2104,7 +2175,8 @@ async function createManualInvoice(event) {
           clientEmail: el.manualInvoiceEmail.value,
           agentName: el.manualInvoiceAgent.value,
           agentPhone: el.manualInvoiceAgentPhone.value,
-          propertyAddress: el.manualInvoiceProperty.value
+          propertyAddress: el.manualInvoiceProperty.value,
+          items
         })
       });
       if (!response.ok) {
