@@ -1220,6 +1220,17 @@ button:focus-visible {
   opacity: 0.58;
 }
 
+.invoice-item.job-incomplete {
+  background: #f1f3f0;
+  border-color: rgba(108, 117, 112, 0.24);
+  box-shadow: none;
+  opacity: 0.62;
+}
+
+.invoice-item.job-incomplete .invoice-status {
+  filter: grayscale(1);
+}
+
 .invoice-main,
 .invoice-total {
   min-width: 0;

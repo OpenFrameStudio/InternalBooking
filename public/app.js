@@ -1396,6 +1396,18 @@ function invoiceIsPendingSend(invoice) {
   return invoice?.status === 'draft' && !invoice?.sentAt;
 }
 
+function invoiceWorkAssignment(invoice) {
+  if (!invoice?.bookingId) return null;
+  return state.workAssignments.find((assignment) => (
+    assignment.source === 'booking' && assignment.sourceId === invoice.bookingId
+  )) || null;
+}
+
+function invoiceJobIsIncomplete(invoice) {
+  const assignment = invoiceWorkAssignment(invoice);
+  return Boolean(assignment && assignment.status !== 'done');
+}
+
 function invoiceListStatusLabel(invoice) {
   if (invoiceIsPendingSend(invoice)) return 'Pending send';
   if (invoice.status === 'draft') return 'Not paid';
@@ -1612,6 +1624,10 @@ function renderInvoices() {
     const item = el.invoiceTemplate.content.firstElementChild.cloneNode(true);
     item.classList.toggle('paid', invoice.status === 'paid');
     item.classList.toggle('void', invoice.status === 'void');
+    item.classList.toggle('job-incomplete', invoiceJobIsIncomplete(invoice));
+    if (invoiceJobIsIncomplete(invoice)) {
+      item.title = 'Job not completed yet.';
+    }
     item.querySelector('h3').textContent = `${invoice.invoiceNumber} - ${invoice.propertyAddress || 'Booking invoice'}`;
     const status = item.querySelector('.invoice-status');
     status.textContent = invoiceListStatusLabel(invoice);
@@ -2316,6 +2332,7 @@ async function loadWorkAssignments() {
     if (!response.ok) return;
     state.workAssignments = Array.isArray(data.assignments) ? data.assignments : [];
     renderMainAssignmentNotice();
+    if (userCanAccess('invoices')) renderInvoices();
   } catch {
     renderMainAssignmentNotice();
   }
