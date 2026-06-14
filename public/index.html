@@ -672,12 +672,23 @@
           <input id="manualInvoiceEmailInput" type="text" autocomplete="email" placeholder="name@example.com" />
         </label>
 
+        <div class="form-row two">
+          <label>
+            <span>Agent name</span>
+            <input id="manualInvoiceAgentInput" type="text" autocomplete="name" />
+          </label>
+          <label>
+            <span>Agent phone</span>
+            <input id="manualInvoiceAgentPhoneInput" type="tel" autocomplete="tel" />
+          </label>
+        </div>
+
         <label>
           <span>Property / invoice description</span>
           <input id="manualInvoicePropertyInput" type="text" autocomplete="street-address" required />
         </label>
 
-        <fieldset class="service-picker">
+        <fieldset class="service-picker" id="manualInvoiceServicesFieldset">
           <legend>Items</legend>
           <label class="service-option">
             <input name="invoiceServices" type="checkbox" value="Photography" checked />
@@ -697,7 +708,7 @@
           </label>
         </fieldset>
 
-        <div class="form-row two">
+        <div class="form-row two" id="manualInvoiceCustomRow">
           <label>
             <span>Extra item</span>
             <input id="manualInvoiceCustomItemInput" type="text" autocomplete="off" placeholder="Optional" />
@@ -847,6 +858,6 @@
 
     <section class="invoice-print-sheet" id="invoicePrintSheet" hidden aria-label="Printable invoice"></section>
 
-    <script src="/app.js?v=pending-send" type="module"></script>
+    <script src="/app.js?v=invoice-details" type="module"></script>
   </body>
 </html>

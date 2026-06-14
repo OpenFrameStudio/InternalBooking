@@ -76,14 +76,19 @@ const el = {
   refreshInvoicesButton: $('#refreshInvoicesButton'),
   manualInvoiceDialog: $('#manualInvoiceDialog'),
   manualInvoiceForm: $('#manualInvoiceForm'),
+  manualInvoiceDialogTitle: $('#manualInvoiceDialogTitle'),
   manualInvoiceNumber: $('#manualInvoiceNumberInput'),
   manualInvoiceDate: $('#manualInvoiceDateInput'),
   manualInvoiceClient: $('#manualInvoiceClientInput'),
   manualInvoiceEmail: $('#manualInvoiceEmailInput'),
+  manualInvoiceAgent: $('#manualInvoiceAgentInput'),
+  manualInvoiceAgentPhone: $('#manualInvoiceAgentPhoneInput'),
   manualInvoiceProperty: $('#manualInvoicePropertyInput'),
+  manualInvoiceServicesFieldset: $('#manualInvoiceServicesFieldset'),
   manualInvoiceServiceInputs: $$('input[name=invoiceServices]'),
   manualInvoiceCustomItem: $('#manualInvoiceCustomItemInput'),
   manualInvoiceCustomAmount: $('#manualInvoiceCustomAmountInput'),
+  manualInvoiceCustomRow: $('#manualInvoiceCustomRow'),
   manualInvoiceTotalPreview: $('#manualInvoiceTotalPreview'),
   manualInvoiceMessage: $('#manualInvoiceMessage'),
   cancelManualInvoiceButton: $('#cancelManualInvoiceButton'),
@@ -172,6 +177,7 @@ const state = {
     query: ''
   },
   editingBookingId: '',
+  editingInvoiceId: '',
   editingInvoiceNumberId: '',
   editingInvoicePriceId: '',
   restoringDraft: false,
@@ -1634,12 +1640,10 @@ function renderInvoices() {
     editPricesButton.title = invoice.status === 'void' ? 'Voided invoices cannot be edited.' : 'Change this invoice item pricing.';
     editPricesButton.addEventListener('click', () => openInvoicePriceDialog(invoice.id));
     const editButton = item.querySelector('.edit-invoice-button');
-    const sourceBooking = state.bookings.find((booking) => booking.id === invoice.bookingId);
-    const canEditSourceBooking = Boolean(invoice.bookingId) && invoice.status !== 'void' && (!sourceBooking || sourceBooking.status !== 'cancelled');
-    editButton.disabled = !canEditSourceBooking;
-    editButton.title = canEditSourceBooking
-      ? 'Edit the booking that created this invoice.'
-      : 'Refresh bookings, then edit the source booking for this invoice.';
+    editButton.disabled = invoice.status === 'void';
+    editButton.title = invoice.status === 'void'
+      ? 'Voided invoices cannot be edited.'
+      : 'Edit this invoice.';
     editButton.addEventListener('click', () => startInvoiceEdit(invoice.id));
     const sendButton = item.querySelector('.send-invoice-button');
     sendButton.hidden = invoice.status === 'void';
@@ -2006,14 +2010,34 @@ function updateManualInvoiceTotal() {
   el.manualInvoiceTotalPreview.textContent = `${formatMoney(total)} incl. GST`;
 }
 
-function openManualInvoiceDialog() {
+function setManualInvoiceItemControlsHidden(hidden) {
+  el.manualInvoiceServicesFieldset.hidden = hidden;
+  el.manualInvoiceCustomRow.hidden = hidden;
+  el.manualInvoiceTotalPreview.hidden = hidden;
+}
+
+function openManualInvoiceDialog(invoice = null) {
+  const isEditing = Boolean(invoice?.id);
+  state.editingInvoiceId = isEditing ? invoice.id : '';
   el.manualInvoiceForm.reset();
-  el.manualInvoiceDate.value = toDateValue(new Date());
+  el.manualInvoiceDialogTitle.textContent = isEditing ? 'Edit invoice' : 'Create invoice';
+  el.manualInvoiceNumber.disabled = isEditing;
+  el.manualInvoiceNumber.value = isEditing ? (invoice.invoiceNumber || '') : '';
+  el.manualInvoiceDate.value = isEditing ? (formatInvoiceIsoDate(invoice.issuedAt) || toDateValue(new Date())) : toDateValue(new Date());
+  el.manualInvoiceClient.value = isEditing ? (invoice.clientName || '') : '';
+  el.manualInvoiceEmail.value = isEditing ? (invoice.clientEmail || '') : '';
+  el.manualInvoiceAgent.value = isEditing ? (invoice.agentName || '') : '';
+  el.manualInvoiceAgentPhone.value = isEditing ? (invoice.agentPhone || '') : '';
+  el.manualInvoiceProperty.value = isEditing ? (invoice.propertyAddress || '') : '';
   el.manualInvoiceServiceInputs.forEach((input) => {
-    input.checked = input.value === 'Photography';
+    input.checked = !isEditing && input.value === 'Photography';
   });
+  el.manualInvoiceCustomItem.value = '';
+  el.manualInvoiceCustomAmount.value = '';
+  setManualInvoiceItemControlsHidden(isEditing);
   setMessage(el.manualInvoiceMessage, '');
   el.saveManualInvoiceButton.disabled = false;
+  el.saveManualInvoiceButton.textContent = isEditing ? 'Save invoice' : 'Create invoice';
   updateManualInvoiceTotal();
 
   if (typeof el.manualInvoiceDialog.showModal === 'function') {
@@ -2026,7 +2050,11 @@ function openManualInvoiceDialog() {
 }
 
 function closeManualInvoiceDialog() {
+  state.editingInvoiceId = '';
   el.manualInvoiceForm.reset();
+  el.manualInvoiceDialogTitle.textContent = 'Create invoice';
+  el.manualInvoiceNumber.disabled = false;
+  setManualInvoiceItemControlsHidden(false);
   setMessage(el.manualInvoiceMessage, '');
 
   if (typeof el.manualInvoiceDialog.close === 'function' && el.manualInvoiceDialog.open) {
@@ -2038,6 +2066,52 @@ function closeManualInvoiceDialog() {
 
 async function createManualInvoice(event) {
   event.preventDefault();
+  const editingInvoiceId = state.editingInvoiceId;
+  const isEditing = Boolean(editingInvoiceId);
+  if (isEditing && !el.manualInvoiceClient.value.trim()) {
+    setMessage(el.manualInvoiceMessage, 'Enter the client name.', 'error');
+    return;
+  }
+  if (isEditing && !el.manualInvoiceProperty.value.trim()) {
+    setMessage(el.manualInvoiceMessage, 'Enter the property or invoice description.', 'error');
+    return;
+  }
+
+  if (isEditing) {
+    el.saveManualInvoiceButton.disabled = true;
+    el.saveManualInvoiceButton.textContent = 'Saving';
+    try {
+      const { response, data } = await fetchJson(`/api/invoices/${encodeURIComponent(editingInvoiceId)}/details`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          issuedAt: el.manualInvoiceDate.value,
+          clientName: el.manualInvoiceClient.value,
+          clientEmail: el.manualInvoiceEmail.value,
+          agentName: el.manualInvoiceAgent.value,
+          agentPhone: el.manualInvoiceAgentPhone.value,
+          propertyAddress: el.manualInvoiceProperty.value
+        })
+      });
+      if (!response.ok) {
+        setMessage(el.manualInvoiceMessage, (data.errors || ['Could not save invoice.']).join(' '), 'error');
+        return;
+      }
+
+      state.invoices = data.invoices || state.invoices.map((invoice) => invoice.id === editingInvoiceId ? data.invoice : invoice);
+      cacheInvoices();
+      renderInvoices();
+      closeManualInvoiceDialog();
+      setMessage(el.invoiceMessage, `${data.invoice?.invoiceNumber || 'Invoice'} updated.`, 'success');
+    } catch {
+      setMessage(el.manualInvoiceMessage, 'Could not reach the invoice app.', 'error');
+    } finally {
+      el.saveManualInvoiceButton.disabled = false;
+      el.saveManualInvoiceButton.textContent = state.editingInvoiceId ? 'Save invoice' : 'Create invoice';
+    }
+    return;
+  }
+
   const items = manualInvoiceItems();
   if (!items.length) {
     setMessage(el.manualInvoiceMessage, 'Choose an item or add an extra item.', 'error');
@@ -2055,6 +2129,8 @@ async function createManualInvoice(event) {
         issuedAt: el.manualInvoiceDate.value,
         clientName: el.manualInvoiceClient.value,
         clientEmail: el.manualInvoiceEmail.value,
+        agentName: el.manualInvoiceAgent.value,
+        agentPhone: el.manualInvoiceAgentPhone.value,
         propertyAddress: el.manualInvoiceProperty.value,
         items
       })
@@ -2084,30 +2160,12 @@ async function startInvoiceEdit(id) {
     return;
   }
 
-  if (!invoice.bookingId) {
-    setMessage(el.invoiceMessage, 'This invoice is not linked to a booking, so it cannot be edited here.', 'error');
+  if (invoice.status === 'void') {
+    setMessage(el.invoiceMessage, 'Voided invoices cannot be edited.', 'error');
     return;
   }
 
-  let booking = state.bookings.find((item) => item.id === invoice.bookingId);
-  if (!booking) {
-    setMessage(el.invoiceMessage, 'Finding the booking for this invoice...');
-    await loadBookings();
-    booking = state.bookings.find((item) => item.id === invoice.bookingId);
-  }
-
-  if (!booking) {
-    setMessage(el.invoiceMessage, 'The booking for this invoice could not be found.', 'error');
-    return;
-  }
-
-  if (booking.status === 'cancelled') {
-    setMessage(el.invoiceMessage, 'This invoice belongs to a cancelled booking, so it cannot be edited.', 'error');
-    return;
-  }
-
-  startBookingEdit(booking.id);
-  setMessage(el.formMessage, `Editing booking for ${invoice.invoiceNumber}. Save it to refresh the invoice.`, 'success');
+  openManualInvoiceDialog(invoice);
 }
 
 function updateStats() {

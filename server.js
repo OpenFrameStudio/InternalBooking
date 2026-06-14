@@ -1416,6 +1416,7 @@ function normalizeInvoice(invoice) {
     sentAt: invoice?.sentAt || "",
     sentTo: uniqueEmails(Array.isArray(invoice?.sentTo) ? invoice.sentTo : parseGuestEmails(invoice?.sentTo || "")),
     notes: String(invoice?.notes || ""),
+    detailsEditedAt: invoice?.detailsEditedAt || "",
     importedAt: invoice?.importedAt || "",
     pricesEditedAt: invoice?.pricesEditedAt || "",
     createdAt: invoice?.createdAt || new Date().toISOString(),
@@ -1585,6 +1586,44 @@ function validateManualInvoice(input, invoices) {
       createdAt: now,
       updatedAt: now
     })
+  };
+}
+
+function validateEditableInvoiceDetails(input, existing) {
+  const errors = [];
+  const clientName = String(input?.clientName ?? existing?.clientName ?? "").trim();
+  const clientEmail = uniqueEmails(parseGuestEmails(input?.clientEmail ?? existing?.clientEmail ?? ""));
+  const propertyAddress = String(input?.propertyAddress ?? input?.description ?? existing?.propertyAddress ?? "").trim();
+  const agentName = String(input?.agentName ?? existing?.agentName ?? "").trim();
+  const agentPhone = String(input?.agentPhone ?? existing?.agentPhone ?? "").trim();
+  const issuedDate = new Date(input?.issuedAt ?? existing?.issuedAt ?? Date.now());
+  const issuedAt = Number.isNaN(issuedDate.getTime()) ? null : issuedDate;
+  const dueDate = input?.dueAt ? new Date(input.dueAt) : (issuedAt ? addDays(issuedAt, 7) : null);
+  const dueAt = dueDate && !Number.isNaN(dueDate.getTime()) ? dueDate : null;
+
+  if (!clientName) errors.push("Enter the client name.");
+  if (clientName.length > 120) errors.push("Client name is too long.");
+  if (!propertyAddress) errors.push("Enter the property or invoice description.");
+  if (propertyAddress.length > 180) errors.push("Property or invoice description is too long.");
+  if (agentName.length > 120) errors.push("Agent name is too long.");
+  if (agentPhone.length > 60) errors.push("Agent phone is too long.");
+  if (!issuedAt) errors.push("Enter a valid issue date.");
+  if (!dueAt) errors.push("Enter a valid due date.");
+  for (const email of clientEmail) {
+    if (!isValidEmail(email)) errors.push(`Enter a valid client email for ${email}.`);
+  }
+
+  return {
+    errors,
+    details: {
+      propertyAddress,
+      clientName,
+      clientEmail: clientEmail.join(", "),
+      agentName,
+      agentPhone,
+      issuedAt: issuedAt ? issuedAt.toISOString() : "",
+      dueAt: dueAt ? dueAt.toISOString() : ""
+    }
   };
 }
 
@@ -1856,6 +1895,7 @@ function invoiceFromBooking(booking, invoices, existing = null) {
   const bookingItems = bookingInvoiceItems(booking);
   const items = isPaid ? existingItems : mergeBookingInvoiceItemsWithExistingPrices(bookingItems, existingItems);
   const { subtotal, gstAmount, total } = calculateInvoiceTotals(items);
+  const invoiceDetails = existing?.detailsEditedAt ? existing : booking;
   const status = booking.status === "cancelled"
     ? (isPaid ? "paid" : "void")
     : (isPaid ? "paid" : "draft");
@@ -1865,11 +1905,11 @@ function invoiceFromBooking(booking, invoices, existing = null) {
     id: existing?.id || crypto.randomUUID(),
     invoiceNumber: invoiceNumberForBooking(existing, booking, invoices),
     bookingId: booking.id,
-    propertyAddress: booking.propertyAddress || "",
-    clientName: booking.clientName || "",
-    clientEmail: booking.clientEmail || "",
-    agentName: booking.agentName || "",
-    agentPhone: booking.agentPhone || "",
+    propertyAddress: invoiceDetails.propertyAddress || "",
+    clientName: invoiceDetails.clientName || "",
+    clientEmail: invoiceDetails.clientEmail || "",
+    agentName: invoiceDetails.agentName || "",
+    agentPhone: invoiceDetails.agentPhone || "",
     photographerName: booking.photographerName || "",
     bookingStartAt: booking.startAt || "",
     bookingEndAt: booking.endAt || "",
@@ -1885,6 +1925,7 @@ function invoiceFromBooking(booking, invoices, existing = null) {
     paidAt: existing?.paidAt || "",
     voidedAt: status === "void" ? (existing?.voidedAt || now) : "",
     notes: "Generated from internal booking.",
+    detailsEditedAt: existing?.detailsEditedAt || "",
     pricesEditedAt: existing?.pricesEditedAt || "",
     createdAt: existing?.createdAt || now,
     updatedAt: now
@@ -6152,6 +6193,44 @@ async function handleApi(req, res, url) {
     invoice.total = total;
     invoice.pricesEditedAt = now;
     invoice.updatedAt = now;
+    await saveInvoices(invoices);
+    invoices.sort((a, b) => new Date(b.issuedAt) - new Date(a.issuedAt));
+    sendJson(res, 200, { invoice: normalizeInvoice(invoice), invoices });
+    return;
+  }
+
+  const invoiceDetailsMatch = url.pathname.match(/^\/api\/invoices\/([^/]+)\/details$/);
+  if ((req.method === "PATCH" || req.method === "PUT") && invoiceDetailsMatch) {
+    if (!hasPermission(req, "manage_invoices")) {
+      sendForbidden(res, "Boss or team leader only.");
+      return;
+    }
+
+    const invoiceId = decodeURIComponent(invoiceDetailsMatch[1]);
+    const input = await readBody(req);
+    const invoices = await loadInvoices();
+    const invoice = invoices.find((item) => item.id === invoiceId);
+    if (!invoice) {
+      sendJson(res, 404, { errors: ["Invoice not found."] });
+      return;
+    }
+
+    if (invoice.status === "void") {
+      sendJson(res, 400, { errors: ["Voided invoices cannot be edited."] });
+      return;
+    }
+
+    const { errors, details } = validateEditableInvoiceDetails(input, invoice);
+    if (errors.length) {
+      sendJson(res, 400, { errors });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    Object.assign(invoice, details, {
+      detailsEditedAt: now,
+      updatedAt: now
+    });
     await saveInvoices(invoices);
     invoices.sort((a, b) => new Date(b.issuedAt) - new Date(a.issuedAt));
     sendJson(res, 200, { invoice: normalizeInvoice(invoice), invoices });
