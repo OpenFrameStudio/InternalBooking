@@ -1633,8 +1633,8 @@ function renderInvoices() {
     item.querySelector('.invoice-total strong').textContent = formatMoney(invoice.total);
     item.querySelector('.invoice-total small').textContent = `${invoice.currency || 'AUD'} incl. GST`;
 
+    item.querySelector('.preview-invoice-button').addEventListener('click', () => previewInvoice(invoice.id));
     item.querySelector('.print-invoice-button').addEventListener('click', () => printInvoice(invoice.id));
-    item.querySelector('.edit-invoice-number-button').addEventListener('click', () => openInvoiceNumberDialog(invoice.id));
     const editPricesButton = item.querySelector('.edit-invoice-prices-button');
     editPricesButton.disabled = invoice.status === 'void';
     editPricesButton.title = invoice.status === 'void' ? 'Voided invoices cannot be edited.' : 'Change this invoice item pricing.';
@@ -1716,6 +1716,20 @@ async function printInvoice(id) {
     setMessage(el.invoiceMessage, `${invoice.invoiceNumber} PDF downloaded.`, 'success');
   } catch {
     setMessage(el.invoiceMessage, 'Could not reach the invoice PDF maker.', 'error');
+  }
+}
+
+function previewInvoice(id) {
+  const invoice = state.invoices.find((item) => item.id === id);
+  if (!invoice) return;
+
+  const version = encodeURIComponent(invoice.updatedAt || invoice.createdAt || Date.now());
+  const url = `/api/invoices/${encodeURIComponent(id)}/pdf?preview=1&v=${version}`;
+  const opened = window.open(url, '_blank', 'noopener');
+  if (opened) {
+    setMessage(el.invoiceMessage, `Opening ${invoice.invoiceNumber} PDF preview.`, 'success');
+  } else {
+    setMessage(el.invoiceMessage, 'Allow pop-ups to preview the invoice PDF.', 'error');
   }
 }
 
@@ -2021,7 +2035,7 @@ function openManualInvoiceDialog(invoice = null) {
   state.editingInvoiceId = isEditing ? invoice.id : '';
   el.manualInvoiceForm.reset();
   el.manualInvoiceDialogTitle.textContent = isEditing ? 'Edit invoice' : 'Create invoice';
-  el.manualInvoiceNumber.disabled = isEditing;
+  el.manualInvoiceNumber.disabled = false;
   el.manualInvoiceNumber.value = isEditing ? (invoice.invoiceNumber || '') : '';
   el.manualInvoiceDate.value = isEditing ? (formatInvoiceIsoDate(invoice.issuedAt) || toDateValue(new Date())) : toDateValue(new Date());
   el.manualInvoiceClient.value = isEditing ? (invoice.clientName || '') : '';
@@ -2085,6 +2099,7 @@ async function createManualInvoice(event) {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          invoiceNumber: el.manualInvoiceNumber.value,
           issuedAt: el.manualInvoiceDate.value,
           clientName: el.manualInvoiceClient.value,
           clientEmail: el.manualInvoiceEmail.value,

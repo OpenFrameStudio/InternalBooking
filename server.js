@@ -1591,6 +1591,7 @@ function validateManualInvoice(input, invoices) {
 
 function validateEditableInvoiceDetails(input, existing) {
   const errors = [];
+  const invoiceNumberValidation = validateEditableInvoiceNumber(input?.invoiceNumber ?? existing?.invoiceNumber);
   const clientName = String(input?.clientName ?? existing?.clientName ?? "").trim();
   const clientEmail = uniqueEmails(parseGuestEmails(input?.clientEmail ?? existing?.clientEmail ?? ""));
   const propertyAddress = String(input?.propertyAddress ?? input?.description ?? existing?.propertyAddress ?? "").trim();
@@ -1612,10 +1613,12 @@ function validateEditableInvoiceDetails(input, existing) {
   for (const email of clientEmail) {
     if (!isValidEmail(email)) errors.push(`Enter a valid client email for ${email}.`);
   }
+  errors.push(...invoiceNumberValidation.errors);
 
   return {
     errors,
     details: {
+      invoiceNumber: invoiceNumberValidation.invoiceNumber,
       propertyAddress,
       clientName,
       clientEmail: clientEmail.join(", "),
@@ -2223,9 +2226,9 @@ function invoiceBillingLines(invoice, client = null) {
     .split(/\r?\n|,\s*/)
     .map((line) => line.trim())
     .filter(Boolean);
-  const billingName = String(invoice.billingName || client?.name || invoice.clientName || "").trim();
-  const billingEmail = String(client?.email || invoice.clientEmail || "").trim();
-  const billingAbn = String(client?.abn || invoice.clientAbn || invoice.abn || "").trim();
+  const billingName = String(invoice.billingName || invoice.clientName || client?.name || "").trim();
+  const billingEmail = String(invoice.clientEmail || client?.email || "").trim();
+  const billingAbn = String(invoice.clientAbn || invoice.abn || client?.abn || "").trim();
   const agentLine = invoice.agentName || invoice.agentPhone
     ? `Agent: ${formatContact(invoice.agentName, invoice.agentPhone)}`
     : "";
@@ -6109,11 +6112,13 @@ async function handleApi(req, res, url) {
     try {
       const pdf = await createInvoicePdfBuffer(invoice);
       const filename = invoiceFileName(invoice).replace(/["\\\r\n]/g, "");
+      const disposition = url.searchParams.get("preview") === "1" ? "inline" : "attachment";
       res.writeHead(200, {
         "Content-Type": "application/pdf",
         "Content-Length": pdf.length,
-        "Content-Disposition": `attachment; filename="${filename}"`,
-        "Cache-Control": "no-store"
+        "Content-Disposition": `${disposition}; filename="${filename}"`,
+        "Cache-Control": "no-store, max-age=0",
+        "X-Content-Type-Options": "nosniff"
       });
       res.end(pdf);
     } catch (error) {
@@ -6223,6 +6228,14 @@ async function handleApi(req, res, url) {
     const { errors, details } = validateEditableInvoiceDetails(input, invoice);
     if (errors.length) {
       sendJson(res, 400, { errors });
+      return;
+    }
+
+    const duplicate = invoices.find((item) =>
+      item.id !== invoiceId && String(item.invoiceNumber || "").trim().toUpperCase() === details.invoiceNumber
+    );
+    if (duplicate) {
+      sendJson(res, 409, { errors: [`${details.invoiceNumber} is already used by another invoice.`] });
       return;
     }
 
