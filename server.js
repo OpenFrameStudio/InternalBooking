@@ -2220,25 +2220,13 @@ async function findInvoiceBillingClient(invoice) {
 }
 
 function invoiceBillingLines(invoice, client = null) {
-  const cityLine = [client?.city, client?.postcode].filter(Boolean).join(" ");
-  const clientAddressLines = [client?.addressLine1, client?.addressLine2, cityLine].filter(Boolean);
-  const invoiceAddressLines = String(invoice.billingAddress || "")
-    .split(/\r?\n|,\s*/)
-    .map((line) => line.trim())
-    .filter(Boolean);
   const billingName = String(invoice.billingName || invoice.clientName || client?.name || "").trim();
-  const billingEmail = String(invoice.clientEmail || client?.email || "").trim();
   const billingAbn = String(invoice.clientAbn || invoice.abn || client?.abn || "").trim();
-  const agentLine = invoice.agentName || invoice.agentPhone
-    ? `Agent: ${formatContact(invoice.agentName, invoice.agentPhone)}`
-    : "";
+  const shouldShowAbn = Number(invoice.total || 0) > 1000 && billingAbn;
 
   const lines = [
     billingName,
-    ...(clientAddressLines.length ? clientAddressLines : invoiceAddressLines),
-    billingAbn ? `ABN: ${billingAbn}` : "",
-    billingEmail ? `Email: ${billingEmail}` : "",
-    agentLine
+    shouldShowAbn ? `ABN: ${billingAbn}` : ""
   ].filter(Boolean);
 
   return lines.length ? lines : [invoice.propertyAddress || "Client"];
