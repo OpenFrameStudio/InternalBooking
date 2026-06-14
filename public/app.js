@@ -79,6 +79,7 @@ const el = {
   manualInvoiceDialogTitle: $('#manualInvoiceDialogTitle'),
   manualInvoiceNumber: $('#manualInvoiceNumberInput'),
   manualInvoiceDate: $('#manualInvoiceDateInput'),
+  manualInvoiceClientSelect: $('#manualInvoiceClientSelect'),
   manualInvoiceClient: $('#manualInvoiceClientInput'),
   manualInvoiceEmail: $('#manualInvoiceEmailInput'),
   manualInvoiceAgent: $('#manualInvoiceAgentInput'),
@@ -817,6 +818,7 @@ function renderClientOptions() {
   renderOptions(el.clientSelect, state.clients, 'New client / enter manually', state.bookingForm.selectedClientId);
   renderClientDropdown();
   renderClientSearchResults();
+  renderManualInvoiceClientSelect();
 }
 
 function setClientDropdownOpen(isOpen) {
@@ -879,6 +881,43 @@ function renderClientDropdown() {
       });
     }
   }
+}
+
+function findManualInvoiceClient(invoice = {}) {
+  const invoiceName = String(invoice.clientName || '').trim().toLowerCase();
+  const invoiceEmail = String(invoice.clientEmail || '').trim();
+  return state.clients.find((client) => (
+    (invoiceName && String(client.name || '').trim().toLowerCase() === invoiceName)
+    || (client.email && invoiceEmail && emailsOverlap(client.email, invoiceEmail))
+  )) || null;
+}
+
+function renderManualInvoiceClientSelect(selectedId = el.manualInvoiceClientSelect.value) {
+  el.manualInvoiceClientSelect.innerHTML = '';
+  el.manualInvoiceClientSelect.append(new Option('Choose saved client / enter manually', ''));
+
+  for (const group of clientGroups()) {
+    if (!group.clients.length) continue;
+    const optgroup = document.createElement('optgroup');
+    optgroup.label = group.title;
+    for (const client of group.clients) {
+      const label = clientOptionLabel(client) || client.name;
+      const meta = [client.email, client.agentPhone].filter(Boolean).join(' - ');
+      optgroup.append(new Option(meta ? `${label} (${meta})` : label, client.id));
+    }
+    el.manualInvoiceClientSelect.append(optgroup);
+  }
+
+  el.manualInvoiceClientSelect.value = state.clients.some((client) => client.id === selectedId) ? selectedId : '';
+}
+
+function applyManualInvoiceClient(clientId) {
+  const client = state.clients.find((item) => item.id === clientId);
+  if (!client) return;
+  el.manualInvoiceClient.value = client.name || '';
+  el.manualInvoiceEmail.value = client.email || '';
+  el.manualInvoiceAgent.value = client.agentName || '';
+  el.manualInvoiceAgentPhone.value = client.agentPhone || '';
 }
 
 function renderPhotographerOptions() {
@@ -2110,12 +2149,14 @@ function resetManualInvoiceItems(items = []) {
 
 function openManualInvoiceDialog(invoice = null) {
   const isEditing = Boolean(invoice?.id);
+  const matchedClient = isEditing ? findManualInvoiceClient(invoice) : null;
   state.editingInvoiceId = isEditing ? invoice.id : '';
   el.manualInvoiceForm.reset();
   el.manualInvoiceDialogTitle.textContent = isEditing ? 'Edit invoice' : 'Create invoice';
   el.manualInvoiceNumber.disabled = false;
   el.manualInvoiceNumber.value = isEditing ? (invoice.invoiceNumber || '') : '';
   el.manualInvoiceDate.value = isEditing ? (formatInvoiceIsoDate(invoice.issuedAt) || toDateValue(new Date())) : toDateValue(new Date());
+  renderManualInvoiceClientSelect(matchedClient?.id || '');
   el.manualInvoiceClient.value = isEditing ? (invoice.clientName || '') : '';
   el.manualInvoiceEmail.value = isEditing ? (invoice.clientEmail || '') : '';
   el.manualInvoiceAgent.value = isEditing ? (invoice.agentName || '') : '';
@@ -2132,7 +2173,7 @@ function openManualInvoiceDialog(invoice = null) {
     el.manualInvoiceDialog.setAttribute('open', '');
   }
 
-  requestAnimationFrame(() => el.manualInvoiceClient.focus());
+  requestAnimationFrame(() => (state.clients.length ? el.manualInvoiceClientSelect : el.manualInvoiceClient).focus());
 }
 
 function closeManualInvoiceDialog() {
@@ -2140,6 +2181,7 @@ function closeManualInvoiceDialog() {
   el.manualInvoiceForm.reset();
   el.manualInvoiceDialogTitle.textContent = 'Create invoice';
   el.manualInvoiceNumber.disabled = false;
+  renderManualInvoiceClientSelect('');
   el.manualInvoiceItemList.innerHTML = '';
   setMessage(el.manualInvoiceMessage, '');
 
@@ -3085,6 +3127,7 @@ el.cancelManualInvoiceButton.addEventListener('click', closeManualInvoiceDialog)
 el.manualInvoiceDialog.addEventListener('click', (event) => {
   if (event.target === el.manualInvoiceDialog) closeManualInvoiceDialog();
 });
+el.manualInvoiceClientSelect.addEventListener('change', () => applyManualInvoiceClient(el.manualInvoiceClientSelect.value));
 el.addManualInvoiceItemButton.addEventListener('click', () => addManualInvoiceItemRow({ name: '', quantity: 1, unitPrice: 0 }));
 el.logoutButton.addEventListener('click', logout);
 el.mainAssignmentNoticeButton?.addEventListener('click', viewOpenWorkAssignments);

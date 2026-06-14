@@ -1352,6 +1352,16 @@ function validateEditableInvoiceNumber(value) {
   return { invoiceNumber, errors };
 }
 
+function invoiceNumberInUse(invoices, invoiceNumber, exceptId = "") {
+  const key = normalizeEditableInvoiceNumber(invoiceNumber);
+  if (!key) return false;
+
+  return invoices.some((invoice) => (
+    invoice.id !== exceptId
+    && normalizeEditableInvoiceNumber(invoice.invoiceNumber) === key
+  ));
+}
+
 function normalizeMoney(value) {
   const number = Number(value);
   return Number.isFinite(number) ? Math.round(number * 100) / 100 : 0;
@@ -1560,7 +1570,7 @@ function validateManualInvoice(input, invoices) {
   if (!invoiceNumber && !errors.length) {
     invoiceNumber = nextInvoiceNumber(invoices, { clientName });
   }
-  if (invoiceNumber && invoices.some((invoice) => String(invoice.invoiceNumber || "").trim().toUpperCase() === invoiceNumber)) {
+  if (invoiceNumber && invoiceNumberInUse(invoices, invoiceNumber)) {
     errors.push(`${invoiceNumber} is already used by another invoice.`);
   }
 
@@ -1793,6 +1803,10 @@ function invoiceNumberForBooking(existing, booking, invoices) {
     return nextNumber();
   }
 
+  if (invoiceNumberInUse(otherInvoices, existing.invoiceNumber)) {
+    return nextNumber();
+  }
+
   const canRefreshDraftNumber =
     existing.status === "draft"
     && !existing.sentAt
@@ -1866,26 +1880,28 @@ function importInvoices(invoices, importedRecords) {
 
   for (const record of importedRecords) {
     const sourceInvoiceId = String(record?.sourceInvoiceId || "").trim();
-    const invoiceNumber = String(record?.invoiceNumber || "").trim();
+    const invoiceNumberValidation = validateEditableInvoiceNumber(record?.invoiceNumber);
+    const invoiceNumber = invoiceNumberValidation.invoiceNumber;
 
-    if (!sourceInvoiceId || !invoiceNumber) {
+    if (!sourceInvoiceId || !invoiceNumber || invoiceNumberValidation.errors.length) {
       skipped.push({
         sourceInvoiceId,
-        invoiceNumber,
-        reason: "Missing original invoice ID or invoice number."
+        invoiceNumber: String(record?.invoiceNumber || "").trim(),
+        reason: invoiceNumberValidation.errors.join(" ") || "Missing original invoice ID or invoice number."
       });
       continue;
     }
 
     const existingIndex = sourceIndex.get(sourceInvoiceId);
     const existing = existingIndex === undefined ? null : invoices[existingIndex];
-    if (!existing) {
-      const hasDifferentInvoiceWithSameNumber = invoices.some((invoice) => (
-        invoice.invoiceNumber === invoiceNumber && invoice.sourceInvoiceId !== sourceInvoiceId
-      ));
-      if (hasDifferentInvoiceWithSameNumber) {
-        duplicateInvoiceNumbers.push({ sourceInvoiceId, invoiceNumber });
-      }
+    if (invoiceNumberInUse(invoices, invoiceNumber, existing?.id || "")) {
+      duplicateInvoiceNumbers.push({ sourceInvoiceId, invoiceNumber });
+      skipped.push({
+        sourceInvoiceId,
+        invoiceNumber,
+        reason: `${invoiceNumber} is already used by another invoice.`
+      });
+      continue;
     }
 
     const invoice = mergeImportedInvoice(existing, { ...record, sourceInvoiceId, invoiceNumber }, invoices, now);
@@ -6324,10 +6340,7 @@ async function handleApi(req, res, url) {
     }
     const { details } = detailValidation;
 
-    const duplicate = invoices.find((item) =>
-      item.id !== invoiceId && String(item.invoiceNumber || "").trim().toUpperCase() === details.invoiceNumber
-    );
-    if (duplicate) {
+    if (invoiceNumberInUse(invoices, details.invoiceNumber, invoiceId)) {
       sendJson(res, 409, { errors: [`${details.invoiceNumber} is already used by another invoice.`] });
       return;
     }
@@ -6375,10 +6388,7 @@ async function handleApi(req, res, url) {
       return;
     }
 
-    const duplicate = invoices.find((item) =>
-      item.id !== invoiceId && String(item.invoiceNumber || "").trim().toUpperCase() === invoiceNumber
-    );
-    if (duplicate) {
+    if (invoiceNumberInUse(invoices, invoiceNumber, invoiceId)) {
       sendJson(res, 409, { errors: [`${invoiceNumber} is already used by another invoice.`] });
       return;
     }
