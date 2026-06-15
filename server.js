@@ -2238,7 +2238,7 @@ function buildInvoiceEmailSubject(invoice) {
 
 function buildInvoiceEmailSignatureText() {
   return [
-    "Admin Team",
+    "OpenFrame Team",
     "OpenFrame Studio · Photography Studio",
     "",
     "OpenFrame Studio | ABN 35 687 073 114",
@@ -2257,7 +2257,7 @@ function buildInvoiceEmailSignatureHtml() {
         </td>
         <td style="width:1px;background:#d9d9d9"></td>
         <td style="padding:0 0 0 28px;vertical-align:middle;line-height:1.45">
-          <div style="font-size:18px;font-weight:700;color:#111611">Admin Team</div>
+          <div style="font-size:18px;font-weight:700;color:#111611">OpenFrame Team</div>
           <div style="font-size:16px;color:#666">OpenFrame Studio · Photography Studio</div>
           <div style="height:14px;line-height:14px">&nbsp;</div>
           <div style="font-size:15px;color:#444">OpenFrame Studio | ABN 35 687 073 114</div>
