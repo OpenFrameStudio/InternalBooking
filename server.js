@@ -2236,6 +2236,41 @@ function buildInvoiceEmailSubject(invoice) {
   return `${invoiceEmailConfig.subjectPrefix} ${invoice.invoiceNumber} - ${invoice.propertyAddress || "OpenFrame Studio"}`;
 }
 
+function buildInvoiceEmailSignatureText() {
+  return [
+    "Admin Team",
+    "OpenFrame Studio · Photography Studio",
+    "",
+    "OpenFrame Studio | ABN 35 687 073 114",
+    "23 Selborne St, Burwood NSW 2134",
+    "M 0403 007 853",
+    "admin@openframe.studio | openframe.studio"
+  ].join("\n");
+}
+
+function buildInvoiceEmailSignatureHtml() {
+  return `
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:22px;border-collapse:collapse;font-family:Arial,sans-serif;color:#333">
+      <tr>
+        <td style="padding:0 28px 0 0;vertical-align:middle">
+          <img src="${escapeHtmlForEmail(`${publicAppUrl}/openframe-logo.png`)}" alt="OpenFrame Studio" width="144" style="display:block;width:144px;max-width:144px;height:auto;border:0" />
+        </td>
+        <td style="width:1px;background:#d9d9d9"></td>
+        <td style="padding:0 0 0 28px;vertical-align:middle;line-height:1.45">
+          <div style="font-size:18px;font-weight:700;color:#111611">Admin Team</div>
+          <div style="font-size:16px;color:#666">OpenFrame Studio · Photography Studio</div>
+          <div style="height:14px;line-height:14px">&nbsp;</div>
+          <div style="font-size:15px;color:#444">OpenFrame Studio | ABN 35 687 073 114</div>
+          <div style="font-size:15px;color:#444">23 Selborne St, Burwood NSW 2134</div>
+          <div style="font-size:15px;color:#444">M 0403 007 853</div>
+          <div style="height:10px;line-height:10px">&nbsp;</div>
+          <div style="font-size:15px;color:#111611">admin@openframe.studio | openframe.studio</div>
+        </td>
+      </tr>
+    </table>
+  `;
+}
+
 function buildInvoiceEmailText(invoice) {
   return [
     "Hi,",
@@ -2249,8 +2284,7 @@ function buildInvoiceEmailText(invoice) {
     "Account: 11440602",
     `Please reference ${invoice.invoiceNumber} for the payment.`,
     "",
-    "Thank you,",
-    "OpenFrame Studio"
+    buildInvoiceEmailSignatureText()
   ].join("\n");
 }
 
@@ -2267,7 +2301,7 @@ function buildInvoiceEmailHtml(invoice) {
         <li>Account: 11440602</li>
         <li>Please reference ${escapeHtmlForEmail(invoice.invoiceNumber)} for the payment.</li>
       </ul>
-      <p>Thank you,<br />OpenFrame Studio</p>
+      ${buildInvoiceEmailSignatureHtml()}
     </div>
   `;
 }
