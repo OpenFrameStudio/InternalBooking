@@ -1,6 +1,7 @@
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 const workNoticeDismissedKey = 'openframe.workNoticeDismissed.v1';
+const showSendLogsInUi = false;
 
 const el = {
   bookingForm: $('#bookingForm'),
@@ -351,7 +352,6 @@ function refreshLiveData() {
     loadBookings(),
     loadInvoices(),
     loadWages(),
-    loadSendLogs(),
     loadWorkAssignments()
   ]);
 }
@@ -386,7 +386,7 @@ function userHasPermission(permission) {
 }
 
 function userCanViewSendLogs() {
-  return ['manage_invoices', 'manage_wages', 'manage_bookings', 'manage_work'].some(userHasPermission);
+  return showSendLogsInUi && ['manage_invoices', 'manage_wages', 'manage_bookings', 'manage_work'].some(userHasPermission);
 }
 
 function applyAppAccess() {
@@ -394,7 +394,7 @@ function applyAppAccess() {
     link.hidden = !userCanAccess(link.dataset.appLink);
   });
   el.testLarkButton.hidden = !userHasPermission('manage_bookings');
-  el.sendLogSection.hidden = !userCanViewSendLogs();
+  el.sendLogSection.hidden = true;
 
   if (!userCanAccess('clients') && window.location.pathname === '/clients') {
     setRoute('/bookings');
@@ -2557,8 +2557,6 @@ async function sendInvoice(id) {
     setMessage(el.invoiceMessage, data.message || 'Invoice sent.', 'success');
   } catch {
     setMessage(el.invoiceMessage, 'Could not reach the invoice email sender.', 'error');
-  } finally {
-    loadSendLogs();
   }
 }
 
@@ -2594,8 +2592,6 @@ async function sendWage(id) {
     setMessage(el.wageMessage, data.message || 'Proforma sent.', 'success');
   } catch {
     setMessage(el.wageMessage, 'Could not reach the wage email sender.', 'error');
-  } finally {
-    loadSendLogs();
   }
 }
 
