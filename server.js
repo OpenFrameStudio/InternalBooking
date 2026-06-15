@@ -842,6 +842,7 @@ function normalizeSendLog(log = {}) {
     title: String(log.title || "").trim().slice(0, 160),
     detail: String(log.detail || "").trim().slice(0, 240),
     provider: String(log.provider || "").trim().slice(0, 80),
+    providerMessageId: String(log.providerMessageId || "").trim().slice(0, 160),
     from: String(log.from || "").trim().slice(0, 160),
     recipients,
     relatedId: String(log.relatedId || "").trim().slice(0, 120),
@@ -2592,12 +2593,14 @@ async function sendInvoiceEmail(invoice, recipients) {
   const bcc = uniqueEmails(parseGuestEmails(invoiceEmailConfig.bcc)).filter(isValidEmail);
 
   if (invoiceEmailProvider === "resend") {
-    await sendInvoiceWithResend(invoice, recipients, pdf, bcc);
-    return;
+    const result = await sendInvoiceWithResend(invoice, recipients, pdf, bcc);
+    return {
+      providerMessageId: String(result?.id || result?.data?.id || "")
+    };
   }
 
   const transport = await createInvoiceTransport();
-  await withTimeout(transport.sendMail({
+  const result = await withTimeout(transport.sendMail({
     from: invoiceEmailConfig.from,
     to: recipients,
     bcc,
@@ -2613,6 +2616,9 @@ async function sendInvoiceEmail(invoice, recipients) {
       }
     ]
   }), invoiceEmailConfig.timeoutMs + 2_000, "Invoice email timed out connecting to Lark Mail.");
+  return {
+    providerMessageId: String(result?.messageId || "")
+  };
 }
 
 function normalizeWageStatus(status) {
@@ -6465,8 +6471,9 @@ async function handleApi(req, res, url) {
     }
     await syncInvoiceDatesFromCompletedJobs(invoices);
 
+    let sendResult = null;
     try {
-      await sendInvoiceEmail(invoice, recipients);
+      sendResult = await sendInvoiceEmail(invoice, recipients);
     } catch (error) {
       const message = invoiceEmailErrorMessage(error);
       await appendSendLog({
@@ -6495,6 +6502,7 @@ async function handleApi(req, res, url) {
       title: `Invoice ${invoice.invoiceNumber}`,
       detail: invoice.propertyAddress || invoice.clientName || "",
       provider: invoiceEmailProvider,
+      providerMessageId: sendResult?.providerMessageId || "",
       from: invoiceEmailConfig.from,
       recipients,
       relatedId: invoice.id,

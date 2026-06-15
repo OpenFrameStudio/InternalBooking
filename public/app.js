@@ -1432,6 +1432,10 @@ function invoiceIsPendingSend(invoice) {
   return invoice?.status === 'draft' && !invoice?.sentAt;
 }
 
+function invoiceIsSent(invoice) {
+  return invoice?.status === 'draft' && Boolean(invoice?.sentAt);
+}
+
 function invoiceWorkAssignment(invoice) {
   if (!invoice?.bookingId) return null;
   return state.workAssignments.find((assignment) => (
@@ -1446,6 +1450,7 @@ function invoiceJobIsIncomplete(invoice) {
 
 function invoiceListStatusLabel(invoice) {
   if (invoiceIsPendingSend(invoice)) return 'Pending send';
+  if (invoiceIsSent(invoice)) return 'Sent';
   if (invoice.status === 'draft') return 'Not paid';
   return invoiceStatusLabel(invoice.status);
 }
@@ -1500,6 +1505,7 @@ function sendLogStatusLabel(status) {
 function sendLogMeta(log) {
   const parts = [
     log.provider ? `Provider: ${log.provider}` : '',
+    log.providerMessageId ? `Message ID: ${log.providerMessageId}` : '',
     log.from ? `From: ${log.from}` : '',
     Array.isArray(log.recipients) && log.recipients.length ? `To: ${log.recipients.join(', ')}` : ''
   ].filter(Boolean);
@@ -1559,6 +1565,10 @@ function updateWageStats() {
 function invoiceMatchesFilters(invoice) {
   if (state.invoiceFilters.status === 'pending-send') {
     return invoiceIsPendingSend(invoice);
+  }
+
+  if (state.invoiceFilters.status === 'sent') {
+    return invoiceIsSent(invoice);
   }
 
   if (state.invoiceFilters.status !== 'all' && invoice.status !== state.invoiceFilters.status) {
@@ -1665,6 +1675,7 @@ function renderInvoices() {
     status.classList.toggle('paid', invoice.status === 'paid');
     status.classList.toggle('void', invoice.status === 'void');
     status.classList.toggle('pending-send', invoiceIsPendingSend(invoice));
+    status.classList.toggle('sent', invoiceIsSent(invoice));
     item.querySelector('.invoice-client').textContent = [invoice.clientName, invoice.agentName].filter(Boolean).join(' - ') || 'No client saved';
     item.querySelector('.invoice-booking').textContent = `Issued ${formatInvoiceDate(invoice.issuedAt)} - due ${formatInvoiceDate(invoice.dueAt)}`;
     item.querySelector('.invoice-services').textContent = [
@@ -1692,6 +1703,7 @@ function renderInvoices() {
     editButton.addEventListener('click', () => startInvoiceEdit(invoice.id));
     const sendButton = item.querySelector('.send-invoice-button');
     sendButton.hidden = invoice.status === 'void';
+    sendButton.textContent = invoice.sentAt ? 'Resend invoice' : 'Send invoice';
     sendButton.addEventListener('click', () => sendInvoice(invoice.id));
     const paidButton = item.querySelector('.paid-invoice-button');
     paidButton.hidden = invoice.status !== 'draft';
@@ -2522,11 +2534,12 @@ async function sendInvoice(id) {
     return;
   }
 
-  if (!window.confirm(`Send ${invoice.invoiceNumber} to ${recipients.join(', ')}?`)) {
+  const sendAction = invoice.sentAt ? 'Resend' : 'Send';
+  if (!window.confirm(`${sendAction} ${invoice.invoiceNumber} to ${recipients.join(', ')}?`)) {
     return;
   }
 
-  setMessage(el.invoiceMessage, `Sending ${invoice.invoiceNumber}...`);
+  setMessage(el.invoiceMessage, `${sendAction}ing ${invoice.invoiceNumber}...`);
   try {
     const { response, data } = await fetchJson(`/api/invoices/${encodeURIComponent(id)}/send`, {
       method: 'POST',
