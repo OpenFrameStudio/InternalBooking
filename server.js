@@ -2250,16 +2250,13 @@ function buildInvoiceEmailSignatureText() {
 
 function buildInvoiceEmailSignatureHtml() {
   return `
-    <div style="margin-top:22px;font-family:Arial,sans-serif;color:#333;line-height:1.45;max-width:360px">
-      <img src="${escapeHtmlForEmail(`${publicAppUrl}/openframe-logo.png`)}" alt="OpenFrame Studio" width="108" style="display:block;width:108px;max-width:108px;height:auto;border:0;margin:0 0 12px 0" />
-      <div style="font-size:18px;font-weight:700;color:#111611">OpenFrame Team</div>
-      <div style="font-size:16px;color:#666">OpenFrame Studio · Photography Studio</div>
-      <div style="height:12px;line-height:12px">&nbsp;</div>
-      <div style="font-size:15px;color:#444">OpenFrame Studio | ABN 35 687 073 114</div>
-      <div style="font-size:15px;color:#444">23 Selborne St, Burwood NSW 2134</div>
-      <div style="font-size:15px;color:#444">M 0403 007 853</div>
-      <div style="height:8px;line-height:8px">&nbsp;</div>
-      <div style="font-size:15px;color:#111611">admin@openframe.studio | openframe.studio</div>
+    <div style="margin-top:22px;font-family:Arial,sans-serif;color:#444;line-height:1.45;font-size:14px">
+      <div style="font-weight:700;color:#111611">OpenFrame Team</div>
+      <div style="color:#666">OpenFrame Studio · Photography Studio</div>
+      <div style="margin-top:10px">OpenFrame Studio | ABN 35 687 073 114</div>
+      <div>23 Selborne St, Burwood NSW 2134</div>
+      <div>M 0403 007 853</div>
+      <div style="margin-top:8px;color:#111611">admin@openframe.studio | openframe.studio</div>
     </div>
   `;
 }
