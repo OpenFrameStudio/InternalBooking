@@ -1238,7 +1238,8 @@ function workdayBeforeBooking(booking) {
   }
 
   const today = parseDateValue(toDateValue(new Date()));
-  return toDateValue(due < today ? today : due);
+  const bookingDay = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+  return toDateValue(bookingDay < today ? due : (due < today ? today : due));
 }
 
 function bookingWorkPriority(booking) {
@@ -1251,8 +1252,7 @@ function bookingWorkPriority(booking) {
 function isSyncableBooking(booking) {
   if (!booking?.id || booking.status === "cancelled") return false;
   const end = new Date(booking.endAt || booking.startAt);
-  if (Number.isNaN(end.getTime())) return false;
-  return end >= parseDateValue(toDateValue(new Date()));
+  return !Number.isNaN(end.getTime());
 }
 
 function assignmentFromBooking(booking, existing = null) {
@@ -2056,6 +2056,16 @@ function bookingHasPassed(booking, now = Date.now()) {
   );
   const endDate = new Date(endSource);
   return !Number.isNaN(endDate.getTime()) && endDate.getTime() < now;
+}
+
+function markPastBookingLocal(booking) {
+  booking.larkStatus = "past_local";
+  booking.larkError = null;
+  booking.larkAttendeeStatus = "not_needed";
+  booking.larkAttendeeError = null;
+  booking.calendarInviteStatus = "not_needed";
+  booking.calendarInviteError = null;
+  return booking;
 }
 
 function bookingIdFromApiPath(pathname, trailingAction = "") {
@@ -5175,10 +5185,6 @@ function validateBooking(input) {
     errors.push("Choose a valid start time.");
   }
 
-  if (startDate.getTime() < Date.now() - 60_000) {
-    errors.push("Choose a future time.");
-  }
-
   return {
     errors,
     value: {
@@ -7043,7 +7049,11 @@ async function handleApi(req, res, url) {
       createdAt: new Date().toISOString()
     };
 
-    await syncBookingToLark(booking);
+    if (bookingHasPassed(booking)) {
+      markPastBookingLocal(booking);
+    } else {
+      await syncBookingToLark(booking);
+    }
 
     bookings.push(booking);
     await saveBookings(bookings);
@@ -7117,7 +7127,11 @@ async function handleApi(req, res, url) {
       updatedAt: new Date().toISOString()
     };
 
-    await syncBookingToLark(booking, existingBooking);
+    if (bookingHasPassed(booking)) {
+      markPastBookingLocal(booking);
+    } else {
+      await syncBookingToLark(booking, existingBooking);
+    }
 
     bookings[bookingIndex] = booking;
     await saveBookings(bookings);

@@ -694,7 +694,7 @@ function setInitialDateTime() {
     minutes = 9 * 60;
   }
 
-  el.date.min = today;
+  el.date.removeAttribute('min');
   el.date.value = dateValue;
   el.time.value = timeValueFromMinutes(minutes);
 }
@@ -1305,22 +1305,24 @@ function syncLabel(booking) {
     failed: 'Lark failed',
     attendees_failed: 'guests failed',
     pending: 'syncing',
+    past_local: 'past job',
     not_configured: 'local only'
   }[booking.larkStatus] || 'local';
 }
 
-function isVisibleOnUpcomingPage(booking) {
+function isVisibleOnBookingsPage(booking) {
+  if (booking.larkStatus === 'past_local') return true;
   const endTime = new Date(booking.endAt).getTime();
   if (!Number.isFinite(endTime)) return true;
   return endTime >= Date.now() - bookingUpcomingGraceMs;
 }
 
 function renderBookings() {
-  const upcoming = state.bookings
-    .filter(isVisibleOnUpcomingPage)
+  const visibleBookings = state.bookings
+    .filter(isVisibleOnBookingsPage)
     .sort((a, b) => new Date(a.startAt) - new Date(b.startAt));
   el.bookingList.innerHTML = '';
-  if (!upcoming.length) {
+  if (!visibleBookings.length) {
     const empty = document.createElement('div');
     empty.className = 'empty-state';
     empty.textContent = 'No bookings yet. Create one above and it will appear here.';
@@ -1328,7 +1330,7 @@ function renderBookings() {
     updateStats();
     return;
   }
-  for (const booking of upcoming) {
+  for (const booking of visibleBookings) {
     const start = new Date(booking.startAt);
     const end = new Date(booking.endAt);
     const item = el.bookingTemplate.content.firstElementChild.cloneNode(true);
@@ -2854,6 +2856,7 @@ function bookingSavedMessage(booking, action) {
   if (booking.calendarInviteStatus === 'failed') return `Booking ${action}, but the admin invite email could not send.`;
   if (booking.calendarInviteStatus === 'not_configured') return `Booking ${action}. Add Resend settings to send invites from admin@openframe.studio.`;
   if (booking.larkAttendeeStatus === 'needs_review') return `Booking ${action}. Check guest removals in Lark.`;
+  if (booking.larkStatus === 'past_local') return `Past job ${action} locally.`;
   if (booking.larkStatus === 'synced') return `Booking ${action} and synced to Lark.`;
   if (booking.larkStatus === 'attendees_failed') return `Booking ${action}, but Lark guest invitations need checking.`;
   if (booking.larkStatus === 'failed') return `Booking ${action} locally, but Lark did not update.`;

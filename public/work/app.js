@@ -59,7 +59,7 @@ const el = {
   toastRegion: $("#toastRegion"),
 };
 
-const initialBookingSyncStatus = "Sync upcoming bookings into the work queue.";
+const initialBookingSyncStatus = "Sync bookings into the work queue.";
 
 const state = {
   employee: {
@@ -1165,14 +1165,14 @@ async function syncBookings() {
 
   setUiState({
     syncInProgress: true,
-    bookingSyncStatus: "Checking upcoming bookings...",
+    bookingSyncStatus: "Checking bookings...",
   });
 
   try {
     const data = await workApi.syncBookings();
     const message = data.syncable === 0
-      ? "No upcoming bookings found to assign."
-      : `Synced ${data.syncable} upcoming bookings: ${data.created} new, ${data.updated} updated.`;
+      ? "No bookings found to assign."
+      : `Synced ${data.syncable} bookings: ${data.created} new, ${data.updated} updated.`;
     const fullMessage = data.workInviteMessage ? `${message} ${data.workInviteMessage}` : message;
 
     setWorkData(data, {
