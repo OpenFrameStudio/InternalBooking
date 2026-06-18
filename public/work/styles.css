@@ -49,10 +49,18 @@
   line-height: 1.35;
 }
 
+.assignment-actions .begin-button,
 .assignment-actions .notify-button {
   white-space: nowrap;
 }
 
+.assignment-actions .begin-button {
+  border-color: rgba(17, 122, 93, 0.28);
+  background: rgba(17, 122, 93, 0.08);
+  color: var(--accent-dark);
+}
+
+.assignment-actions .begin-button:disabled,
 .assignment-actions .notify-button:disabled {
   opacity: 0.62;
   cursor: wait;
@@ -370,6 +378,7 @@
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 40px;
   }
 
+  .assignment-actions .begin-button,
   .assignment-actions .notify-button,
   .assignment-actions .complete-button {
     width: 100%;

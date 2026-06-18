@@ -1014,6 +1014,15 @@ function normalizeWorkState(raw) {
         larkNotifySentAt: assignment.larkNotifySentAt || "",
         larkNotifyTo: String(assignment.larkNotifyTo || ""),
         larkNotifyError: String(assignment.larkNotifyError || ""),
+        startNotifyStatus: ["sent", "failed", "not_configured"].includes(assignment.startNotifyStatus) ? assignment.startNotifyStatus : "",
+        startNotifySentAt: assignment.startNotifySentAt || "",
+        startNotifyTo: String(assignment.startNotifyTo || ""),
+        startNotifyError: String(assignment.startNotifyError || ""),
+        startEmailStatus: ["sent", "failed", "not_configured"].includes(assignment.startEmailStatus) ? assignment.startEmailStatus : "",
+        startEmailSentAt: assignment.startEmailSentAt || "",
+        startEmailTo: uniqueEmails(parseGuestEmails(assignment.startEmailTo || "")).join(", "),
+        startEmailFrom: String(assignment.startEmailFrom || ""),
+        startEmailError: String(assignment.startEmailError || ""),
         completionNotifyStatus: ["sent", "failed", "not_configured"].includes(assignment.completionNotifyStatus) ? assignment.completionNotifyStatus : "",
         completionNotifySentAt: assignment.completionNotifySentAt || "",
         completionNotifyTo: String(assignment.completionNotifyTo || ""),
@@ -1023,6 +1032,8 @@ function normalizeWorkState(raw) {
         completionEmailTo: uniqueEmails(parseGuestEmails(assignment.completionEmailTo || "")).join(", "),
         completionEmailFrom: String(assignment.completionEmailFrom || ""),
         completionEmailError: String(assignment.completionEmailError || ""),
+        startedAt: assignment.startedAt || "",
+        startedBy: String(assignment.startedBy || ""),
         completedAt: assignment.completedAt || "",
         createdAt: assignment.createdAt || new Date().toISOString(),
         updatedAt: assignment.updatedAt || assignment.createdAt || new Date().toISOString()
@@ -1182,6 +1193,15 @@ function validateWorkAssignment(input, existing = null, workState = null) {
       larkNotifySentAt: existing?.larkNotifySentAt || "",
       larkNotifyTo: existing?.larkNotifyTo || "",
       larkNotifyError: existing?.larkNotifyError || "",
+      startNotifyStatus: existing?.startNotifyStatus || "",
+      startNotifySentAt: existing?.startNotifySentAt || "",
+      startNotifyTo: existing?.startNotifyTo || "",
+      startNotifyError: existing?.startNotifyError || "",
+      startEmailStatus: existing?.startEmailStatus || "",
+      startEmailSentAt: existing?.startEmailSentAt || "",
+      startEmailTo: existing?.startEmailTo || "",
+      startEmailFrom: existing?.startEmailFrom || "",
+      startEmailError: existing?.startEmailError || "",
       completionNotifyStatus: existing?.completionNotifyStatus || "",
       completionNotifySentAt: existing?.completionNotifySentAt || "",
       completionNotifyTo: existing?.completionNotifyTo || "",
@@ -1191,6 +1211,8 @@ function validateWorkAssignment(input, existing = null, workState = null) {
       completionEmailTo: existing?.completionEmailTo || "",
       completionEmailFrom: existing?.completionEmailFrom || "",
       completionEmailError: existing?.completionEmailError || "",
+      startedAt: existing?.startedAt || "",
+      startedBy: existing?.startedBy || "",
       completedAt: existing?.completedAt || "",
       createdAt: existing?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString()
@@ -1294,6 +1316,15 @@ function assignmentFromBooking(booking, existing = null) {
     larkNotifySentAt: existing?.larkNotifySentAt || "",
     larkNotifyTo: existing?.larkNotifyTo || "",
     larkNotifyError: existing?.larkNotifyError || "",
+    startNotifyStatus: existing?.startNotifyStatus || "",
+    startNotifySentAt: existing?.startNotifySentAt || "",
+    startNotifyTo: existing?.startNotifyTo || "",
+    startNotifyError: existing?.startNotifyError || "",
+    startEmailStatus: existing?.startEmailStatus || "",
+    startEmailSentAt: existing?.startEmailSentAt || "",
+    startEmailTo: existing?.startEmailTo || "",
+    startEmailFrom: existing?.startEmailFrom || "",
+    startEmailError: existing?.startEmailError || "",
     completionNotifyStatus: existing?.completionNotifyStatus || "",
     completionNotifySentAt: existing?.completionNotifySentAt || "",
     completionNotifyTo: existing?.completionNotifyTo || "",
@@ -1303,6 +1334,8 @@ function assignmentFromBooking(booking, existing = null) {
     completionEmailTo: existing?.completionEmailTo || "",
     completionEmailFrom: existing?.completionEmailFrom || "",
     completionEmailError: existing?.completionEmailError || "",
+    startedAt: existing?.startedAt || "",
+    startedBy: existing?.startedBy || "",
     completedAt: existing?.completedAt || "",
     createdAt: existing?.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString()
@@ -3870,6 +3903,76 @@ function buildWorkCompletionEmailHtml(assignment, workState, completedBy) {
   `;
 }
 
+function buildWorkStartLarkNotificationText(assignment, workState, startedBy) {
+  const employee = workEmployeeForAssignment(workState, assignment);
+  const startedByName = startedBy?.name || employee?.name || "Employee";
+  const lines = [
+    `Work started: ${assignment.title}`,
+    "",
+    `${startedByName} began this work.`,
+    `Assigned to: ${employee?.name || "Employee"}`,
+    `Due: ${formatWorkInviteDueDate(assignment)}`,
+    `Priority: ${assignment.priority}`,
+    ""
+  ];
+
+  if (assignment.notes) {
+    const notes = assignment.notes.length > 700 ? `${assignment.notes.slice(0, 700)}...` : assignment.notes;
+    lines.push("Details:", notes, "");
+  }
+
+  lines.push("Open work desk:", `${publicAppUrl}/work/`);
+  return lines.join("\n");
+}
+
+function buildWorkStartEmailSubject(assignment) {
+  return `Work started: ${assignment.title}`;
+}
+
+function buildWorkStartEmailText(assignment, workState, startedBy) {
+  const employee = workEmployeeForAssignment(workState, assignment);
+  const startedByName = startedBy?.name || employee?.name || "Employee";
+  const lines = [
+    `${startedByName} began this work.`,
+    "",
+    `Work: ${assignment.title}`,
+    `Started by: ${startedByName}`,
+    `Assigned to: ${employee?.name || "Employee"}`,
+    `Due: ${formatWorkInviteDueDate(assignment)}`,
+    `Priority: ${assignment.priority}`,
+    ""
+  ];
+
+  if (assignment.notes) {
+    lines.push("Details:", assignment.notes, "");
+  }
+
+  lines.push("Open work desk:", `${publicAppUrl}/work/`, "", "OpenFrame Studio");
+  return lines.join("\n");
+}
+
+function buildWorkStartEmailHtml(assignment, workState, startedBy) {
+  const employee = workEmployeeForAssignment(workState, assignment);
+  const startedByName = startedBy?.name || employee?.name || "Employee";
+  const notes = assignment.notes
+    ? `<p><strong>Details:</strong><br />${escapeHtmlForEmail(assignment.notes).replace(/\n/g, "<br />")}</p>`
+    : "";
+
+  return `
+    <div style="font-family:Arial,sans-serif;color:#111611;line-height:1.5">
+      <p><strong>${escapeHtmlForEmail(startedByName)}</strong> began this work.</p>
+      <p><strong>Work:</strong> ${escapeHtmlForEmail(assignment.title)}</p>
+      <p><strong>Started by:</strong> ${escapeHtmlForEmail(startedByName)}</p>
+      <p><strong>Assigned to:</strong> ${escapeHtmlForEmail(employee?.name || "Employee")}</p>
+      <p><strong>Due:</strong> ${escapeHtmlForEmail(formatWorkInviteDueDate(assignment))}</p>
+      <p><strong>Priority:</strong> ${escapeHtmlForEmail(assignment.priority)}</p>
+      ${notes}
+      <p><a href="${escapeHtmlForEmail(`${publicAppUrl}/work/`)}">Open the work desk</a></p>
+      <p>OpenFrame Studio</p>
+    </div>
+  `;
+}
+
 function isInvalidLarkReceiveIdResult(result) {
   const code = Number(result?.code);
   const message = String(result?.msg || result?.message || "").toLowerCase();
@@ -4058,6 +4161,52 @@ async function sendWorkCompletionLarkNotification(assignment, workState, complet
   };
 }
 
+async function sendWorkStartLarkNotification(assignment, workState, startedBy) {
+  const missing = workCompletionLarkNotificationMissingSettings();
+  if (missing.length) {
+    return { sent: false, skipped: true, missing };
+  }
+
+  const token = await getTenantAccessToken();
+  const receiveIdType = workCompletionLarkReceiveIdType();
+  const receiveId = workCompletionLarkReceiveId();
+  const text = buildWorkStartLarkNotificationText(assignment, workState, startedBy);
+  const firstAttempt = await postWorkLarkMessage(token, receiveIdType, receiveId, text);
+  let resolvedOpenId = "";
+  let result = firstAttempt.result;
+
+  if (!firstAttempt.ok && receiveIdType === "email" && firstAttempt.invalidReceiveId) {
+    try {
+      resolvedOpenId = await resolveLarkOpenIdByEmail(receiveId, token);
+    } catch (error) {
+      throw new Error(
+        `Lark rejected ${receiveId} as the boss notification recipient, and the app could not look up that Lark user ID by email: ${error.message}.`
+      );
+    }
+
+    if (resolvedOpenId) {
+      const retryAttempt = await postWorkLarkMessage(token, "open_id", resolvedOpenId, text);
+      result = retryAttempt.result;
+      if (!retryAttempt.ok) {
+        throw new Error(retryAttempt.message);
+      }
+    } else {
+      throw new Error(
+        `Lark rejected ${receiveId} as the boss notification recipient, and no Lark user was found for that email. Set WORK_COMPLETION_LARK_RECEIVE_ID_TYPE to user_id and WORK_COMPLETION_LARK_RECEIVE_ID to your Lark User ID, or use open_id if you have your Lark open_id.`
+      );
+    }
+  } else if (!firstAttempt.ok) {
+    throw new Error(firstAttempt.message);
+  }
+
+  return {
+    sent: true,
+    receiveId: resolvedOpenId || receiveId,
+    receiveIdType: resolvedOpenId ? "open_id" : receiveIdType,
+    messageId: result.data?.message_id || result.data?.messageId || ""
+  };
+}
+
 async function sendWorkCompletionEmail(assignment, workState, completedBy) {
   const missing = workCompletionEmailMissingSettings();
   if (missing.length) {
@@ -4080,6 +4229,31 @@ async function sendWorkCompletionEmail(assignment, workState, completedBy) {
   }
 
   await sendResendEmail(payload, workCompletionEmailConfig.timeoutMs, "Work completion email request timed out.");
+  return { sent: true, recipients };
+}
+
+async function sendWorkStartEmail(assignment, workState, startedBy) {
+  const missing = workCompletionEmailMissingSettings();
+  if (missing.length) {
+    return { sent: false, skipped: true, missing };
+  }
+
+  const recipients = workCompletionEmailRecipients();
+  const bcc = uniqueEmails(parseGuestEmails(workCompletionEmailConfig.bcc)).filter(isValidEmail);
+  const payload = {
+    from: workCompletionEmailConfig.from,
+    to: recipients,
+    subject: buildWorkStartEmailSubject(assignment),
+    text: buildWorkStartEmailText(assignment, workState, startedBy),
+    html: buildWorkStartEmailHtml(assignment, workState, startedBy),
+    reply_to: workCompletionEmailConfig.replyTo
+  };
+
+  if (bcc.length) {
+    payload.bcc = bcc;
+  }
+
+  await sendResendEmail(payload, workCompletionEmailConfig.timeoutMs, "Work start email request timed out.");
   return { sent: true, recipients };
 }
 
@@ -4306,6 +4480,161 @@ function workAssignmentNotificationMessage(workLarkSummary, workEmailSummary) {
   return [larkMessage, emailMessage].filter(Boolean).join(" ");
 }
 
+async function trySendWorkStartLarkNotification(workState, assignment, startedBy) {
+  const summary = {
+    attempted: startedBy?.role === "employee" ? 1 : 0,
+    sent: 0,
+    skipped: 0,
+    failed: 0,
+    recipients: [],
+    errors: [],
+    missing: []
+  };
+
+  if (!summary.attempted) {
+    return summary;
+  }
+
+  try {
+    const result = await sendWorkStartLarkNotification(assignment, workState, startedBy);
+    const now = new Date().toISOString();
+
+    if (result.sent) {
+      summary.sent = 1;
+      const recipient = `${result.receiveIdType}:${result.receiveId}`;
+      summary.recipients = [recipient];
+      assignment.startNotifyStatus = "sent";
+      assignment.startNotifySentAt = now;
+      assignment.startNotifyTo = recipient;
+      assignment.startNotifyError = "";
+      await appendSendLog({
+        type: "work_notification",
+        status: "success",
+        title: `Start notification: ${assignment.title}`,
+        detail: startedBy?.name || startedBy?.username || "Employee",
+        provider: "lark",
+        recipients: [recipient],
+        relatedId: assignment.id
+      });
+    } else {
+      summary.skipped = 1;
+      summary.missing = result.missing || [];
+      assignment.startNotifyStatus = "not_configured";
+      assignment.startNotifyError = result.missing?.length
+        ? `Missing ${result.missing.join(", ")}`
+        : "Start Lark notification is not configured.";
+      await appendSendLog({
+        type: "work_notification",
+        status: "skipped",
+        title: `Start notification: ${assignment.title}`,
+        detail: startedBy?.name || startedBy?.username || "Employee",
+        provider: "lark",
+        relatedId: assignment.id,
+        error: assignment.startNotifyError
+      });
+    }
+  } catch (error) {
+    summary.failed = 1;
+    const message = error.message || "Could not send start Lark notification.";
+    summary.errors = [message];
+    assignment.startNotifyStatus = "failed";
+    assignment.startNotifyError = message;
+    await appendSendLog({
+      type: "work_notification",
+      status: "failed",
+      title: `Start notification: ${assignment.title}`,
+      detail: startedBy?.name || startedBy?.username || "Employee",
+      provider: "lark",
+      recipients: [workCompletionLarkReceiveId()].filter(Boolean),
+      relatedId: assignment.id,
+      error: message
+    });
+  }
+
+  return summary;
+}
+
+async function trySendWorkStartEmailNotification(workState, assignment, startedBy) {
+  const summary = {
+    attempted: startedBy?.role === "employee" ? 1 : 0,
+    sent: 0,
+    skipped: 0,
+    failed: 0,
+    recipients: [],
+    errors: [],
+    missing: []
+  };
+
+  if (!summary.attempted) {
+    return summary;
+  }
+
+  try {
+    const result = await sendWorkStartEmail(assignment, workState, startedBy);
+    const now = new Date().toISOString();
+
+    if (result.sent) {
+      summary.sent = 1;
+      summary.recipients = result.recipients;
+      assignment.startEmailStatus = "sent";
+      assignment.startEmailSentAt = now;
+      assignment.startEmailTo = result.recipients.join(", ");
+      assignment.startEmailFrom = workCompletionEmailConfig.from;
+      assignment.startEmailError = "";
+      await appendSendLog({
+        type: "work_email",
+        status: "success",
+        title: `Start email: ${assignment.title}`,
+        detail: startedBy?.name || startedBy?.username || "Employee",
+        provider: "resend",
+        from: workCompletionEmailConfig.from,
+        recipients: result.recipients,
+        relatedId: assignment.id
+      });
+    } else {
+      summary.skipped = 1;
+      summary.missing = result.missing || [];
+      assignment.startEmailStatus = "not_configured";
+      assignment.startEmailFrom = workCompletionEmailConfig.from;
+      assignment.startEmailError = result.missing?.length
+        ? `Missing ${result.missing.join(", ")}`
+        : "Start email is not configured.";
+      await appendSendLog({
+        type: "work_email",
+        status: "skipped",
+        title: `Start email: ${assignment.title}`,
+        detail: startedBy?.name || startedBy?.username || "Employee",
+        provider: "resend",
+        from: workCompletionEmailConfig.from,
+        recipients: workCompletionEmailRecipients(),
+        relatedId: assignment.id,
+        error: assignment.startEmailError
+      });
+    }
+  } catch (error) {
+    summary.failed = 1;
+    const message = error.message || "Could not send start email.";
+    summary.errors = [message];
+    assignment.startEmailStatus = "failed";
+    assignment.startEmailFrom = workCompletionEmailConfig.from;
+    assignment.startEmailTo = workCompletionEmailRecipients().join(", ");
+    assignment.startEmailError = message;
+    await appendSendLog({
+      type: "work_email",
+      status: "failed",
+      title: `Start email: ${assignment.title}`,
+      detail: startedBy?.name || startedBy?.username || "Employee",
+      provider: "resend",
+      from: workCompletionEmailConfig.from,
+      recipients: workCompletionEmailRecipients(),
+      relatedId: assignment.id,
+      error: message
+    });
+  }
+
+  return summary;
+}
+
 async function trySendWorkCompletionLarkNotification(workState, assignment, completedBy) {
   const summary = {
     attempted: completedBy?.role === "employee" ? 1 : 0,
@@ -4479,6 +4808,32 @@ function workCompletionNotificationMessage(larkSummary, emailSummary = null) {
       messages.push("Lark completion notification sent to Barry.");
     } else if (larkSummary.failed) {
       messages.push(`Lark completion notification could not send: ${larkSummary.errors[0] || "unknown error"}`);
+    } else if (larkSummary.skipped) {
+      messages.push("Add WORK_COMPLETION_LARK_RECEIVE_ID or BOSS_LARK_RECEIVE_ID in Render to notify Barry in Lark.");
+    }
+  }
+
+  return messages.join(" ");
+}
+
+function workStartNotificationMessage(larkSummary, emailSummary = null) {
+  const messages = [];
+
+  if (emailSummary?.attempted) {
+    if (emailSummary.sent) {
+      messages.push(`Start email sent to ${emailSummary.recipients.join(", ")}.`);
+    } else if (emailSummary.failed) {
+      messages.push(`Started, but Barry's start email could not send: ${emailSummary.errors[0] || "unknown error"}`);
+    } else if (emailSummary.skipped) {
+      messages.push("Started. Add RESEND_API_KEY in Render to email Barry when work starts.");
+    }
+  }
+
+  if (larkSummary?.attempted) {
+    if (larkSummary.sent) {
+      messages.push("Lark start notification sent to Barry.");
+    } else if (larkSummary.failed) {
+      messages.push(`Lark start notification could not send: ${larkSummary.errors[0] || "unknown error"}`);
     } else if (larkSummary.skipped) {
       messages.push("Add WORK_COMPLETION_LARK_RECEIVE_ID or BOSS_LARK_RECEIVE_ID in Render to notify Barry in Lark.");
     }
@@ -6072,6 +6427,69 @@ async function handleApi(req, res, url) {
       workLarkNotificationMessage: workLarkNotificationMessage(workLarkNotification, "manual"),
       workInviteMessage: workNotificationMessage,
       user: currentUser(req)
+    });
+    return;
+  }
+
+  const beginWorkMatch = url.pathname.match(/^\/api\/work\/assignments\/([^/]+)\/begin$/);
+  if (req.method === "POST" && beginWorkMatch) {
+    const assignmentId = decodeURIComponent(beginWorkMatch[1]);
+    const user = currentUser(req);
+    const workState = await loadWorkState();
+    const assignment = workState.assignments.find((item) => item.id === assignmentId);
+    if (!assignment) {
+      sendJson(res, 404, { errors: ["Work not found."] });
+      return;
+    }
+
+    if (!canCompleteWorkAssignment(user, assignment)) {
+      sendForbidden(res);
+      return;
+    }
+
+    if (assignment.status === "done") {
+      sendJson(res, 400, { errors: ["This work has already been finished."] });
+      return;
+    }
+
+    if (assignment.startedAt) {
+      sendJson(res, 200, {
+        ...visibleWorkStateForUser(workState, user),
+        workStartNotificationMessage: "Work already started.",
+        user
+      });
+      return;
+    }
+
+    const startedAt = new Date().toISOString();
+    const startedBy = user?.name || user?.username || workEmployeeForAssignment(workState, assignment).name;
+    const startedAssignment = { ...assignment, startedAt, startedBy, updatedAt: startedAt };
+    workState.messages.unshift({
+      id: crypto.randomUUID(),
+      text: `${workEmployeeForAssignment(workState, startedAssignment).name} began: ${startedAssignment.title}`,
+      createdAt: startedAt
+    });
+    workState.messages = workState.messages.slice(0, 12);
+    const workStartNotification = await trySendWorkStartLarkNotification(
+      workState,
+      startedAssignment,
+      user
+    );
+    const workStartEmailNotification = await trySendWorkStartEmailNotification(
+      workState,
+      startedAssignment,
+      user
+    );
+    workState.assignments = workState.assignments.map((item) =>
+      item.id === assignmentId ? startedAssignment : item
+    );
+    await saveWorkState(workState);
+    sendJson(res, 200, {
+      ...visibleWorkStateForUser(workState, user),
+      workStartNotification,
+      workStartEmailNotification,
+      workStartNotificationMessage: workStartNotificationMessage(workStartNotification, workStartEmailNotification),
+      user
     });
     return;
   }

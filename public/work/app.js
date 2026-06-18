@@ -90,6 +90,7 @@ const state = {
     assignmentDraft: emptyAssignmentDraft(),
     assignmentError: "",
     assignmentNoticeDismissedSignature: readWorkNoticeDismissedSignature(),
+    beginningAssignmentId: "",
     bookingSyncStatus: initialBookingSyncStatus,
     fayeHistoryMonth: currentMonthKey(),
     fayeHistoryQuery: "",
@@ -273,6 +274,7 @@ const workApi = {
   syncBookings: () => apiFetch("/api/work/sync-bookings", jsonRequest("POST")),
   createAssignment: (payload) => apiFetch("/api/work/assignments", jsonRequest("POST", payload)),
   updateAssignment: (id, payload) => apiFetch(assignmentEndpoint(id), jsonRequest("PUT", payload)),
+  beginAssignment: (id) => apiFetch(assignmentEndpoint(id, "begin"), jsonRequest("POST")),
   completeAssignment: (id) => apiFetch(assignmentEndpoint(id, "complete"), jsonRequest("POST")),
   notifyAssignment: (id) => apiFetch(assignmentEndpoint(id, "notify"), jsonRequest("POST")),
   reopenAssignment: (id) => apiFetch(assignmentEndpoint(id, "reopen"), jsonRequest("POST")),
@@ -404,6 +406,8 @@ function assignmentSearchText(assignment) {
     assignment.priority,
     assignment.status,
     assignment.dueDate,
+    assignment.startedAt,
+    assignment.startedBy,
     assignment.completedAt,
     assignment.createdAt,
     assignment.updatedAt,
@@ -664,8 +668,13 @@ function renderAssignments() {
 
 function renderAssignmentCard(assignment) {
   const assignee = employeeById(assignment.employeeId);
+  const statusLabel = assignment.status === "done"
+    ? "Finished"
+    : assignment.startedAt
+      ? "In progress"
+      : "Open";
   const card = document.createElement("article");
-  card.className = `assignment-card ${assignment.status === "done" ? "done" : "open"} ${
+  card.className = `assignment-card ${assignment.status === "done" ? "done" : assignment.startedAt ? "started" : "open"} ${
     isOverdue(assignment) ? "overdue" : ""
   }`;
   card.dataset.assignmentId = assignment.id;
@@ -685,7 +694,7 @@ function renderAssignmentCard(assignment) {
     <div class="assignment-actions"></div>
   `;
 
-  card.querySelector(".status-pill").textContent = assignment.status === "done" ? "Finished" : "Open";
+  card.querySelector(".status-pill").textContent = statusLabel;
   card.querySelector(".priority-pill").textContent = assignment.priority;
   card.querySelector("h3").textContent = assignment.title;
   card.querySelector(".assignment-notes").textContent = assignment.notes || "No details added.";
@@ -700,6 +709,17 @@ function renderAssignmentCard(assignment) {
   const actions = card.querySelector(".assignment-actions");
 
   if (assignment.status !== "done" && canCompleteAssignment(assignment)) {
+    if (!assignment.startedAt) {
+      const beginButton = document.createElement("button");
+      const isBeginning = state.ui.beginningAssignmentId === assignment.id;
+      beginButton.className = "ghost-button begin-button";
+      beginButton.type = "button";
+      beginButton.disabled = isBeginning;
+      beginButton.textContent = isBeginning ? "Starting" : "Begin Work";
+      beginButton.dataset.beginAssignment = assignment.id;
+      actions.append(beginButton);
+    }
+
     const completeButton = document.createElement("button");
     completeButton.className = "ghost-button complete-button";
     completeButton.type = "button";
@@ -1102,6 +1122,21 @@ async function handleAssignmentSubmit(event) {
   }
 }
 
+async function beginAssignment(id) {
+  const assignmentBeforeUpdate = state.assignments.find((item) => item.id === id);
+  if (!canCompleteAssignment(assignmentBeforeUpdate) || assignmentBeforeUpdate?.status === "done" || assignmentBeforeUpdate?.startedAt) return;
+
+  setUiState({ beginningAssignmentId: id });
+  try {
+    const data = await workApi.beginAssignment(id);
+    setWorkData(data, { beginningAssignmentId: "" });
+    if (data.workStartNotificationMessage) showToast(data.workStartNotificationMessage);
+  } catch (error) {
+    setUiState({ beginningAssignmentId: "" });
+    showToast(error.message);
+  }
+}
+
 async function completeAssignment(id) {
   const assignmentBeforeUpdate = state.assignments.find((item) => item.id === id);
   if (!canCompleteAssignment(assignmentBeforeUpdate)) return;
@@ -1284,6 +1319,12 @@ function wireEvents() {
   });
 
   el.assignmentList.addEventListener("click", async (event) => {
+    const beginTarget = event.target.closest("[data-begin-assignment]");
+    if (beginTarget) {
+      await beginAssignment(beginTarget.dataset.beginAssignment);
+      return;
+    }
+
     const completeTarget = event.target.closest("[data-complete-assignment]");
     if (completeTarget) {
       await completeAssignment(completeTarget.dataset.completeAssignment);
