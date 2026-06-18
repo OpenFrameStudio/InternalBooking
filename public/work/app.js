@@ -310,6 +310,46 @@ function formatMessageTime(value) {
   }).format(new Date(value));
 }
 
+function validTimeValue(value) {
+  const time = new Date(value || "").getTime();
+  return Number.isNaN(time) ? "" : value;
+}
+
+function listPhrase(items) {
+  if (!items.length) return "";
+  if (items.length === 1) return items[0];
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
+function startNotificationLogText(assignment) {
+  const sent = [
+    { channel: "email", at: validTimeValue(assignment.startEmailSentAt), status: assignment.startEmailStatus },
+    { channel: "Lark", at: validTimeValue(assignment.startNotifySentAt), status: assignment.startNotifyStatus },
+  ].filter((item) => item.status === "sent" && item.at);
+
+  if (sent.length) {
+    const latest = sent.reduce((latestItem, item) =>
+      new Date(item.at) > new Date(latestItem.at) ? item : latestItem
+    );
+    return {
+      text: `Boss notified ${formatMessageTime(latest.at)} by ${listPhrase(sent.map((item) => item.channel))}.`,
+      status: "sent",
+    };
+  }
+
+  const failed = [assignment.startEmailStatus, assignment.startNotifyStatus].includes("failed");
+  if (failed) {
+    return { text: "Boss notification failed.", status: "warning" };
+  }
+
+  const skipped = [assignment.startEmailStatus, assignment.startNotifyStatus].includes("not_configured");
+  if (skipped) {
+    return { text: "Boss notification not sent.", status: "warning" };
+  }
+
+  return { text: "", status: "" };
+}
+
 function formatHistoryDate(value) {
   if (!value) return "No completion date";
   const date = new Date(value);
@@ -688,6 +728,7 @@ function renderAssignmentCard(assignment) {
         <span><i data-lucide="user-round"></i><strong></strong></span>
         <span><i data-lucide="calendar-days"></i><em></em></span>
       </div>
+      <p class="assignment-notification-log" hidden></p>
     </div>
     <div class="assignment-actions"></div>
   `;
@@ -702,6 +743,11 @@ function renderAssignmentCard(assignment) {
     day: "numeric",
     month: "short",
   })}`;
+  const notificationLog = startNotificationLogText(assignment);
+  const notificationLogElement = card.querySelector(".assignment-notification-log");
+  notificationLogElement.textContent = notificationLog.text;
+  notificationLogElement.hidden = !notificationLog.text;
+  notificationLogElement.classList.toggle("warning", notificationLog.status === "warning");
   renderAssignmentAttachments(card, assignment.attachments || []);
 
   const actions = card.querySelector(".assignment-actions");
