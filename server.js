@@ -152,8 +152,8 @@ const authUsers = [
     label: "Employee",
     name: "Faye",
     employeeId: "faye",
-    apps: ["bookings", "work"],
-    permissions: ["complete_work"]
+    apps: ["bookings", "clients", "work"],
+    permissions: ["complete_work", "manage_clients"]
   },
   {
     username: process.env.TEST_EMPLOYEE_USERNAME || "Test",
@@ -477,8 +477,8 @@ function userWithAccountRole(user, roleValue = "") {
       ? accountRoleOptions.map(({ value, label }) => ({ value, label }))
       : [],
     employeeId: roleOption.value === "employee" ? (user.employeeId || defaultWorkEmployee.id) : (user.employeeId || ""),
-    apps: [...roleOption.apps],
-    permissions: [...roleOption.permissions]
+    apps: usesBaseRole && Array.isArray(user.apps) ? [...user.apps] : [...roleOption.apps],
+    permissions: usesBaseRole && Array.isArray(user.permissions) ? [...user.permissions] : [...roleOption.permissions]
   };
 }
 
@@ -604,6 +604,10 @@ function requirePermission(req, res, permission, message = "You do not have acce
 
   sendForbidden(res, message);
   return false;
+}
+
+function canManageClients(req) {
+  return hasPermission(req, "manage_directory") || hasPermission(req, "manage_clients");
 }
 
 function canCompleteWorkAssignment(user, assignment) {
@@ -6879,7 +6883,7 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "POST" && url.pathname === "/api/clients") {
-    if (!hasPermission(req, "manage_directory")) {
+    if (!canManageClients(req)) {
       sendForbidden(res, "Boss or team leader only.");
       return;
     }
@@ -6918,7 +6922,7 @@ async function handleApi(req, res, url) {
 
   const clientIdMatch = url.pathname.match(/^\/api\/clients\/([^/]+)$/);
   if (req.method === "DELETE" && clientIdMatch) {
-    if (!hasPermission(req, "manage_directory")) {
+    if (!canManageClients(req)) {
       sendForbidden(res, "Boss or team leader only.");
       return;
     }
