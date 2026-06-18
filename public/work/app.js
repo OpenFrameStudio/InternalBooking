@@ -96,7 +96,6 @@ const state = {
     fayeHistoryQuery: "",
     filter: "open",
     loggingOut: false,
-    notifyingAssignmentId: "",
     notificationPermission: getNotificationPermission(),
     syncInProgress: false,
     toasts: [],
@@ -276,7 +275,6 @@ const workApi = {
   updateAssignment: (id, payload) => apiFetch(assignmentEndpoint(id), jsonRequest("PUT", payload)),
   beginAssignment: (id) => apiFetch(assignmentEndpoint(id, "begin"), jsonRequest("POST")),
   completeAssignment: (id) => apiFetch(assignmentEndpoint(id, "complete"), jsonRequest("POST")),
-  notifyAssignment: (id) => apiFetch(assignmentEndpoint(id, "notify"), jsonRequest("POST")),
   reopenAssignment: (id) => apiFetch(assignmentEndpoint(id, "reopen"), jsonRequest("POST")),
   deleteAssignment: (id) => apiFetch(assignmentEndpoint(id), jsonRequest("DELETE")),
   clearMessages: () => apiFetch("/api/work/messages", jsonRequest("DELETE")),
@@ -740,19 +738,6 @@ function renderAssignmentCard(assignment) {
     actions.append(finishedLabel);
   }
 
-  if (assignment.status !== "done" && canManageWork()) {
-    const notifyButton = document.createElement("button");
-    const isNotifying = state.ui.notifyingAssignmentId === assignment.id;
-    notifyButton.className = "ghost-button notify-button";
-    notifyButton.type = "button";
-    notifyButton.disabled = isNotifying;
-    notifyButton.title = `Notify ${assignee?.name || "employee"}`;
-    notifyButton.setAttribute("aria-label", `Notify ${assignee?.name || "employee"}`);
-    notifyButton.dataset.notifyAssignment = assignment.id;
-    notifyButton.innerHTML = `<i data-lucide="bell-ring"></i><span>${isNotifying ? "Sending" : "Notify"}</span>`;
-    actions.append(notifyButton);
-  }
-
   if (canManageWork()) {
     const editButton = document.createElement("button");
     editButton.className = "ghost-button icon-ghost";
@@ -1148,22 +1133,6 @@ async function completeAssignment(id) {
   if (data.workCompletionNotificationMessage) showToast(data.workCompletionNotificationMessage);
 }
 
-async function notifyAssignment(id) {
-  if (!canManageWork()) return;
-
-  setUiState({ notifyingAssignmentId: id });
-  try {
-    const data = await workApi.notifyAssignment(id);
-    setWorkData(data, { notifyingAssignmentId: "" });
-    if (data.workInviteMessage || data.workLarkNotificationMessage) {
-      showToast(data.workInviteMessage || data.workLarkNotificationMessage);
-    }
-  } catch (error) {
-    setUiState({ notifyingAssignmentId: "" });
-    showToast(error.message);
-  }
-}
-
 async function reopenAssignment(id) {
   if (!canManageWork()) return;
   setWorkData(await workApi.reopenAssignment(id));
@@ -1328,12 +1297,6 @@ function wireEvents() {
     const completeTarget = event.target.closest("[data-complete-assignment]");
     if (completeTarget) {
       await completeAssignment(completeTarget.dataset.completeAssignment);
-      return;
-    }
-
-    const notifyTarget = event.target.closest("[data-notify-assignment]");
-    if (notifyTarget) {
-      await notifyAssignment(notifyTarget.dataset.notifyAssignment);
       return;
     }
 
