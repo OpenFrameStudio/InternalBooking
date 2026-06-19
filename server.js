@@ -218,8 +218,8 @@ const contentTypes = {
 const serviceCatalog = new Set(["Photography", "Floorplan", "Drone", "Siteplan"]);
 const invoiceServicePrices = {
   Photography: 150,
-  Floorplan: 75,
-  Drone: 100,
+  Floorplan: 50,
+  Drone: 25,
   Siteplan: 25
 };
 const invoiceGstRate = 0.1;
@@ -1962,7 +1962,11 @@ function invoiceFromBooking(booking, invoices, existing = null) {
   const isPaid = existing?.status === "paid";
   const existingItems = Array.isArray(existing?.items) ? existing.items : [];
   const bookingItems = bookingInvoiceItems(booking);
-  const items = isPaid ? existingItems : mergeBookingInvoiceItemsWithExistingPrices(bookingItems, existingItems);
+  const items = isPaid
+    ? existingItems
+    : existing?.pricesEditedAt
+      ? mergeBookingInvoiceItemsWithExistingPrices(bookingItems, existingItems)
+      : bookingItems;
   const { subtotal, gstAmount, total } = calculateInvoiceTotals(items);
   const invoiceDetails = existing?.detailsEditedAt ? existing : booking;
   const status = booking.status === "cancelled"

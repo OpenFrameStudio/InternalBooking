@@ -223,8 +223,8 @@ const sendLogTimeFormatter = new Intl.DateTimeFormat('en-AU', { day: 'numeric', 
 const currencyFormatter = new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' });
 const manualInvoiceServicePrices = {
   Photography: 150,
-  Floorplan: 75,
-  Drone: 100,
+  Floorplan: 50,
+  Drone: 25,
   Siteplan: 25
 };
 const bookingUpcomingGraceMs = 24 * 60 * 60 * 1000;
