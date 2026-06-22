@@ -2290,7 +2290,7 @@ function invoiceEmailRecipients(invoice, input = {}) {
     : parseGuestEmails(input.to || input.recipients || "");
   const routingOverride = invoiceEmailRoutingOverride(invoice);
   const fallbackRecipients = parseGuestEmails(invoice.clientEmail || "");
-  return uniqueEmails(requestedRecipients.length ? requestedRecipients : (routingOverride?.to || fallbackRecipients)).filter(isValidEmail);
+  return uniqueEmails(routingOverride?.to || (requestedRecipients.length ? requestedRecipients : fallbackRecipients)).filter(isValidEmail);
 }
 
 function invoiceEmailRoutingOverride(invoice) {
@@ -2313,7 +2313,8 @@ function invoiceCcEmailRecipients(invoice, input = {}, recipients = [], billingC
     ...(routingOverride?.cc || [])
   ];
   const recipientSet = new Set(recipients.map((email) => String(email || "").trim().toLowerCase()));
-  return uniqueEmails(requestedCc.length ? requestedCc : fallbackCc)
+  const ccSource = routingOverride ? [...requestedCc, ...fallbackCc] : (requestedCc.length ? requestedCc : fallbackCc);
+  return uniqueEmails(ccSource)
     .filter(isValidEmail)
     .filter((email) => !recipientSet.has(email.toLowerCase()));
 }
