@@ -247,6 +247,14 @@ const invoicePrefixOverrides = [
   { prefix: "SC", names: ["Sprite Clean"] },
   { prefix: "VE", names: ["Video Estate", "VideoEstate"] }
 ];
+const invoiceEmailRoutingOverrides = [
+  {
+    names: ["McConnell Bourn", "Eric (McConnell Bourn)"],
+    agentName: "Eric",
+    to: ["Ashley.l@mhstay.com.au"],
+    cc: ["Kate.p@mhstay.com.au"]
+  }
+];
 const wageCurrency = "AUD";
 const employeeWageCurrency = "THB";
 const larkImportDays = Number(process.env.LARK_IMPORT_DAYS || 120);
@@ -838,6 +846,9 @@ function normalizeSendLog(log = {}) {
   const recipients = Array.isArray(log.recipients)
     ? uniqueEmails(log.recipients.map((email) => String(email || "").trim()).filter(Boolean))
     : uniqueEmails(parseGuestEmails(log.recipients || ""));
+  const ccRecipients = Array.isArray(log.ccRecipients || log.cc)
+    ? uniqueEmails((log.ccRecipients || log.cc).map((email) => String(email || "").trim()).filter(Boolean))
+    : uniqueEmails(parseGuestEmails(log.ccRecipients || log.cc || ""));
 
   return {
     id: String(log.id || crypto.randomUUID()),
@@ -849,6 +860,7 @@ function normalizeSendLog(log = {}) {
     providerMessageId: String(log.providerMessageId || "").trim().slice(0, 160),
     from: String(log.from || "").trim().slice(0, 160),
     recipients,
+    ccRecipients,
     relatedId: String(log.relatedId || "").trim().slice(0, 120),
     relatedNumber: String(log.relatedNumber || "").trim().slice(0, 80),
     error: String(log.error || "").trim().slice(0, 700),
@@ -2269,8 +2281,34 @@ function invoiceEmailRecipients(invoice, input = {}) {
   const requestedRecipients = Array.isArray(input.to || input.recipients)
     ? (input.to || input.recipients)
     : parseGuestEmails(input.to || input.recipients || "");
+  const routingOverride = invoiceEmailRoutingOverride(invoice);
   const fallbackRecipients = parseGuestEmails(invoice.clientEmail || "");
-  return uniqueEmails(requestedRecipients.length ? requestedRecipients : fallbackRecipients).filter(isValidEmail);
+  return uniqueEmails(requestedRecipients.length ? requestedRecipients : (routingOverride?.to || fallbackRecipients)).filter(isValidEmail);
+}
+
+function invoiceEmailRoutingOverride(invoice) {
+  return invoiceEmailRoutingOverrides.find((override) => {
+    const agentMatches = !override.agentName
+      || invoiceClientNameMatches(invoice.agentName, override.agentName)
+      || invoiceClientNameMatches(invoice.clientName, override.agentName);
+    return agentMatches && override.names.some((name) => invoiceClientNameMatches(invoice.clientName, name));
+  }) || null;
+}
+
+function invoiceCcEmailRecipients(invoice, input = {}, recipients = [], billingClient = null) {
+  const requestedCc = Array.isArray(input.cc || input.ccRecipients)
+    ? (input.cc || input.ccRecipients)
+    : parseGuestEmails(input.cc || input.ccRecipients || "");
+  const routingOverride = invoiceEmailRoutingOverride(invoice);
+  const fallbackCc = [
+    ...parseGuestEmails(invoice.clientCcEmail || invoice.invoiceCcEmail || invoice.ccEmail || ""),
+    ...parseGuestEmails(billingClient?.invoiceCcEmail || billingClient?.clientCcEmail || billingClient?.ccEmail || ""),
+    ...(routingOverride?.cc || [])
+  ];
+  const recipientSet = new Set(recipients.map((email) => String(email || "").trim().toLowerCase()));
+  return uniqueEmails(requestedCc.length ? requestedCc : fallbackCc)
+    .filter(isValidEmail)
+    .filter((email) => !recipientSet.has(email.toLowerCase()));
 }
 
 function buildInvoiceEmailSubject(invoice) {
@@ -2600,7 +2638,7 @@ async function sendResendEmail(payload, timeoutMs, timeoutMessage = "Resend emai
   return result;
 }
 
-async function sendInvoiceWithResend(invoice, recipients, pdf, bcc = []) {
+async function sendInvoiceWithResend(invoice, recipients, pdf, cc = [], bcc = []) {
   const payload = {
     from: invoiceEmailConfig.from,
     to: recipients,
@@ -2615,6 +2653,10 @@ async function sendInvoiceWithResend(invoice, recipients, pdf, bcc = []) {
       }
     ]
   };
+
+  if (cc.length) {
+    payload.cc = cc;
+  }
 
   if (bcc.length) {
     payload.bcc = bcc;
@@ -2649,7 +2691,7 @@ function invoiceEmailErrorMessage(error) {
   return message || "Could not send invoice email.";
 }
 
-async function sendInvoiceEmail(invoice, recipients) {
+async function sendInvoiceEmail(invoice, recipients, ccRecipients = []) {
   if (!isInvoiceEmailConfigured()) {
     throw new Error(`Invoice email is not set up yet. Add ${invoiceEmailMissingSettings().join(", ")} in Render.`);
   }
@@ -2658,7 +2700,7 @@ async function sendInvoiceEmail(invoice, recipients) {
   const bcc = uniqueEmails(parseGuestEmails(invoiceEmailConfig.bcc)).filter(isValidEmail);
 
   if (invoiceEmailProvider === "resend") {
-    const result = await sendInvoiceWithResend(invoice, recipients, pdf, bcc);
+    const result = await sendInvoiceWithResend(invoice, recipients, pdf, ccRecipients, bcc);
     return {
       providerMessageId: String(result?.id || result?.data?.id || "")
     };
@@ -2668,6 +2710,7 @@ async function sendInvoiceEmail(invoice, recipients) {
   const result = await withTimeout(transport.sendMail({
     from: invoiceEmailConfig.from,
     to: recipients,
+    cc: ccRecipients,
     bcc,
     replyTo: invoiceEmailConfig.replyTo,
     subject: buildInvoiceEmailSubject(invoice),
@@ -5426,6 +5469,7 @@ function validateClient(input) {
     id: String(input.id || "").trim(),
     name: String(input.name || input.clientName || "").trim(),
     email: String(input.email || input.clientEmail || "").trim(),
+    invoiceCcEmail: String(input.invoiceCcEmail || input.clientCcEmail || input.ccEmail || input.cc || "").trim(),
     agentName: String(input.agentName || "").trim(),
     agentPhone: String(input.agentPhone || input.phone || "").trim(),
     addressLine1,
@@ -5438,6 +5482,7 @@ function validateClient(input) {
     sourceCustomerId: String(input.sourceCustomerId || input.customerId || "").trim()
   };
   const clientEmails = uniqueEmails(parseGuestEmails(client.email));
+  const clientCcEmails = uniqueEmails(parseGuestEmails(client.invoiceCcEmail));
 
   if (!client.name) {
     errors.push("Enter the agency or client name.");
@@ -5449,7 +5494,14 @@ function validateClient(input) {
     }
   }
 
+  for (const email of clientCcEmails) {
+    if (!isValidEmail(email)) {
+      errors.push(`Enter a valid CC email for ${email}.`);
+    }
+  }
+
   client.email = clientEmails.join(", ");
+  client.invoiceCcEmail = clientCcEmails.join(", ");
   return { errors, client };
 }
 
@@ -5463,6 +5515,7 @@ function mergeClientRecord(existing, client, now) {
     updatedAt: now
   };
   const optionalFields = [
+    "invoiceCcEmail",
     "addressLine1",
     "addressLine2",
     "city",
@@ -6914,7 +6967,9 @@ async function handleApi(req, res, url) {
       return;
     }
 
+    const billingClient = await findInvoiceBillingClient(invoice);
     const recipients = invoiceEmailRecipients(invoice, input);
+    const ccRecipients = invoiceCcEmailRecipients(invoice, input, recipients, billingClient);
     if (!recipients.length) {
       sendJson(res, 400, { errors: ["Add a valid client email before sending this invoice."] });
       return;
@@ -6923,7 +6978,7 @@ async function handleApi(req, res, url) {
 
     let sendResult = null;
     try {
-      sendResult = await sendInvoiceEmail(invoice, recipients);
+      sendResult = await sendInvoiceEmail(invoice, recipients, ccRecipients);
     } catch (error) {
       const message = invoiceEmailErrorMessage(error);
       await appendSendLog({
@@ -6934,6 +6989,7 @@ async function handleApi(req, res, url) {
         provider: invoiceEmailProvider,
         from: invoiceEmailConfig.from,
         recipients,
+        ccRecipients,
         relatedId: invoice.id,
         relatedNumber: invoice.invoiceNumber,
         error: message
@@ -6955,11 +7011,13 @@ async function handleApi(req, res, url) {
       providerMessageId: sendResult?.providerMessageId || "",
       from: invoiceEmailConfig.from,
       recipients,
+      ccRecipients,
       relatedId: invoice.id,
       relatedNumber: invoice.invoiceNumber
     });
     invoices.sort((a, b) => new Date(b.issuedAt) - new Date(a.issuedAt));
-    sendJson(res, 200, { invoice, invoices, message: `Invoice sent to ${recipients.join(", ")}.` });
+    const ccMessage = ccRecipients.length ? `, cc ${ccRecipients.join(", ")}` : "";
+    sendJson(res, 200, { invoice, invoices, message: `Invoice sent to ${recipients.join(", ")}${ccMessage}.` });
     return;
   }
 

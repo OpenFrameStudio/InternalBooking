@@ -800,6 +800,7 @@ function clientSearchText(client) {
     client.name,
     client.agentName,
     client.email,
+    client.invoiceCcEmail,
     client.agentPhone,
     clientAddressLabel(client),
     client.abn
@@ -1059,7 +1060,10 @@ function renderClientList() {
     for (const client of group.clients) {
       const item = el.clientTemplate.content.firstElementChild.cloneNode(true);
       item.querySelector('h3').textContent = client.name;
-      item.querySelector('.client-email').textContent = client.email || '';
+      item.querySelector('.client-email').textContent = [
+        client.email || '',
+        client.invoiceCcEmail ? `CC: ${client.invoiceCcEmail}` : ''
+      ].filter(Boolean).join(' | ');
       item.querySelector('.client-agent').textContent = clientHasAgent(client) ? `Agent: ${formatContact(client.agentName, client.agentPhone)}` : '';
       item.querySelector('.client-address').textContent = clientAddressLabel(client);
       item.querySelector('.client-abn').textContent = client.abn ? `ABN: ${client.abn}` : '';
@@ -1507,7 +1511,8 @@ function sendLogMeta(log) {
     log.provider ? `Provider: ${log.provider}` : '',
     log.providerMessageId ? `Message ID: ${log.providerMessageId}` : '',
     log.from ? `From: ${log.from}` : '',
-    Array.isArray(log.recipients) && log.recipients.length ? `To: ${log.recipients.join(', ')}` : ''
+    Array.isArray(log.recipients) && log.recipients.length ? `To: ${log.recipients.join(', ')}` : '',
+    Array.isArray(log.ccRecipients) && log.ccRecipients.length ? `CC: ${log.ccRecipients.join(', ')}` : ''
   ].filter(Boolean);
   return parts.join(' - ');
 }
