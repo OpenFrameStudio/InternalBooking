@@ -143,7 +143,7 @@ const authUsers = [
     role: "boss",
     label: "Boss / Team Leader",
     name: "Boss",
-    apps: ["bookings", "clients", "photographers", "work", "invoices"],
+    apps: ["bookings", "clients", "photographers", "work", "invoices", "wages"],
     permissions: ["manage_bookings", "manage_directory", "manage_work", "sync_work_bookings", "view_work_messages", "manage_invoices", "manage_wages"]
   },
   {
@@ -171,7 +171,7 @@ const accountRoleOptions = [
   {
     value: "boss",
     label: "Boss / Team Leader",
-    apps: ["bookings", "clients", "photographers", "work", "invoices"],
+    apps: ["bookings", "clients", "photographers", "work", "invoices", "wages"],
     permissions: ["manage_bookings", "manage_directory", "manage_work", "sync_work_bookings", "view_work_messages", "manage_invoices", "manage_wages"]
   },
   {
