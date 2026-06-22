@@ -82,6 +82,7 @@ const invoiceEmailConfig = {
   pass: process.env.INVOICE_EMAIL_PASSWORD || process.env.INVOICE_MAIL_PASSWORD || process.env.SMTP_PASSWORD || "",
   from: process.env.INVOICE_EMAIL_FROM || `OpenFrame Studio <${invoiceEmailUser}>`,
   replyTo: process.env.INVOICE_EMAIL_REPLY_TO || "admin@openframe.studio",
+  copyTo: process.env.INVOICE_EMAIL_COPY_TO || "barry.gao@openframe.studio",
   bcc: process.env.INVOICE_EMAIL_BCC || "",
   subjectPrefix: process.env.INVOICE_EMAIL_SUBJECT_PREFIX || "Tax Invoice",
   timeoutMs: Number.isFinite(invoiceEmailTimeoutMs) ? invoiceEmailTimeoutMs : 15_000
@@ -849,6 +850,9 @@ function normalizeSendLog(log = {}) {
   const ccRecipients = Array.isArray(log.ccRecipients || log.cc)
     ? uniqueEmails((log.ccRecipients || log.cc).map((email) => String(email || "").trim()).filter(Boolean))
     : uniqueEmails(parseGuestEmails(log.ccRecipients || log.cc || ""));
+  const bccRecipients = Array.isArray(log.bccRecipients || log.bcc)
+    ? uniqueEmails((log.bccRecipients || log.bcc).map((email) => String(email || "").trim()).filter(Boolean))
+    : uniqueEmails(parseGuestEmails(log.bccRecipients || log.bcc || ""));
 
   return {
     id: String(log.id || crypto.randomUUID()),
@@ -861,6 +865,7 @@ function normalizeSendLog(log = {}) {
     from: String(log.from || "").trim().slice(0, 160),
     recipients,
     ccRecipients,
+    bccRecipients,
     relatedId: String(log.relatedId || "").trim().slice(0, 120),
     relatedNumber: String(log.relatedNumber || "").trim().slice(0, 80),
     error: String(log.error || "").trim().slice(0, 700),
@@ -2311,6 +2316,18 @@ function invoiceCcEmailRecipients(invoice, input = {}, recipients = [], billingC
     .filter((email) => !recipientSet.has(email.toLowerCase()));
 }
 
+function invoiceBccEmailRecipients(recipients = [], ccRecipients = []) {
+  const visibleRecipients = new Set(
+    [...recipients, ...ccRecipients].map((email) => String(email || "").trim().toLowerCase())
+  );
+  return uniqueEmails([
+    ...parseGuestEmails(invoiceEmailConfig.copyTo || ""),
+    ...parseGuestEmails(invoiceEmailConfig.bcc || "")
+  ])
+    .filter(isValidEmail)
+    .filter((email) => !visibleRecipients.has(email.toLowerCase()));
+}
+
 function buildInvoiceEmailSubject(invoice) {
   return `${invoiceEmailConfig.subjectPrefix} ${invoice.invoiceNumber} - ${invoice.propertyAddress || "OpenFrame Studio"}`;
 }
@@ -2691,18 +2708,19 @@ function invoiceEmailErrorMessage(error) {
   return message || "Could not send invoice email.";
 }
 
-async function sendInvoiceEmail(invoice, recipients, ccRecipients = []) {
+async function sendInvoiceEmail(invoice, recipients, ccRecipients = [], bccRecipients = []) {
   if (!isInvoiceEmailConfigured()) {
     throw new Error(`Invoice email is not set up yet. Add ${invoiceEmailMissingSettings().join(", ")} in Render.`);
   }
 
   const pdf = await createInvoicePdfBuffer(invoice);
-  const bcc = uniqueEmails(parseGuestEmails(invoiceEmailConfig.bcc)).filter(isValidEmail);
+  const bcc = bccRecipients;
 
   if (invoiceEmailProvider === "resend") {
     const result = await sendInvoiceWithResend(invoice, recipients, pdf, ccRecipients, bcc);
     return {
-      providerMessageId: String(result?.id || result?.data?.id || "")
+      providerMessageId: String(result?.id || result?.data?.id || ""),
+      bccRecipients: bcc
     };
   }
 
@@ -2725,7 +2743,8 @@ async function sendInvoiceEmail(invoice, recipients, ccRecipients = []) {
     ]
   }), invoiceEmailConfig.timeoutMs + 2_000, "Invoice email timed out connecting to Lark Mail.");
   return {
-    providerMessageId: String(result?.messageId || "")
+    providerMessageId: String(result?.messageId || ""),
+    bccRecipients: bcc
   };
 }
 
@@ -6970,6 +6989,7 @@ async function handleApi(req, res, url) {
     const billingClient = await findInvoiceBillingClient(invoice);
     const recipients = invoiceEmailRecipients(invoice, input);
     const ccRecipients = invoiceCcEmailRecipients(invoice, input, recipients, billingClient);
+    const bccRecipients = invoiceBccEmailRecipients(recipients, ccRecipients);
     if (!recipients.length) {
       sendJson(res, 400, { errors: ["Add a valid client email before sending this invoice."] });
       return;
@@ -6978,7 +6998,7 @@ async function handleApi(req, res, url) {
 
     let sendResult = null;
     try {
-      sendResult = await sendInvoiceEmail(invoice, recipients, ccRecipients);
+      sendResult = await sendInvoiceEmail(invoice, recipients, ccRecipients, bccRecipients);
     } catch (error) {
       const message = invoiceEmailErrorMessage(error);
       await appendSendLog({
@@ -6990,6 +7010,7 @@ async function handleApi(req, res, url) {
         from: invoiceEmailConfig.from,
         recipients,
         ccRecipients,
+        bccRecipients,
         relatedId: invoice.id,
         relatedNumber: invoice.invoiceNumber,
         error: message
@@ -7012,6 +7033,7 @@ async function handleApi(req, res, url) {
       from: invoiceEmailConfig.from,
       recipients,
       ccRecipients,
+      bccRecipients: sendResult?.bccRecipients || bccRecipients,
       relatedId: invoice.id,
       relatedNumber: invoice.invoiceNumber
     });

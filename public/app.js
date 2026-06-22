@@ -1512,7 +1512,8 @@ function sendLogMeta(log) {
     log.providerMessageId ? `Message ID: ${log.providerMessageId}` : '',
     log.from ? `From: ${log.from}` : '',
     Array.isArray(log.recipients) && log.recipients.length ? `To: ${log.recipients.join(', ')}` : '',
-    Array.isArray(log.ccRecipients) && log.ccRecipients.length ? `CC: ${log.ccRecipients.join(', ')}` : ''
+    Array.isArray(log.ccRecipients) && log.ccRecipients.length ? `CC: ${log.ccRecipients.join(', ')}` : '',
+    Array.isArray(log.bccRecipients) && log.bccRecipients.length ? `BCC: ${log.bccRecipients.join(', ')}` : ''
   ].filter(Boolean);
   return parts.join(' - ');
 }
