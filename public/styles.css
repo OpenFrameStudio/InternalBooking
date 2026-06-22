@@ -1265,6 +1265,23 @@ button:focus-visible {
   background: rgba(17, 122, 93, 0.12);
 }
 
+.invoice-status.logo-badge {
+  min-width: 58px;
+  min-height: 42px;
+  justify-content: center;
+  border: 1px solid rgba(17, 122, 93, 0.18);
+  border-radius: 10px;
+  background: #fff;
+  padding: 4px 8px;
+}
+
+.invoice-status-logo {
+  display: block;
+  width: 42px;
+  height: 32px;
+  object-fit: contain;
+}
+
 .invoice-status.pending-send {
   color: #8a5a00;
   background: rgba(245, 166, 35, 0.16);

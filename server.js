@@ -2489,16 +2489,8 @@ function drawInvoicePdf(doc, invoice, billingClient = null) {
   doc.save();
   const stampY = hasMultipleRows ? Math.max(584, tableBottom + 44) : Math.max(559, totalY + 42);
   doc.rotate(-10, { origin: [140, stampY + 16] });
-  if (invoice.status === "paid") {
-    try {
-      doc.image(logoPath, 116, stampY - 14, { width: 60, height: 60, fit: [60, 60] });
-    } catch {
-      doc.fillColor("#000").font("Helvetica-Bold").fontSize(10).text("OPENFRAME\nSTUDIO", 110, stampY, { width: 96, align: "center" });
-    }
-  } else {
-    doc.rect(110, stampY, 96, 30).lineWidth(2).stroke("#f5a623");
-    doc.fillColor("#f5a623").font("Helvetica-Bold").fontSize(18).text(invoice.status === "void" ? "VOID" : "UNPAID", 118, stampY + 6);
-  }
+  doc.rect(110, stampY, 96, 30).lineWidth(2).stroke("#f5a623");
+  doc.fillColor("#f5a623").font("Helvetica-Bold").fontSize(18).text(invoice.status === "paid" ? "PAID" : invoice.status === "void" ? "VOID" : "UNPAID", 118, stampY + 6);
   doc.restore();
 
   const totalX = 324;

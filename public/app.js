@@ -1671,8 +1671,15 @@ function renderInvoices() {
     }
     item.querySelector('h3').textContent = `${invoice.invoiceNumber} - ${invoice.propertyAddress || 'Booking invoice'}`;
     const status = item.querySelector('.invoice-status');
-    status.textContent = invoiceListStatusLabel(invoice);
+    if (invoice.status === 'paid') {
+      status.innerHTML = '<img class="invoice-status-logo" src="/openframe-logo.png" alt="Paid" />';
+      status.title = 'Paid';
+    } else {
+      status.textContent = invoiceListStatusLabel(invoice);
+      status.title = '';
+    }
     status.classList.toggle('paid', invoice.status === 'paid');
+    status.classList.toggle('logo-badge', invoice.status === 'paid');
     status.classList.toggle('void', invoice.status === 'void');
     status.classList.toggle('pending-send', invoiceIsPendingSend(invoice));
     status.classList.toggle('sent', invoiceIsSent(invoice));
