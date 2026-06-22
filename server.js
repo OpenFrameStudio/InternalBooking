@@ -216,12 +216,14 @@ const contentTypes = {
   ".ico": "image/x-icon"
 };
 
-const serviceCatalog = new Set(["Photography", "Floorplan", "Drone", "Siteplan"]);
+const serviceCatalog = new Set(["Photography", "Floorplan", "Drone", "Siteplan", "Video", "Dusk"]);
 const invoiceServicePrices = {
   Photography: 150,
   Floorplan: 50,
   Drone: 25,
-  Siteplan: 25
+  Siteplan: 25,
+  Video: 350,
+  Dusk: 50
 };
 const invoiceGstRate = 0.1;
 const invoiceCurrency = "AUD";

@@ -234,7 +234,9 @@ const manualInvoiceServicePrices = {
   Photography: 150,
   Floorplan: 50,
   Drone: 25,
-  Siteplan: 25
+  Siteplan: 25,
+  Video: 350,
+  Dusk: 50
 };
 const bookingUpcomingGraceMs = 24 * 60 * 60 * 1000;
 const timeZonePartsFormatter = new Intl.DateTimeFormat('en-AU', {
