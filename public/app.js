@@ -1653,6 +1653,21 @@ function updateWageStats() {
   el.wageTotalValue.textContent = formatMoney(drafts.reduce((sum, wage) => sum + Number(wage.total || 0), 0));
 }
 
+function invoiceSearchTokens(value) {
+  return String(value || '')
+    .toLowerCase()
+    .split(/[^a-z0-9@._+-]+/)
+    .filter(Boolean);
+}
+
+function invoiceSearchTermMatches(tokens, term) {
+  if (!term) return true;
+  if (term.length <= 3) {
+    return tokens.some((token) => token === term || token.startsWith(term));
+  }
+  return tokens.some((token) => token.includes(term));
+}
+
 function invoiceMatchesFilters(invoice) {
   if (state.invoiceFilters.status === 'pending-send') {
     return invoiceIsPendingSend(invoice);
@@ -1669,13 +1684,15 @@ function invoiceMatchesFilters(invoice) {
   const query = state.invoiceFilters.query.trim().toLowerCase();
   if (!query) return true;
 
-  return [
+  const tokens = [
     invoice.clientName,
     invoice.agentName,
     invoice.propertyAddress,
     invoice.invoiceNumber,
     invoice.clientEmail
-  ].some((value) => String(value || '').toLowerCase().includes(query));
+  ].flatMap(invoiceSearchTokens);
+  const terms = invoiceSearchTokens(query);
+  return terms.length > 0 && terms.every((term) => invoiceSearchTermMatches(tokens, term));
 }
 
 function renderWages() {
