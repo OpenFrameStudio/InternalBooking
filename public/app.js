@@ -2,6 +2,15 @@ const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 const workNoticeDismissedKey = 'openframe.workNoticeDismissed.v1';
 const showSendLogsInUi = false;
+const invoiceCopyEmail = 'barry.gao@openframe.studio';
+const invoiceEmailRoutingOverrides = [
+  {
+    names: ['McConnell Bourn', 'Eric (McConnell Bourn)'],
+    agentName: 'Eric',
+    to: ['Ashley.l@mhstay.com.au'],
+    cc: ['Kate.p@mhstay.com.au']
+  }
+];
 
 const el = {
   bookingForm: $('#bookingForm'),
@@ -1475,8 +1484,84 @@ function invoicePrintTitle(invoice) {
   return [invoice.invoiceNumber, invoice.propertyAddress, 'Tax Invoice'].filter(Boolean).join(' - ');
 }
 
+function normalizeInvoiceMatchValue(value) {
+  return String(value || '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/\b(pty|ltd|limited|proprietary|company|co|the)\b/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+function compactInvoiceMatchValue(value) {
+  return normalizeInvoiceMatchValue(value).replace(/\s+/g, '');
+}
+
+function invoiceNameMatches(left, right) {
+  const leftKey = normalizeInvoiceMatchValue(left);
+  const rightKey = normalizeInvoiceMatchValue(right);
+  if (!leftKey || !rightKey) return false;
+  if (leftKey === rightKey || leftKey.includes(rightKey) || rightKey.includes(leftKey)) return true;
+
+  const leftCompact = compactInvoiceMatchValue(left);
+  const rightCompact = compactInvoiceMatchValue(right);
+  return Boolean(leftCompact && rightCompact && leftCompact === rightCompact);
+}
+
+function invoiceEmailRoutingOverride(invoice) {
+  return invoiceEmailRoutingOverrides.find((override) => {
+    const agentMatches = !override.agentName
+      || invoiceNameMatches(invoice.agentName, override.agentName)
+      || invoiceNameMatches(invoice.clientName, override.agentName);
+    return agentMatches && override.names.some((name) => invoiceNameMatches(invoice.clientName, name));
+  }) || null;
+}
+
+function invoiceClientScore(invoice, client) {
+  let score = 0;
+  if (invoiceNameMatches(invoice.clientName, client.name)) score += 6;
+  if (invoiceNameMatches(invoice.agentName, client.agentName)) score += 4;
+  if (client.email && invoice.clientEmail && emailsOverlap(client.email, invoice.clientEmail)) score += 3;
+  return score;
+}
+
+function invoiceBillingClient(invoice) {
+  return state.clients
+    .map((client) => ({ client, score: invoiceClientScore(invoice, client) }))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score)[0]?.client || null;
+}
+
 function invoiceRecipientEmails(invoice) {
-  return uniqueEmails(parseEmails(invoice.clientEmail || '')).filter(isEmail);
+  const routingOverride = invoiceEmailRoutingOverride(invoice);
+  const billingClient = invoiceBillingClient(invoice);
+  return uniqueEmails([
+    ...(routingOverride?.to || []),
+    ...(!routingOverride ? parseEmails(invoice.clientEmail || billingClient?.email || '') : [])
+  ]).filter(isEmail);
+}
+
+function invoiceCcEmails(invoice, recipients = []) {
+  const routingOverride = invoiceEmailRoutingOverride(invoice);
+  const billingClient = invoiceBillingClient(invoice);
+  const recipientSet = new Set(recipients.map((email) => email.toLowerCase()));
+  return uniqueEmails([
+    ...parseEmails(invoice.invoiceCcEmail || invoice.clientCcEmail || invoice.ccEmail || ''),
+    ...parseEmails(billingClient?.invoiceCcEmail || billingClient?.clientCcEmail || billingClient?.ccEmail || ''),
+    ...(routingOverride?.cc || [])
+  ])
+    .filter(isEmail)
+    .filter((email) => !recipientSet.has(email.toLowerCase()));
+}
+
+function invoiceBccEmails(recipients = [], ccRecipients = []) {
+  const visibleSet = new Set([...recipients, ...ccRecipients].map((email) => email.toLowerCase()));
+  return uniqueEmails(parseEmails(invoiceCopyEmail))
+    .filter(isEmail)
+    .filter((email) => !visibleSet.has(email.toLowerCase()));
 }
 
 function wageRecipientEmails(wage) {
@@ -2535,13 +2620,21 @@ async function sendInvoice(id) {
   if (!invoice) return;
 
   const recipients = invoiceRecipientEmails(invoice);
+  const ccRecipients = invoiceCcEmails(invoice, recipients);
+  const bccRecipients = invoiceBccEmails(recipients, ccRecipients);
   if (!recipients.length) {
     setMessage(el.invoiceMessage, 'Add a client email before sending this invoice.', 'error');
     return;
   }
 
   const sendAction = invoice.sentAt ? 'Resend' : 'Send';
-  if (!window.confirm(`${sendAction} ${invoice.invoiceNumber} to ${recipients.join(', ')}?`)) {
+  const confirmLines = [
+    `${sendAction} ${invoice.invoiceNumber}?`,
+    `To: ${recipients.join(', ')}`,
+    ccRecipients.length ? `CC: ${ccRecipients.join(', ')}` : '',
+    bccRecipients.length ? `BCC: ${bccRecipients.join(', ')}` : ''
+  ].filter(Boolean);
+  if (!window.confirm(confirmLines.join('\n'))) {
     return;
   }
 
@@ -2550,7 +2643,7 @@ async function sendInvoice(id) {
     const { response, data } = await fetchJson(`/api/invoices/${encodeURIComponent(id)}/send`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ to: recipients })
+      body: JSON.stringify({ to: recipients, cc: ccRecipients })
     });
     if (!response.ok) {
       setMessage(el.invoiceMessage, (data.errors || ['Could not send invoice.']).join(' '), 'error');
