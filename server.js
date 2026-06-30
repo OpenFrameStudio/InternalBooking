@@ -4350,19 +4350,22 @@ function larkCommandField(text, label) {
   return String(match?.[1] || "").trim();
 }
 
-function parseLarkWorkAssignmentCommand(text, workState) {
+function parseWorkAssignmentCommand(text, workState, options = {}) {
   const trimmed = String(text || "").trim();
-  const commandMatch =
-    trimmed.match(/^\/?(?:assign|task)\s+(?:to\s+)?([a-z][a-z0-9 _-]*?)\s*[:\-]\s*([\s\S]+)$/i)
-    || trimmed.match(/^\/?(faye)\s*[:\-]\s*([\s\S]+)$/i)
-    || trimmed.match(/^\/?(?:assign|task)\s*[:\-]\s*([\s\S]+)$/i);
-  if (!commandMatch) {
+  const namedCommandMatch = trimmed.match(/^\/?(?:assign|task)\s+(?:to\s+)?([a-z][a-z0-9 _-]*?)\s*[:\-]\s*([\s\S]+)$/i);
+  const defaultCommandMatch = trimmed.match(/^\/?(?:assign|task)\s*[:\-]\s*([\s\S]+)$/i);
+  const directEmployeeMatch = trimmed.match(/^\/?([a-z][a-z0-9 _-]*?)\s*[:\-]\s*([\s\S]+)$/i);
+
+  if (!namedCommandMatch && !defaultCommandMatch && !directEmployeeMatch) {
     return null;
   }
 
-  const hasEmployee = commandMatch.length === 3;
-  const employeeName = hasEmployee ? commandMatch[1] : defaultWorkEmployee.name;
-  const body = String(hasEmployee ? commandMatch[2] : commandMatch[1]).trim();
+  const employeeName = namedCommandMatch
+    ? namedCommandMatch[1]
+    : defaultCommandMatch
+      ? options.defaultEmployeeName || defaultWorkEmployee.name
+      : directEmployeeMatch[1];
+  const body = String(namedCommandMatch?.[2] || defaultCommandMatch?.[1] || directEmployeeMatch?.[2] || "").trim();
   const employee = findWorkEmployeeByName(workState, employeeName);
   if (!employee) {
     return {
@@ -4391,13 +4394,21 @@ function parseLarkWorkAssignmentCommand(text, workState) {
       dueDate: parseLarkCommandDueDate(body),
       priority: parseLarkCommandPriority(body),
       notes: [
-        "Assigned from Lark.",
+        options.notePrefix || "Assigned from Quick Assign.",
         "",
         body
       ].join("\n").trim(),
-      source: "lark-command"
+      source: options.source || "quick-command"
     }
   };
+}
+
+function parseLarkWorkAssignmentCommand(text, workState) {
+  return parseWorkAssignmentCommand(text, workState, {
+    defaultEmployeeName: defaultWorkEmployee.name,
+    notePrefix: "Assigned from Lark.",
+    source: "lark-command"
+  });
 }
 
 function larkWorkCommandHelpText() {
@@ -4425,6 +4436,41 @@ function larkWorkCommandReplyText(assignment, workLarkNotification, workInvite) 
     `Priority: ${assignment.priority}`,
     notification || "Saved in the Work page."
   ].join("\n");
+}
+
+async function createWorkAssignmentFromQuickCommand(commandText) {
+  const workState = await loadWorkState();
+  const parsed = parseWorkAssignmentCommand(commandText, workState, {
+    defaultEmployeeName: defaultWorkEmployee.name,
+    notePrefix: "Assigned from Quick Assign.",
+    source: "quick-command"
+  });
+  if (!parsed) {
+    return {
+      errors: [
+        "Use a command like: Faye: Follow up with client. Due Friday. High priority."
+      ]
+    };
+  }
+  if (parsed.errors?.length) {
+    return { errors: parsed.errors };
+  }
+
+  const { errors, assignment } = validateWorkAssignment(parsed.assignmentInput, null, workState);
+  if (errors.length) {
+    return { errors };
+  }
+
+  workState.assignments.push(assignment);
+  const workInvite = await sendWorkInviteEmails(workState, [assignment]);
+  const workLarkNotification = await sendWorkLarkNotifications(workState, [assignment]);
+  await saveWorkState(workState);
+
+  return {
+    assignment,
+    workInvite,
+    workLarkNotification
+  };
 }
 
 async function createWorkAssignmentFromLarkCommand(command) {
@@ -6863,6 +6909,38 @@ async function handleApi(req, res, url) {
       workInvite,
       workLarkNotification,
       workLarkNotificationMessage: workLarkNotificationMessage(workLarkNotification),
+      workInviteMessage: workNotificationMessage,
+      user: currentUser(req)
+    });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/work/assignments/quick") {
+    if (!requirePermission(req, res, "manage_work", "Boss or team leader only.")) {
+      return;
+    }
+
+    const input = await readBody(req);
+    const command = String(input.command || input.text || "").trim();
+    if (!command) {
+      sendJson(res, 400, { errors: ["Enter a quick assignment."] });
+      return;
+    }
+
+    const result = await createWorkAssignmentFromQuickCommand(command);
+    if (result.errors?.length) {
+      sendJson(res, 400, { errors: result.errors });
+      return;
+    }
+
+    const workState = await loadWorkState();
+    const workNotificationMessage = workAssignmentNotificationMessage(result.workLarkNotification, result.workInvite);
+    sendJson(res, 201, {
+      assignment: result.assignment,
+      ...visibleWorkStateForUser(workState, currentUser(req)),
+      workInvite: result.workInvite,
+      workLarkNotification: result.workLarkNotification,
+      workLarkNotificationMessage: workLarkNotificationMessage(result.workLarkNotification),
       workInviteMessage: workNotificationMessage,
       user: currentUser(req)
     });

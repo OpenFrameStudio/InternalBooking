@@ -16,11 +16,11 @@
     <link rel="icon" type="image/png" sizes="48x48" href="/favicon-48.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
     <link rel="stylesheet" href="/styles.css" />
-    <link rel="stylesheet" href="/work/styles.css?v=boss-notify" />
+    <link rel="stylesheet" href="/work/styles.css?v=quick-assign" />
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
     <script src="/install.js" defer></script>
     <script src="/session-keepalive.js?v=monthly-session" defer></script>
-    <script src="/work/app.js?v=boss-notify" type="module"></script>
+    <script src="/work/app.js?v=quick-assign" type="module"></script>
   </head>
   <body>
     <main class="shell">
@@ -128,6 +128,20 @@
                 </button>
               </div>
             </div>
+
+            <section class="quick-assign-panel" id="quickAssignPanel" aria-label="Quick assign">
+              <form id="quickAssignForm">
+                <label>
+                  <span>Quick Assign</span>
+                  <textarea id="quickAssignInput" rows="2" placeholder="Faye: Follow up with client. Due Friday. High priority."></textarea>
+                </label>
+                <button class="primary-button" id="quickAssignButton" type="submit">
+                  <i data-lucide="send"></i>
+                  <span>Create task</span>
+                </button>
+              </form>
+              <p id="quickAssignMessage" role="status"></p>
+            </section>
 
             <section class="assignment-notice" id="assignmentNotice" hidden aria-live="polite">
               <div class="assignment-notice-copy">

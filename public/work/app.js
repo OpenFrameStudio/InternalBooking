@@ -53,6 +53,11 @@ const el = {
   messageList: $("#messageList"),
   messagePanel: $("#messagePanel"),
   openCount: $("#openCount"),
+  quickAssignButton: $("#quickAssignButton"),
+  quickAssignForm: $("#quickAssignForm"),
+  quickAssignInput: $("#quickAssignInput"),
+  quickAssignMessage: $("#quickAssignMessage"),
+  quickAssignPanel: $("#quickAssignPanel"),
   sessionPill: $("#sessionPill"),
   summaryLine: $("#summaryLine"),
   syncBookingsButton: $("#syncBookingsButton"),
@@ -98,6 +103,10 @@ const state = {
     loggingOut: false,
     notifyingAssignmentId: "",
     notificationPermission: getNotificationPermission(),
+    quickAssignError: "",
+    quickAssignMessage: "",
+    quickAssignSubmitting: false,
+    quickAssignText: "",
     syncInProgress: false,
     toasts: [],
   },
@@ -276,6 +285,7 @@ function assignmentEndpoint(id, action = "") {
 const workApi = {
   load: () => apiFetch("/api/work"),
   syncBookings: () => apiFetch("/api/work/sync-bookings", jsonRequest("POST")),
+  quickAssign: (command) => apiFetch("/api/work/assignments/quick", jsonRequest("POST", { command })),
   createAssignment: (payload) => apiFetch("/api/work/assignments", jsonRequest("POST", payload)),
   updateAssignment: (id, payload) => apiFetch(assignmentEndpoint(id), jsonRequest("PUT", payload)),
   beginAssignment: (id) => apiFetch(assignmentEndpoint(id, "begin"), jsonRequest("POST")),
@@ -513,6 +523,7 @@ function render() {
   renderFayeHistory();
   renderAssignmentNotice();
   renderRoleAccess();
+  renderQuickAssign();
   renderFilters();
   renderMessages();
   renderAssignments();
@@ -545,6 +556,23 @@ function renderRoleAccess() {
   el.bookingSyncPanel.hidden = !canSyncBookings();
   el.enableMessagesButton.hidden = !canViewWorkMessages();
   el.clearMessagesButton.hidden = !canViewWorkMessages();
+  el.quickAssignPanel.hidden = !canManageWork();
+}
+
+function renderQuickAssign() {
+  if (!canManageWork()) return;
+
+  if (el.quickAssignInput.value !== state.ui.quickAssignText) {
+    el.quickAssignInput.value = state.ui.quickAssignText;
+  }
+
+  const label = el.quickAssignButton.querySelector("span");
+  el.quickAssignButton.disabled = state.ui.quickAssignSubmitting || !state.ui.quickAssignText.trim();
+  if (label) label.textContent = state.ui.quickAssignSubmitting ? "Creating" : "Create task";
+
+  const message = state.ui.quickAssignError || state.ui.quickAssignMessage;
+  el.quickAssignMessage.textContent = message;
+  el.quickAssignMessage.classList.toggle("error", Boolean(state.ui.quickAssignError));
 }
 
 function renderMetrics() {
@@ -1172,6 +1200,49 @@ async function handleAssignmentSubmit(event) {
   }
 }
 
+function handleQuickAssignInput() {
+  setUiState({
+    quickAssignText: el.quickAssignInput.value,
+    quickAssignError: "",
+    quickAssignMessage: "",
+  });
+}
+
+async function handleQuickAssignSubmit(event) {
+  event.preventDefault();
+  if (!canManageWork()) return;
+
+  const command = state.ui.quickAssignText.trim();
+  if (!command) {
+    setUiState({ quickAssignError: "Enter a quick assignment." });
+    return;
+  }
+
+  setUiState({
+    quickAssignSubmitting: true,
+    quickAssignError: "",
+    quickAssignMessage: "",
+  });
+
+  try {
+    const data = await workApi.quickAssign(command);
+    const message = data.workInviteMessage || data.workLarkNotificationMessage || "Task created.";
+    setWorkData(data, {
+      filter: "open",
+      quickAssignError: "",
+      quickAssignMessage: message,
+      quickAssignSubmitting: false,
+      quickAssignText: "",
+    });
+    showToast(message);
+  } catch (error) {
+    setUiState({
+      quickAssignError: error.message,
+      quickAssignSubmitting: false,
+    });
+  }
+}
+
 async function beginAssignment(id) {
   const assignmentBeforeUpdate = state.assignments.find((item) => item.id === id);
   if (!canCompleteAssignment(assignmentBeforeUpdate) || assignmentBeforeUpdate?.status === "done" || assignmentBeforeUpdate?.startedAt) return;
@@ -1342,6 +1413,8 @@ function wireEvents() {
   el.syncBookingsButton.addEventListener("click", syncBookings);
   el.enableMessagesButton.addEventListener("click", enableNotifications);
   el.clearMessagesButton.addEventListener("click", clearMessages);
+  el.quickAssignInput.addEventListener("input", handleQuickAssignInput);
+  el.quickAssignForm.addEventListener("submit", handleQuickAssignSubmit);
 
   el.filterButtons.forEach((button) => {
     button.addEventListener("change", () => {
