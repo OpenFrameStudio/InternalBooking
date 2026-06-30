@@ -160,6 +160,39 @@ When an employee marks work finished, the app sends Barry a Lark notification
 at `barry.gao@openframe.studio` by default. Override it with
 `WORK_COMPLETION_LARK_RECEIVE_ID` if needed.
 
+## Assign Work from Lark
+
+The system can receive Lark bot messages and turn them into Work tasks.
+
+1. In Render, add `LARK_EVENT_VERIFICATION_TOKEN`. Use the verification token
+   from the Lark app event subscription page.
+2. Optional: add `LARK_EVENT_ENCRYPT_KEY` if encrypted Lark callbacks are
+   enabled.
+3. In Lark Open Platform, enable the bot and subscribe to the
+   `im.message.receive_v1` event.
+4. Set the request/callback URL to:
+
+```text
+https://system.openframe.studio/api/lark/events
+```
+
+Example Lark messages:
+
+```text
+Assign Faye: Draft 20 outreach emails. Due Friday. High priority.
+```
+
+```text
+Assign Faye:
+Title: Build a list of 50 Airbnb hosts
+Due: 2026-07-03
+Priority: high
+Details: Find Sydney Airbnb hosts with weak listing photos. Add name, listing link, suburb, and why they may need better photography.
+```
+
+After the task is saved, the bot replies in Lark with the created task title,
+due date, priority, and notification result.
+
 SMTP is still available if `INVOICE_EMAIL_PROVIDER=smtp`, but Render free
 services block outbound SMTP ports such as `465` and `587`.
 

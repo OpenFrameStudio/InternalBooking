@@ -124,6 +124,14 @@ const workCompletionEmailConfig = {
   subjectPrefix: process.env.WORK_COMPLETION_EMAIL_SUBJECT_PREFIX || "Work finished",
   timeoutMs: Number.isFinite(invoiceEmailTimeoutMs) ? invoiceEmailTimeoutMs : 15_000
 };
+const larkEventConfig = {
+  verificationToken: process.env.LARK_EVENT_VERIFICATION_TOKEN || process.env.LARK_VERIFICATION_TOKEN || "",
+  encryptKey: process.env.LARK_EVENT_ENCRYPT_KEY || process.env.LARK_ENCRYPT_KEY || "",
+  allowedSenders: String(process.env.LARK_WORK_COMMAND_ALLOWED_SENDERS || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean)
+};
 const calendarInviteEmailConfig = {
   enabled: normalizeEnvBoolean(process.env.CALENDAR_INVITE_EMAIL_ENABLED, true),
   from: process.env.CALENDAR_INVITE_EMAIL_FROM || invoiceEmailConfig.from,
@@ -4113,6 +4121,401 @@ async function postWorkLarkMessage(token, receiveIdType, receiveId, text) {
   };
 }
 
+async function replyToLarkMessage(messageId, text) {
+  if (!messageId) {
+    return { sent: false, skipped: true, message: "No Lark message ID was provided." };
+  }
+
+  const token = await getTenantAccessToken();
+  const response = await fetch(`${larkConfig.apiBase}/im/v1/messages/${encodeURIComponent(messageId)}/reply`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    body: JSON.stringify({
+      msg_type: "text",
+      content: JSON.stringify({ text })
+    })
+  });
+  const result = await response.json().catch(() => ({}));
+
+  return {
+    sent: response.ok && (result.code === undefined || result.code === 0),
+    message: larkMessageErrorText(response, result),
+    result
+  };
+}
+
+async function replyToLarkCommand(message, text) {
+  try {
+    const replyResult = await replyToLarkMessage(message.messageId, text);
+    if (replyResult.sent || !message.chatId) {
+      return replyResult;
+    }
+
+    const token = await getTenantAccessToken();
+    return await postWorkLarkMessage(token, "chat_id", message.chatId, text);
+  } catch (error) {
+    console.warn("Could not reply to Lark command:", error.message || error);
+    return { sent: false, message: error.message || "Could not reply to Lark." };
+  }
+}
+
+function decryptLarkEventPayload(encrypt) {
+  if (!larkEventConfig.encryptKey) {
+    throw new Error("Add LARK_EVENT_ENCRYPT_KEY before enabling encrypted Lark events.");
+  }
+
+  const encrypted = Buffer.from(String(encrypt || ""), "base64");
+  if (encrypted.length <= 16) {
+    throw new Error("Lark encrypted event payload is invalid.");
+  }
+
+  const key = crypto.createHash("sha256").update(larkEventConfig.encryptKey).digest();
+  const decipher = crypto.createDecipheriv("aes-256-cbc", key, encrypted.subarray(0, 16));
+  let decrypted = decipher.update(encrypted.subarray(16).toString("hex"), "hex", "utf8");
+  decrypted += decipher.final("utf8");
+  return JSON.parse(decrypted);
+}
+
+function decodeLarkEventPayload(input) {
+  if (input?.encrypt) {
+    return decryptLarkEventPayload(input.encrypt);
+  }
+
+  return input || {};
+}
+
+function larkEventToken(payload) {
+  return String(payload?.token || payload?.header?.token || "").trim();
+}
+
+function verifyLarkEventToken(payload) {
+  if (!larkEventConfig.verificationToken) {
+    return false;
+  }
+
+  return safeEquals(larkEventToken(payload), larkEventConfig.verificationToken);
+}
+
+function larkSenderIdentifiers(sender = {}) {
+  const senderId = sender.sender_id || sender.senderId || {};
+  return [
+    senderId.open_id,
+    senderId.user_id,
+    senderId.union_id,
+    sender.open_id,
+    sender.user_id,
+    sender.union_id,
+    sender.sender_id
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+}
+
+function isLarkCommandSenderAllowed(sender = {}) {
+  if (!larkEventConfig.allowedSenders.length) {
+    return true;
+  }
+
+  const senderIds = larkSenderIdentifiers(sender);
+  return senderIds.some((id) => larkEventConfig.allowedSenders.includes(id));
+}
+
+function parseLarkMessageTextContent(content) {
+  let parsed = content;
+  if (typeof content === "string") {
+    try {
+      parsed = JSON.parse(content);
+    } catch {
+      parsed = { text: content };
+    }
+  }
+
+  return String(parsed?.text || "")
+    .replace(/<at\b[^>]*>.*?<\/at>/gi, "")
+    .replace(/\r/g, "")
+    .trim();
+}
+
+function extractLarkWorkCommandMessage(payload) {
+  const eventType = payload?.header?.event_type || payload?.event?.type || payload?.type || "";
+  if (eventType && eventType !== "im.message.receive_v1") {
+    return null;
+  }
+
+  const message = payload?.event?.message || payload?.message || {};
+  const messageType = message.message_type || message.msg_type || "";
+  if (messageType && messageType !== "text") {
+    return null;
+  }
+
+  const text = parseLarkMessageTextContent(message.content || message.body || "");
+  if (!text) {
+    return null;
+  }
+
+  return {
+    eventId: String(payload?.header?.event_id || payload?.event_id || "").trim(),
+    messageId: String(message.message_id || message.messageId || "").trim(),
+    chatId: String(message.chat_id || message.chatId || "").trim(),
+    chatType: String(message.chat_type || message.chatType || "").trim(),
+    text,
+    sender: payload?.event?.sender || payload?.sender || {}
+  };
+}
+
+function findWorkEmployeeByName(workState, name) {
+  const needle = String(name || "").trim().toLowerCase();
+  const employees = Array.isArray(workState?.employees) ? workState.employees : [];
+  if (!needle) {
+    return workEmployeeById(workState, defaultWorkEmployee.id);
+  }
+
+  return employees.find((employee) => {
+    return employee.id === needle || String(employee.name || "").trim().toLowerCase() === needle;
+  }) || null;
+}
+
+function addWorkCommandDays(dateValue, days) {
+  return toDateValue(addDays(parseDateValue(dateValue), days));
+}
+
+function parseLarkCommandDueDate(text) {
+  const today = toDateValue(new Date());
+  const dueMatch = String(text || "").match(/\bdue\s*:?\s*([^\n.;]+)/i);
+  const rawDue = String(dueMatch?.[1] || "").trim().toLowerCase();
+  if (!rawDue) {
+    return today;
+  }
+
+  const isoMatch = rawDue.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
+  if (isoMatch) {
+    return isoMatch[0];
+  }
+
+  const slashMatch = rawDue.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/);
+  if (slashMatch) {
+    const [, day, month, yearValue] = slashMatch;
+    const currentYear = parseDateParts(today)?.year || new Date().getFullYear();
+    const year = yearValue
+      ? (yearValue.length === 2 ? 2000 + Number(yearValue) : Number(yearValue))
+      : currentYear;
+    const candidate = `${year.toString().padStart(4, "0")}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+    if (!Number.isNaN(parseDateValue(candidate).getTime())) {
+      return candidate;
+    }
+  }
+
+  if (/\btoday\b/.test(rawDue)) {
+    return today;
+  }
+  if (/\btomorrow\b/.test(rawDue)) {
+    return addWorkCommandDays(today, 1);
+  }
+
+  const weekdays = {
+    sunday: 0,
+    monday: 1,
+    tuesday: 2,
+    wednesday: 3,
+    thursday: 4,
+    friday: 5,
+    saturday: 6
+  };
+  const weekdayName = Object.keys(weekdays).find((day) => rawDue.includes(day));
+  if (weekdayName) {
+    const base = parseDateValue(today);
+    const targetDay = weekdays[weekdayName];
+    let daysUntil = (targetDay - base.getDay() + 7) % 7;
+    if (rawDue.includes("next") && daysUntil === 0) {
+      daysUntil = 7;
+    }
+    return addWorkCommandDays(today, daysUntil);
+  }
+
+  return today;
+}
+
+function parseLarkCommandPriority(text) {
+  const value = String(text || "").toLowerCase();
+  if (/\b(urgent|asap|high)\b/.test(value)) return "high";
+  if (/\b(low|whenever)\b/.test(value)) return "low";
+  return "normal";
+}
+
+function larkCommandField(text, label) {
+  const match = String(text || "").match(new RegExp(`(?:^|\\n)\\s*${label}\\s*:\\s*([^\\n]+)`, "i"));
+  return String(match?.[1] || "").trim();
+}
+
+function parseLarkWorkAssignmentCommand(text, workState) {
+  const trimmed = String(text || "").trim();
+  const commandMatch =
+    trimmed.match(/^\/?(?:assign|task)\s+(?:to\s+)?([a-z][a-z0-9 _-]*?)\s*[:\-]\s*([\s\S]+)$/i)
+    || trimmed.match(/^\/?(faye)\s*[:\-]\s*([\s\S]+)$/i)
+    || trimmed.match(/^\/?(?:assign|task)\s*[:\-]\s*([\s\S]+)$/i);
+  if (!commandMatch) {
+    return null;
+  }
+
+  const hasEmployee = commandMatch.length === 3;
+  const employeeName = hasEmployee ? commandMatch[1] : defaultWorkEmployee.name;
+  const body = String(hasEmployee ? commandMatch[2] : commandMatch[1]).trim();
+  const employee = findWorkEmployeeByName(workState, employeeName);
+  if (!employee) {
+    return {
+      errors: [`I could not find an employee called ${employeeName}.`]
+    };
+  }
+
+  const explicitTitle = larkCommandField(body, "title");
+  const withoutMetadata = body
+    .replace(/(?:^|\n)\s*(title|due|priority)\s*:\s*[^\n]+/gi, "\n")
+    .replace(/\bdue\s*:?\s*[^\n.;]+/i, "")
+    .replace(/\b(high|normal|low)\s+priority\b/i, "")
+    .replace(/\bpriority\s*:?\s*(high|normal|low)\b/i, "")
+    .trim();
+  const firstLine = withoutMetadata.split(/\n/).map((line) => line.trim()).filter(Boolean)[0] || body;
+  const firstSentence = firstLine.split(/[.;]/).map((part) => part.trim()).filter(Boolean)[0] || firstLine;
+  const title = (explicitTitle || firstSentence).replace(/^[-*]\s*/, "").trim().slice(0, 120);
+  if (!title) {
+    return { errors: ["Please include a task title after Assign Faye:."] };
+  }
+
+  return {
+    assignmentInput: {
+      employeeId: employee.id,
+      title,
+      dueDate: parseLarkCommandDueDate(body),
+      priority: parseLarkCommandPriority(body),
+      notes: [
+        "Assigned from Lark.",
+        "",
+        body
+      ].join("\n").trim(),
+      source: "lark-command"
+    }
+  };
+}
+
+function larkWorkCommandHelpText() {
+  return [
+    "To assign work from Lark, send:",
+    "Assign Faye: Task title. Due Friday. High priority.",
+    "",
+    "You can also use:",
+    "Assign Faye:",
+    "Title: Draft 20 outreach emails",
+    "Due: 2026-07-03",
+    "Priority: high",
+    "Details: Explain exactly what Faye needs to do."
+  ].join("\n");
+}
+
+function larkWorkCommandReplyText(assignment, workLarkNotification, workInvite) {
+  const assignee = assignment.employeeId === defaultWorkEmployee.id
+    ? defaultWorkEmployee.name
+    : assignment.employeeId;
+  const notification = workAssignmentNotificationMessage(workLarkNotification, workInvite);
+  return [
+    `Task assigned to ${assignee}: ${assignment.title}`,
+    `Due: ${formatWorkInviteDueDate(assignment)}`,
+    `Priority: ${assignment.priority}`,
+    notification || "Saved in the Work page."
+  ].join("\n");
+}
+
+async function createWorkAssignmentFromLarkCommand(command) {
+  const workState = await loadWorkState();
+  const sourceId = command.messageId || command.eventId || "";
+  const existing = sourceId
+    ? workState.assignments.find((assignment) => assignment.source === "lark-command" && assignment.sourceId === sourceId)
+    : null;
+  if (existing) {
+    return {
+      assignment: existing,
+      duplicate: true,
+      replyText: `This Lark message was already assigned: ${existing.title}`
+    };
+  }
+
+  const parsed = parseLarkWorkAssignmentCommand(command.text, workState);
+  if (!parsed) {
+    return { ignored: true, replyText: larkWorkCommandHelpText() };
+  }
+  if (parsed.errors?.length) {
+    return { errors: parsed.errors, replyText: parsed.errors.join("\n") };
+  }
+
+  const { errors, assignment } = validateWorkAssignment({
+    ...parsed.assignmentInput,
+    sourceId
+  }, null, workState);
+  if (errors.length) {
+    return { errors, replyText: errors.join("\n") };
+  }
+
+  workState.assignments.push(assignment);
+  const workInvite = await sendWorkInviteEmails(workState, [assignment]);
+  const workLarkNotification = await sendWorkLarkNotifications(workState, [assignment]);
+  await saveWorkState(workState);
+
+  return {
+    assignment,
+    workInvite,
+    workLarkNotification,
+    replyText: larkWorkCommandReplyText(assignment, workLarkNotification, workInvite)
+  };
+}
+
+async function handleLarkEventCallback(req, res) {
+  const rawInput = await readBody(req);
+  let payload;
+
+  try {
+    payload = decodeLarkEventPayload(rawInput);
+  } catch (error) {
+    sendJson(res, 400, { errors: [error.message || "Could not decode Lark event."] });
+    return;
+  }
+
+  if (!verifyLarkEventToken(payload)) {
+    sendJson(res, 401, { errors: ["Lark verification token did not match."] });
+    return;
+  }
+
+  if (payload?.challenge) {
+    sendJson(res, 200, { challenge: payload.challenge });
+    return;
+  }
+
+  const command = extractLarkWorkCommandMessage(payload);
+  if (!command) {
+    sendJson(res, 200, { ok: true, ignored: true });
+    return;
+  }
+
+  if (!isLarkCommandSenderAllowed(command.sender)) {
+    await replyToLarkCommand(command, "This Lark account is not allowed to assign OpenFrame work.");
+    sendJson(res, 200, { ok: true, ignored: true });
+    return;
+  }
+
+  const result = await createWorkAssignmentFromLarkCommand(command);
+  const shouldReply =
+    result.assignment
+    || result.errors?.length
+    || command.chatType === "p2p"
+    || /\b(assign|task|faye)\b/i.test(command.text);
+  if (shouldReply && result.replyText) {
+    await replyToLarkCommand(command, result.replyText);
+  }
+
+  sendJson(res, 200, { ok: true });
+}
+
 function buildWorkInviteEmailHtml(assignment, workState) {
   const employee = workEmployeeForAssignment(workState, assignment);
   const notes = assignment.notes
@@ -5252,6 +5655,14 @@ function isLarkConfigured() {
   return Boolean(larkConfig.appId && larkConfig.appSecret && effectiveLarkCalendarId());
 }
 
+function isLarkAppConfigured() {
+  return Boolean(larkConfig.appId && larkConfig.appSecret);
+}
+
+function isLarkEventCallbackConfigured() {
+  return Boolean(isLarkAppConfigured() && larkEventConfig.verificationToken);
+}
+
 function effectiveLarkCalendarId() {
   return larkConfig.organizerCalendarId || larkConfig.calendarId;
 }
@@ -5678,7 +6089,7 @@ function validateBooking(input) {
 }
 
 async function getTenantAccessToken() {
-  if (!isLarkConfigured()) {
+  if (!isLarkAppConfigured()) {
     throw new Error("Lark is not configured.");
   }
 
@@ -6239,9 +6650,16 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  if (req.method === "POST" && url.pathname === "/api/lark/events") {
+    await handleLarkEventCallback(req, res);
+    return;
+  }
+
   if (req.method === "GET" && url.pathname === "/api/status") {
     sendJson(res, 200, {
       larkConfigured: isLarkConfigured(),
+      larkAppConfigured: isLarkAppConfigured(),
+      larkEventCallbackConfigured: isLarkEventCallbackConfigured(),
       calendarId: effectiveLarkCalendarId(),
       senderEmail: larkConfig.senderEmail,
       senderName: larkConfig.senderName,
