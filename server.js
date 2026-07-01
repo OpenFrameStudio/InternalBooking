@@ -741,15 +741,6 @@ async function updateAuthUserPassword(username, newPassword) {
   return true;
 }
 
-async function resetBossPasswordOverrideForDefaultLogin() {
-  const records = await loadPasswordRecords();
-  const nextRecords = records.filter((record) => !safeEquals(record.username, authConfig.username));
-  if (nextRecords.length === records.length) return;
-
-  await savePasswordRecords(nextRecords);
-  console.log(`Reset saved password override for ${authConfig.username}.`);
-}
-
 function expireOtherSessionsForUser(username, currentToken) {
   for (const [token, session] of sessions.entries()) {
     if (token !== currentToken && safeEquals(session?.user?.username, username)) {
@@ -8411,7 +8402,6 @@ const server = http.createServer(async (req, res) => {
 });
 
 await prepareDataStorage();
-await resetBossPasswordOverrideForDefaultLogin();
 
 server.listen(port, host, () => {
   console.log(`Booking app running at http://${host}:${port}`);
