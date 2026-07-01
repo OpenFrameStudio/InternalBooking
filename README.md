@@ -30,7 +30,7 @@ Default logins:
 - Test employee login: `Test`
 - Test employee password: `1111`
 
-Faye and Test can access Bookings, Clients, and Work. Boss can access Bookings, Clients, Photographers, Invoices, Wages, and Work.
+Faye and Test can access Bookings, Clients, Photographers, and Work. Boss can access Bookings, Clients, Photographers, Invoices, Wages, and Work.
 Work actions are enforced by server-side permissions; hiding buttons in the browser is only for usability.
 
 Work assignments include an assignee dropdown. Faye is the default employee and the default assignee for imported booking work; Test is available as a quiet testing employee account.

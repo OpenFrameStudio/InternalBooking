@@ -161,8 +161,8 @@ const authUsers = [
     label: "Employee",
     name: "Faye",
     employeeId: "faye",
-    apps: ["bookings", "clients", "work"],
-    permissions: ["complete_work", "manage_clients"]
+    apps: ["bookings", "clients", "photographers", "work"],
+    permissions: ["complete_work", "manage_clients", "manage_directory"]
   },
   {
     username: process.env.TEST_EMPLOYEE_USERNAME || "Test",
@@ -171,8 +171,8 @@ const authUsers = [
     label: "Employee",
     name: "Test",
     employeeId: "test",
-    apps: ["bookings", "clients", "work"],
-    permissions: ["complete_work", "manage_clients"]
+    apps: ["bookings", "clients", "photographers", "work"],
+    permissions: ["complete_work", "manage_clients", "manage_directory"]
   }
 ];
 const accountRoleOptions = [
@@ -185,8 +185,8 @@ const accountRoleOptions = [
   {
     value: "employee",
     label: "Employee",
-    apps: ["bookings", "clients", "work"],
-    permissions: ["complete_work", "manage_clients"]
+    apps: ["bookings", "clients", "photographers", "work"],
+    permissions: ["complete_work", "manage_clients", "manage_directory"]
   }
 ];
 const workDeskOrigins = new Set(
