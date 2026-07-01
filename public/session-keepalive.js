@@ -2,7 +2,7 @@ const sessionKeepAliveIntervalMs = 13 * 60 * 1000;
 
 async function refreshSession() {
   try {
-    const response = await fetch("/api/session", {
+    const response = await fetch(`/api/session?_of=${Date.now().toString(36)}`, {
       credentials: "include",
       cache: "no-store"
     });

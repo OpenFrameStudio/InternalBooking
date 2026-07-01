@@ -245,8 +245,14 @@ function canBeginAssignment(assignment) {
   return state.user?.role === "employee" && assignment?.employeeId === state.user?.employeeId;
 }
 
+function uncachedApiUrl(url, options = {}) {
+  const method = String(options.method || "GET").toUpperCase();
+  if (method !== "GET" || !String(url).startsWith("/api/")) return url;
+  return `${url}${String(url).includes("?") ? "&" : "?"}_of=${Date.now().toString(36)}`;
+}
+
 async function apiFetch(url, options = {}) {
-  const response = await fetch(url, {
+  const response = await fetch(uncachedApiUrl(url, options), {
     credentials: "include",
     cache: "no-store",
     headers: {
