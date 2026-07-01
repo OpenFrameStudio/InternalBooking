@@ -248,6 +248,7 @@ function canBeginAssignment(assignment) {
 async function apiFetch(url, options = {}) {
   const response = await fetch(url, {
     credentials: "include",
+    cache: "no-store",
     headers: {
       Accept: "application/json",
       ...(options.body ? { "Content-Type": "application/json" } : {}),

@@ -367,8 +367,12 @@ function refreshLiveData() {
   ]);
 }
 
-async function fetchJson(url, options) {
-  const response = await fetch(url, options);
+async function fetchJson(url, options = {}) {
+  const response = await fetch(url, {
+    credentials: 'include',
+    cache: 'no-store',
+    ...options
+  });
   const data = await response.json().catch(() => ({}));
   if (response.status === 401) {
     window.location.href = '/login';
