@@ -171,8 +171,8 @@ const authUsers = [
     label: "Employee",
     name: "Test",
     employeeId: "test",
-    apps: ["bookings", "work"],
-    permissions: ["complete_work"]
+    apps: ["bookings", "clients", "work"],
+    permissions: ["complete_work", "manage_clients"]
   }
 ];
 const accountRoleOptions = [
@@ -185,8 +185,8 @@ const accountRoleOptions = [
   {
     value: "employee",
     label: "Employee",
-    apps: ["bookings", "work"],
-    permissions: ["complete_work"]
+    apps: ["bookings", "clients", "work"],
+    permissions: ["complete_work", "manage_clients"]
   }
 ];
 const workDeskOrigins = new Set(
