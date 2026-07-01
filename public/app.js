@@ -698,11 +698,9 @@ function setInitialDateTime() {
   let dateValue = today;
   let minutes = Math.ceil((nowParts.hour * 60 + nowParts.minute) / 15) * 15;
 
-  if (minutes < 8 * 60) {
-    minutes = 9 * 60;
-  } else if (minutes >= 18 * 60) {
+  if (minutes >= 24 * 60) {
     dateValue = addDaysToDateValue(dateValue, 1);
-    minutes = 9 * 60;
+    minutes = 0;
   }
 
   el.date.removeAttribute('min');
