@@ -20,17 +20,17 @@
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
     <script src="/install.js" defer></script>
     <script src="/session-keepalive.js?v=api-cache-bust" defer></script>
-    <script src="/work/app.js?v=api-cache-bust" type="module"></script>
+    <script src="/work/app.js?v=employee-nav-access-20260701" type="module"></script>
   </head>
   <body>
     <main class="shell">
       <nav class="top-nav" aria-label="Main navigation">
         <a class="nav-link nav-home" href="/">All apps</a>
-        <a class="nav-link" href="/bookings" data-app-link="bookings">Bookings</a>
-        <a class="nav-link" href="/clients" data-app-link="clients">Clients</a>
-        <a class="nav-link" href="/photographers" data-app-link="photographers">Photographers</a>
-        <a class="nav-link" href="/invoices" data-app-link="invoices">Invoices</a>
-        <a class="nav-link" href="/wages" data-app-link="wages">Wages</a>
+        <a class="nav-link" href="/bookings" data-app-link="bookings" hidden>Bookings</a>
+        <a class="nav-link" href="/clients" data-app-link="clients" hidden>Clients</a>
+        <a class="nav-link" href="/photographers" data-app-link="photographers" hidden>Photographers</a>
+        <a class="nav-link" href="/invoices" data-app-link="invoices" hidden>Invoices</a>
+        <a class="nav-link" href="/wages" data-app-link="wages" hidden>Wages</a>
         <a class="nav-link active" href="/work/" data-app-link="work">Work</a>
         <span class="nav-link nav-status" id="sessionPill">Checking session</span>
         <button class="nav-link nav-action" id="logoutButton" type="button">Log out</button>
