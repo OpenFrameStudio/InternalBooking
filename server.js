@@ -3854,6 +3854,31 @@ function buildWorkInviteEmailSubject(assignment) {
   return `${workInviteEmailConfig.subjectPrefix}: ${assignment.title}`;
 }
 
+function workLarkBotSetupLines() {
+  return [
+    "To receive future work notifications in Lark:",
+    "1. Open Lark.",
+    "2. Search for the OpenFrame Lark app/bot, or open the app if it is already visible.",
+    "3. Add or open the OpenFrame app/bot once.",
+    "4. Send the bot a quick message such as Hello, then leave the app available in Lark.",
+    "After that, new OpenFrame work notifications should be able to reach you directly in Lark."
+  ];
+}
+
+function buildWorkLarkBotSetupEmailText() {
+  return workLarkBotSetupLines().join("\n");
+}
+
+function buildWorkLarkBotSetupEmailHtml() {
+  const [, ...steps] = workLarkBotSetupLines();
+  return `
+    <p><strong>To receive future work notifications in Lark:</strong></p>
+    <ol>
+      ${steps.map((step) => `<li>${escapeHtmlForEmail(step.replace(/^\d+\.\s*/, ""))}</li>`).join("")}
+    </ol>
+  `;
+}
+
 function buildWorkInviteEmailText(assignment, workState) {
   const employee = workEmployeeForAssignment(workState, assignment);
   const lines = [
@@ -3878,6 +3903,8 @@ function buildWorkInviteEmailText(assignment, workState) {
   lines.push(
     "Open the work desk:",
     `${publicAppUrl}/work/`,
+    "",
+    buildWorkLarkBotSetupEmailText(),
     "",
     "Thank you,",
     "OpenFrame Studio"
@@ -4059,7 +4086,7 @@ function isInvalidLarkReceiveIdResult(result) {
 function larkMessageErrorText(response, result) {
   const message = result?.msg || result?.message || `Lark message failed with ${response.status}.`;
   if (String(message).toLowerCase().includes("no availability")) {
-    return "Lark bot is not available to this employee yet. Ask them to open or add the OpenFrame Lark app/bot, or use the email invite instead.";
+    return "Lark bot is not available to this employee yet. The work invite email includes steps for adding the OpenFrame Lark app/bot.";
   }
   if (String(message).includes("contact:user.employee_id:readonly")) {
     return "Lark needs the contact:user.employee_id:readonly permission before it can send notifications by User ID. Add that permission in the Lark Developer app, publish/save it, then retry.";
@@ -4581,6 +4608,7 @@ function buildWorkInviteEmailHtml(assignment, workState) {
       ${notes}
       ${photos}
       <p><a href="${escapeHtmlForEmail(`${publicAppUrl}/work/`)}">Open the work desk</a></p>
+      ${buildWorkLarkBotSetupEmailHtml()}
       <p>Thank you,<br />OpenFrame Studio</p>
     </div>
   `;
