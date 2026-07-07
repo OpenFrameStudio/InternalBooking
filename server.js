@@ -5788,6 +5788,12 @@ function uniqueEmails(emails) {
   return unique;
 }
 
+const automaticBookingInviteEmails = uniqueEmails(parseGuestEmails(
+  process.env.BOOKING_AUTO_INVITE_EMAILS
+    || process.env.CALENDAR_INVITE_EXTRA_EMAILS
+    || "admin@openframe.studio"
+)).filter(isValidEmail);
+
 function formatContact(name, phone) {
   if (name && phone) {
     return `${name} (${phone})`;
@@ -6064,7 +6070,7 @@ function validateBooking(input) {
   const agentName = String(input.agentName || "").trim();
   const agentPhone = String(input.agentPhone || "").trim();
   const rawGuestEmails = parseGuestEmails(input.guestEmails);
-  const guestEmails = uniqueEmails([...clientEmails, photographerEmail, ...rawGuestEmails]);
+  const guestEmails = uniqueEmails([...clientEmails, photographerEmail, ...rawGuestEmails, ...automaticBookingInviteEmails]);
   const notes = String(input.notes || "").trim();
   const bookingDate = String(input.date || input.bookingDate || "").trim();
   const bookingTime = String(input.time || input.bookingTime || "").trim();
