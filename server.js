@@ -633,6 +633,14 @@ function canCompleteWorkAssignment(user, assignment) {
   return user?.role === "boss" || assignment.employeeId === user?.employeeId;
 }
 
+function isEmployeeAccountUser(user) {
+  return (user?.baseRole || user?.role) === "employee";
+}
+
+function shouldNotifyBossForWorkCompletion(assignment, completedBy) {
+  return Boolean(assignment?.employeeId) && (isEmployeeAccountUser(completedBy) || completedBy?.role === "boss");
+}
+
 function sendForbidden(res, message = "You do not have access to that feature.") {
   sendJson(res, 403, { errors: [message] });
 }
@@ -5155,7 +5163,7 @@ async function trySendWorkStartEmailNotification(workState, assignment, startedB
 
 async function trySendWorkCompletionLarkNotification(workState, assignment, completedBy) {
   const summary = {
-    attempted: completedBy?.role === "employee" ? 1 : 0,
+    attempted: shouldNotifyBossForWorkCompletion(assignment, completedBy) ? 1 : 0,
     sent: 0,
     skipped: 0,
     failed: 0,
@@ -5229,7 +5237,7 @@ async function trySendWorkCompletionLarkNotification(workState, assignment, comp
 
 async function trySendWorkCompletionEmailNotification(workState, assignment, completedBy) {
   const summary = {
-    attempted: completedBy?.role === "employee" ? 1 : 0,
+    attempted: shouldNotifyBossForWorkCompletion(assignment, completedBy) ? 1 : 0,
     sent: 0,
     skipped: 0,
     failed: 0,
