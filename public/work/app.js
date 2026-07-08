@@ -217,6 +217,40 @@ function setWorkData(data, uiPatch = {}) {
   });
 }
 
+function optimisticAssignmentSnapshot() {
+  return {
+    assignments: state.assignments,
+    messages: state.messages,
+  };
+}
+
+function restoreOptimisticAssignmentSnapshot(snapshot, uiPatch = {}) {
+  setState({
+    assignments: snapshot.assignments,
+    messages: snapshot.messages,
+    ui: {
+      ...state.ui,
+      ...uiPatch,
+    },
+  });
+}
+
+function applyOptimisticAssignment(id, patch, messageText = "") {
+  const now = new Date().toISOString();
+  const nextMessages = messageText
+    ? [{ id: `local-${id}-${now}`, text: messageText, createdAt: now }, ...state.messages].slice(0, 12)
+    : state.messages;
+
+  setState({
+    assignments: state.assignments.map((assignment) =>
+      assignment.id === id
+        ? { ...assignment, ...patch, updatedAt: patch.updatedAt || now }
+        : assignment
+    ),
+    messages: nextMessages,
+  });
+}
+
 function userCanAccess(app) {
   return Boolean(state.user?.apps?.includes(app));
 }
@@ -1252,28 +1286,58 @@ async function handleQuickAssignSubmit(event) {
 
 async function beginAssignment(id) {
   const assignmentBeforeUpdate = state.assignments.find((item) => item.id === id);
-  if (!canCompleteAssignment(assignmentBeforeUpdate) || assignmentBeforeUpdate?.status === "done" || assignmentBeforeUpdate?.startedAt) return;
+  if (!assignmentBeforeUpdate || !canCompleteAssignment(assignmentBeforeUpdate) || assignmentBeforeUpdate.status === "done" || assignmentBeforeUpdate.startedAt) return;
 
+  const snapshot = optimisticAssignmentSnapshot();
+  const startedAt = new Date().toISOString();
+  const assigneeName = employeeById(assignmentBeforeUpdate.employeeId)?.name || "Employee";
   setUiState({ beginningAssignmentId: id });
+  applyOptimisticAssignment(
+    id,
+    {
+      startedAt,
+      startedBy: state.user?.name || state.user?.username || assigneeName,
+      updatedAt: startedAt,
+    },
+    `${assigneeName} began: ${assignmentBeforeUpdate.title}`
+  );
   try {
     const data = await workApi.beginAssignment(id);
     setWorkData(data, { beginningAssignmentId: "" });
     if (data.workStartNotificationMessage) showToast(data.workStartNotificationMessage);
   } catch (error) {
-    setUiState({ beginningAssignmentId: "" });
+    restoreOptimisticAssignmentSnapshot(snapshot, { beginningAssignmentId: "" });
     showToast(error.message);
   }
 }
 
 async function completeAssignment(id) {
   const assignmentBeforeUpdate = state.assignments.find((item) => item.id === id);
-  if (!canCompleteAssignment(assignmentBeforeUpdate)) return;
+  if (!assignmentBeforeUpdate || !canCompleteAssignment(assignmentBeforeUpdate)) return;
 
-  const data = await workApi.completeAssignment(id);
-  setWorkData(data);
-  const assignment = data.assignments?.find((item) => item.id === id);
-  if (assignment) notifyCompletion(assignment);
-  if (data.workCompletionNotificationMessage) showToast(data.workCompletionNotificationMessage);
+  const snapshot = optimisticAssignmentSnapshot();
+  const completedAt = new Date().toISOString();
+  const assigneeName = employeeById(assignmentBeforeUpdate.employeeId)?.name || "Employee";
+  applyOptimisticAssignment(
+    id,
+    {
+      status: "done",
+      completedAt,
+      updatedAt: completedAt,
+    },
+    `${assigneeName} finished: ${assignmentBeforeUpdate.title}`
+  );
+
+  try {
+    const data = await workApi.completeAssignment(id);
+    setWorkData(data);
+    const assignment = data.assignments?.find((item) => item.id === id);
+    if (assignment) notifyCompletion(assignment);
+    if (data.workCompletionNotificationMessage) showToast(data.workCompletionNotificationMessage);
+  } catch (error) {
+    restoreOptimisticAssignmentSnapshot(snapshot);
+    showToast(error.message);
+  }
 }
 
 async function notifyAssignment(id) {

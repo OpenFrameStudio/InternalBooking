@@ -637,6 +637,10 @@ function isEmployeeAccountUser(user) {
   return (user?.baseRole || user?.role) === "employee";
 }
 
+function shouldNotifyBossForWorkStart(startedBy) {
+  return isEmployeeAccountUser(startedBy);
+}
+
 function shouldNotifyBossForWorkCompletion(assignment, completedBy) {
   return Boolean(assignment?.employeeId) && (isEmployeeAccountUser(completedBy) || completedBy?.role === "boss");
 }
@@ -1086,6 +1090,86 @@ async function loadWorkState() {
 
 async function saveWorkState(workState) {
   await writeStoredJson(dataFiles.work, normalizeWorkState(workState));
+}
+
+const workAssignmentNotificationFields = [
+  "inviteStatus",
+  "inviteSentAt",
+  "inviteTo",
+  "inviteEmailFrom",
+  "inviteError",
+  "larkNotifyStatus",
+  "larkNotifySentAt",
+  "larkNotifyTo",
+  "larkNotifyError",
+  "startNotifyStatus",
+  "startNotifySentAt",
+  "startNotifyTo",
+  "startNotifyError",
+  "startEmailStatus",
+  "startEmailSentAt",
+  "startEmailTo",
+  "startEmailFrom",
+  "startEmailError",
+  "completionNotifyStatus",
+  "completionNotifySentAt",
+  "completionNotifyTo",
+  "completionNotifyError",
+  "completionEmailStatus",
+  "completionEmailSentAt",
+  "completionEmailTo",
+  "completionEmailFrom",
+  "completionEmailError"
+];
+
+function mergeWorkAssignmentNotificationFields(assignment, notificationSource) {
+  let changed = false;
+  const next = { ...assignment };
+
+  for (const field of workAssignmentNotificationFields) {
+    if (!Object.prototype.hasOwnProperty.call(notificationSource, field)) {
+      continue;
+    }
+
+    const value = notificationSource[field] || "";
+    if (next[field] !== value) {
+      next[field] = value;
+      changed = true;
+    }
+  }
+
+  return changed ? next : assignment;
+}
+
+async function saveWorkAssignmentNotificationFields(assignments) {
+  const updates = new Map(
+    (Array.isArray(assignments) ? assignments : [assignments])
+      .filter((assignment) => assignment?.id)
+      .map((assignment) => [assignment.id, assignment])
+  );
+
+  if (!updates.size) {
+    return;
+  }
+
+  const latestWorkState = await loadWorkState();
+  let changed = false;
+  latestWorkState.assignments = latestWorkState.assignments.map((assignment) => {
+    const notificationSource = updates.get(assignment.id);
+    if (!notificationSource) {
+      return assignment;
+    }
+
+    const nextAssignment = mergeWorkAssignmentNotificationFields(assignment, notificationSource);
+    if (nextAssignment !== assignment) {
+      changed = true;
+    }
+    return nextAssignment;
+  });
+
+  if (changed) {
+    await saveWorkState(latestWorkState);
+  }
 }
 
 function visibleWorkStateForUser(workState, user) {
@@ -4470,9 +4554,8 @@ async function createWorkAssignmentFromQuickCommand(commandText) {
   }
 
   workState.assignments.push(assignment);
-  const workInvite = await sendWorkInviteEmails(workState, [assignment]);
-  const workLarkNotification = await sendWorkLarkNotifications(workState, [assignment]);
   await saveWorkState(workState);
+  const { workInvite, workLarkNotification } = queueWorkInviteNotifications([assignment.id]);
 
   return {
     assignment,
@@ -4512,9 +4595,8 @@ async function createWorkAssignmentFromLarkCommand(command) {
   }
 
   workState.assignments.push(assignment);
-  const workInvite = await sendWorkInviteEmails(workState, [assignment]);
-  const workLarkNotification = await sendWorkLarkNotifications(workState, [assignment]);
   await saveWorkState(workState);
+  const { workInvite, workLarkNotification } = queueWorkInviteNotifications([assignment.id]);
 
   return {
     assignment,
@@ -4963,6 +5045,11 @@ async function sendWorkInviteEmails(workState, assignments) {
 
 function workLarkNotificationMessage(summary, context = "saved") {
   if (!summary?.attempted) return "";
+  if (summary.queued) {
+    return context === "manual"
+      ? "Lark notification is sending in the background."
+      : "Work saved. Lark notification is sending in the background.";
+  }
   if (summary.sent) {
     return "Lark notification sent to the employee.";
   }
@@ -5008,7 +5095,7 @@ function workAssignmentNotificationMessage(workLarkSummary, workEmailSummary) {
 
 async function trySendWorkStartLarkNotification(workState, assignment, startedBy) {
   const summary = {
-    attempted: startedBy?.role === "employee" ? 1 : 0,
+    attempted: shouldNotifyBossForWorkStart(startedBy) ? 1 : 0,
     sent: 0,
     skipped: 0,
     failed: 0,
@@ -5082,7 +5169,7 @@ async function trySendWorkStartLarkNotification(workState, assignment, startedBy
 
 async function trySendWorkStartEmailNotification(workState, assignment, startedBy) {
   const summary = {
-    attempted: startedBy?.role === "employee" ? 1 : 0,
+    attempted: shouldNotifyBossForWorkStart(startedBy) ? 1 : 0,
     sent: 0,
     skipped: 0,
     failed: 0,
@@ -5320,7 +5407,9 @@ function workCompletionNotificationMessage(larkSummary, emailSummary = null) {
   const messages = [];
 
   if (emailSummary?.attempted) {
-    if (emailSummary.sent) {
+    if (emailSummary.queued) {
+      messages.push("Finished. Barry's completion email is sending in the background.");
+    } else if (emailSummary.sent) {
       messages.push(`Completion email sent to ${emailSummary.recipients.join(", ")}.`);
     } else if (emailSummary.failed) {
       messages.push(`Finished, but Barry's completion email could not send: ${emailSummary.errors[0] || "unknown error"}`);
@@ -5330,7 +5419,9 @@ function workCompletionNotificationMessage(larkSummary, emailSummary = null) {
   }
 
   if (larkSummary?.attempted) {
-    if (larkSummary.sent) {
+    if (larkSummary.queued) {
+      messages.push("Lark completion notification is sending in the background.");
+    } else if (larkSummary.sent) {
       messages.push("Lark completion notification sent to Barry.");
     } else if (larkSummary.failed) {
       messages.push(`Lark completion notification could not send: ${larkSummary.errors[0] || "unknown error"}`);
@@ -5346,7 +5437,9 @@ function workStartNotificationMessage(larkSummary, emailSummary = null) {
   const messages = [];
 
   if (emailSummary?.attempted) {
-    if (emailSummary.sent) {
+    if (emailSummary.queued) {
+      messages.push("Started. Barry's start email is sending in the background.");
+    } else if (emailSummary.sent) {
       messages.push(`Start email sent to ${emailSummary.recipients.join(", ")}.`);
     } else if (emailSummary.failed) {
       messages.push(`Started, but Barry's start email could not send: ${emailSummary.errors[0] || "unknown error"}`);
@@ -5356,7 +5449,9 @@ function workStartNotificationMessage(larkSummary, emailSummary = null) {
   }
 
   if (larkSummary?.attempted) {
-    if (larkSummary.sent) {
+    if (larkSummary.queued) {
+      messages.push("Lark start notification is sending in the background.");
+    } else if (larkSummary.sent) {
       messages.push("Lark start notification sent to Barry.");
     } else if (larkSummary.failed) {
       messages.push(`Lark start notification could not send: ${larkSummary.errors[0] || "unknown error"}`);
@@ -5370,6 +5465,9 @@ function workStartNotificationMessage(larkSummary, emailSummary = null) {
 
 function workInviteMessage(summary) {
   if (!summary?.attempted) return "";
+  if (summary.queued) {
+    return "Work saved. Email invite is sending in the background.";
+  }
   if (summary.sent) {
     return `Work invite sent from ${workInviteEmailConfig.from} to ${summary.recipients.join(", ")}.`;
   }
@@ -5388,6 +5486,118 @@ function workInviteMessage(summary) {
     return `Work saved. Add the employee's email details to send work invite emails from ${workInviteEmailConfig.from}.`;
   }
   return "";
+}
+
+function queuedWorkNotificationSummary(attempted = 1) {
+  const count = Math.max(0, Number(attempted) || 0);
+  return {
+    attempted: count,
+    queued: count,
+    sent: 0,
+    skipped: 0,
+    failed: 0,
+    recipients: [],
+    errors: [],
+    missing: []
+  };
+}
+
+function runDetachedWorkTask(label, task) {
+  setTimeout(() => {
+    Promise.resolve()
+      .then(task)
+      .catch((error) => {
+        console.warn(`${label} failed:`, error.message || error);
+      });
+  }, 0);
+}
+
+function queueWorkInviteNotifications(assignmentIds) {
+  const ids = [...new Set((Array.isArray(assignmentIds) ? assignmentIds : [assignmentIds]).filter(Boolean))];
+  const summaries = {
+    workInvite: queuedWorkNotificationSummary(ids.length),
+    workLarkNotification: queuedWorkNotificationSummary(ids.length)
+  };
+
+  if (!ids.length) {
+    return summaries;
+  }
+
+  runDetachedWorkTask("Work invite notification queue", async () => {
+    const workState = await loadWorkState();
+    const idSet = new Set(ids);
+    const assignments = workState.assignments.filter((assignment) => idSet.has(assignment.id));
+    if (!assignments.length) {
+      return;
+    }
+
+    await sendWorkInviteEmails(workState, assignments);
+    await sendWorkLarkNotifications(workState, assignments);
+    await saveWorkAssignmentNotificationFields(assignments);
+  });
+
+  return summaries;
+}
+
+function queueWorkStartNotifications(assignmentId, startedBy) {
+  const attempted = shouldNotifyBossForWorkStart(startedBy) ? 1 : 0;
+  const summaries = {
+    workStartNotification: queuedWorkNotificationSummary(attempted),
+    workStartEmailNotification: queuedWorkNotificationSummary(attempted)
+  };
+
+  if (!assignmentId || !attempted) {
+    return summaries;
+  }
+
+  const startedBySnapshot = startedBy ? { ...startedBy } : null;
+  runDetachedWorkTask("Work start notification queue", async () => {
+    const workState = await loadWorkState();
+    const assignment = workState.assignments.find((item) => item.id === assignmentId);
+    if (!assignment || !assignment.startedAt) {
+      return;
+    }
+
+    await trySendWorkStartLarkNotification(workState, assignment, startedBySnapshot);
+    await trySendWorkStartEmailNotification(workState, assignment, startedBySnapshot);
+    await saveWorkAssignmentNotificationFields(assignment);
+  });
+
+  return summaries;
+}
+
+function queueWorkCompletionNotifications(assignmentInput, completedBy) {
+  const assignmentId = typeof assignmentInput === "string" ? assignmentInput : assignmentInput?.id;
+  const completedBySnapshot = completedBy ? { ...completedBy } : null;
+  const willAttempt = Boolean(assignmentId) && shouldNotifyBossForWorkCompletion(
+    typeof assignmentInput === "string" ? { id: assignmentInput, employeeId: defaultWorkEmployee.id } : assignmentInput,
+    completedBy
+  );
+  const summaries = {
+    workCompletionNotification: queuedWorkNotificationSummary(willAttempt ? 1 : 0),
+    workCompletionEmailNotification: queuedWorkNotificationSummary(willAttempt ? 1 : 0)
+  };
+
+  if (!willAttempt) {
+    return summaries;
+  }
+
+  runDetachedWorkTask("Work completion notification queue", async () => {
+    const workState = await loadWorkState();
+    const assignment = workState.assignments.find((item) => item.id === assignmentId);
+    if (!assignment || assignment.status !== "done") {
+      return;
+    }
+
+    await trySendWorkCompletionLarkNotification(workState, assignment, completedBySnapshot);
+    await trySendWorkCompletionEmailNotification(workState, assignment, completedBySnapshot);
+    await saveWorkAssignmentNotificationFields(assignment);
+
+    const invoices = await loadInvoices();
+    await syncInvoiceDatesFromCompletedJobs(invoices, workState);
+  });
+
+  return summaries;
 }
 
 function calendarInviteEmailSetupMissingSettings() {
@@ -6913,10 +7123,10 @@ async function handleApi(req, res, url) {
     const bookings = await loadBookings();
     const result = mergeBookingWorkAssignments(workState, bookings);
     const { createdAssignments, ...syncResult } = result;
-    const workInvite = await sendWorkInviteEmails(workState, createdAssignments);
-    const workLarkNotification = await sendWorkLarkNotifications(workState, createdAssignments);
-    const workNotificationMessage = workAssignmentNotificationMessage(workLarkNotification, workInvite);
+    const createdAssignmentIds = createdAssignments.map((assignment) => assignment.id);
     await saveWorkState(workState);
+    const { workInvite, workLarkNotification } = queueWorkInviteNotifications(createdAssignmentIds);
+    const workNotificationMessage = workAssignmentNotificationMessage(workLarkNotification, workInvite);
     sendJson(res, 200, {
       ...visibleWorkStateForUser(workState, currentUser(req)),
       ...syncResult,
@@ -6975,10 +7185,9 @@ async function handleApi(req, res, url) {
     }
 
     workState.assignments.push(assignment);
-    const workInvite = await sendWorkInviteEmails(workState, [assignment]);
-    const workLarkNotification = await sendWorkLarkNotifications(workState, [assignment]);
-    const workNotificationMessage = workAssignmentNotificationMessage(workLarkNotification, workInvite);
     await saveWorkState(workState);
+    const { workInvite, workLarkNotification } = queueWorkInviteNotifications([assignment.id]);
+    const workNotificationMessage = workAssignmentNotificationMessage(workLarkNotification, workInvite);
     sendJson(res, 201, {
       assignment,
       ...visibleWorkStateForUser(workState, currentUser(req)),
@@ -7005,10 +7214,8 @@ async function handleApi(req, res, url) {
       return;
     }
 
-    const workInvite = await sendWorkInviteEmails(workState, [assignment]);
-    const workLarkNotification = await sendWorkLarkNotifications(workState, [assignment]);
+    const { workInvite, workLarkNotification } = queueWorkInviteNotifications([assignment.id]);
     const workNotificationMessage = workAssignmentNotificationMessage(workLarkNotification, workInvite);
-    await saveWorkState(workState);
     sendJson(res, 200, {
       ...visibleWorkStateForUser(workState, currentUser(req)),
       workInvite,
@@ -7059,20 +7266,11 @@ async function handleApi(req, res, url) {
       createdAt: startedAt
     });
     workState.messages = workState.messages.slice(0, 12);
-    const workStartNotification = await trySendWorkStartLarkNotification(
-      workState,
-      startedAssignment,
-      user
-    );
-    const workStartEmailNotification = await trySendWorkStartEmailNotification(
-      workState,
-      startedAssignment,
-      user
-    );
     workState.assignments = workState.assignments.map((item) =>
       item.id === assignmentId ? startedAssignment : item
     );
     await saveWorkState(workState);
+    const { workStartNotification, workStartEmailNotification } = queueWorkStartNotifications(assignmentId, user);
     sendJson(res, 200, {
       ...visibleWorkStateForUser(workState, user),
       workStartNotification,
@@ -7106,22 +7304,11 @@ async function handleApi(req, res, url) {
       createdAt: completedAt
     });
     workState.messages = workState.messages.slice(0, 12);
-    const workCompletionNotification = await trySendWorkCompletionLarkNotification(
-      workState,
-      completedAssignment,
-      currentUser(req)
-    );
-    const workCompletionEmailNotification = await trySendWorkCompletionEmailNotification(
-      workState,
-      completedAssignment,
-      currentUser(req)
-    );
     workState.assignments = workState.assignments.map((item) =>
       item.id === assignmentId ? completedAssignment : item
     );
     await saveWorkState(workState);
-    const invoices = await loadInvoices();
-    await syncInvoiceDatesFromCompletedJobs(invoices, workState);
+    const { workCompletionNotification, workCompletionEmailNotification } = queueWorkCompletionNotifications(completedAssignment, currentUser(req));
     sendJson(res, 200, {
       ...visibleWorkStateForUser(workState, currentUser(req)),
       workCompletionNotification,
