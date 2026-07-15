@@ -4213,6 +4213,84 @@ async function postWorkLarkMessage(token, receiveIdType, receiveId, text) {
   };
 }
 
+function bossLarkFallbackEmails(receiveIdType, receiveId) {
+  if (receiveIdType !== "email") {
+    return [];
+  }
+
+  const primary = String(receiveId || "").trim().toLowerCase();
+  return uniqueEmails([
+    ...parseGuestEmails(process.env.WORK_COMPLETION_LARK_FALLBACK_EMAILS || ""),
+    ...parseGuestEmails(process.env.BOSS_LARK_FALLBACK_EMAILS || ""),
+    larkConfig.senderEmail,
+    "admin@openframe.studio"
+  ]).filter((email) => isValidEmail(email) && email.toLowerCase() !== primary);
+}
+
+async function sendBossWorkLarkMessage(token, text) {
+  const receiveIdType = workCompletionLarkReceiveIdType();
+  const receiveId = workCompletionLarkReceiveId();
+  const attempts = [
+    { receiveIdType, receiveId },
+    ...bossLarkFallbackEmails(receiveIdType, receiveId).map((email) => ({
+      receiveIdType: "email",
+      receiveId: email
+    }))
+  ];
+  let lastInvalidEmail = "";
+  let lastError = "";
+
+  for (const attempt of attempts) {
+    const firstAttempt = await postWorkLarkMessage(token, attempt.receiveIdType, attempt.receiveId, text);
+    let result = firstAttempt.result;
+    let resolvedOpenId = "";
+
+    if (firstAttempt.ok) {
+      return {
+        sent: true,
+        receiveId: attempt.receiveId,
+        receiveIdType: attempt.receiveIdType,
+        messageId: result.data?.message_id || result.data?.messageId || ""
+      };
+    }
+
+    if (attempt.receiveIdType === "email" && firstAttempt.invalidReceiveId) {
+      lastInvalidEmail = attempt.receiveId;
+      try {
+        resolvedOpenId = await resolveLarkOpenIdByEmail(attempt.receiveId, token);
+      } catch (error) {
+        lastError = `Lark rejected ${attempt.receiveId} and the app could not look up that Lark user ID by email: ${error.message}.`;
+        continue;
+      }
+
+      if (!resolvedOpenId) {
+        lastError = `Lark rejected ${attempt.receiveId} and no Lark user was found for that email.`;
+        continue;
+      }
+
+      const retryAttempt = await postWorkLarkMessage(token, "open_id", resolvedOpenId, text);
+      result = retryAttempt.result;
+      if (retryAttempt.ok) {
+        return {
+          sent: true,
+          receiveId: resolvedOpenId,
+          receiveIdType: "open_id",
+          messageId: result.data?.message_id || result.data?.messageId || ""
+        };
+      }
+
+      lastError = retryAttempt.message;
+      continue;
+    }
+
+    throw new Error(firstAttempt.message);
+  }
+
+  throw new Error(
+    lastError || `Lark rejected ${lastInvalidEmail || receiveId} as the boss notification recipient. Set WORK_COMPLETION_LARK_RECEIVE_ID_TYPE to user_id and WORK_COMPLETION_LARK_RECEIVE_ID to your Lark User ID, or use open_id if you have your Lark open_id.`
+  );
+}
+
 async function replyToLarkMessage(messageId, text) {
   if (!messageId) {
     return { sent: false, skipped: true, message: "No Lark message ID was provided." };
@@ -4730,43 +4808,8 @@ async function sendWorkCompletionLarkNotification(assignment, workState, complet
   }
 
   const token = await getTenantAccessToken();
-  const receiveIdType = workCompletionLarkReceiveIdType();
-  const receiveId = workCompletionLarkReceiveId();
   const text = buildWorkCompletionLarkNotificationText(assignment, workState, completedBy);
-  const firstAttempt = await postWorkLarkMessage(token, receiveIdType, receiveId, text);
-  let resolvedOpenId = "";
-  let result = firstAttempt.result;
-
-  if (!firstAttempt.ok && receiveIdType === "email" && firstAttempt.invalidReceiveId) {
-    try {
-      resolvedOpenId = await resolveLarkOpenIdByEmail(receiveId, token);
-    } catch (error) {
-      throw new Error(
-        `Lark rejected ${receiveId} as the boss notification recipient, and the app could not look up that Lark user ID by email: ${error.message}.`
-      );
-    }
-
-    if (resolvedOpenId) {
-      const retryAttempt = await postWorkLarkMessage(token, "open_id", resolvedOpenId, text);
-      result = retryAttempt.result;
-      if (!retryAttempt.ok) {
-        throw new Error(retryAttempt.message);
-      }
-    } else {
-      throw new Error(
-        `Lark rejected ${receiveId} as the boss notification recipient, and no Lark user was found for that email. Set WORK_COMPLETION_LARK_RECEIVE_ID_TYPE to user_id and WORK_COMPLETION_LARK_RECEIVE_ID to your Lark User ID, or use open_id if you have your Lark open_id.`
-      );
-    }
-  } else if (!firstAttempt.ok) {
-    throw new Error(firstAttempt.message);
-  }
-
-  return {
-    sent: true,
-    receiveId: resolvedOpenId || receiveId,
-    receiveIdType: resolvedOpenId ? "open_id" : receiveIdType,
-    messageId: result.data?.message_id || result.data?.messageId || ""
-  };
+  return sendBossWorkLarkMessage(token, text);
 }
 
 async function sendWorkStartLarkNotification(assignment, workState, startedBy) {
@@ -4776,43 +4819,8 @@ async function sendWorkStartLarkNotification(assignment, workState, startedBy) {
   }
 
   const token = await getTenantAccessToken();
-  const receiveIdType = workCompletionLarkReceiveIdType();
-  const receiveId = workCompletionLarkReceiveId();
   const text = buildWorkStartLarkNotificationText(assignment, workState, startedBy);
-  const firstAttempt = await postWorkLarkMessage(token, receiveIdType, receiveId, text);
-  let resolvedOpenId = "";
-  let result = firstAttempt.result;
-
-  if (!firstAttempt.ok && receiveIdType === "email" && firstAttempt.invalidReceiveId) {
-    try {
-      resolvedOpenId = await resolveLarkOpenIdByEmail(receiveId, token);
-    } catch (error) {
-      throw new Error(
-        `Lark rejected ${receiveId} as the boss notification recipient, and the app could not look up that Lark user ID by email: ${error.message}.`
-      );
-    }
-
-    if (resolvedOpenId) {
-      const retryAttempt = await postWorkLarkMessage(token, "open_id", resolvedOpenId, text);
-      result = retryAttempt.result;
-      if (!retryAttempt.ok) {
-        throw new Error(retryAttempt.message);
-      }
-    } else {
-      throw new Error(
-        `Lark rejected ${receiveId} as the boss notification recipient, and no Lark user was found for that email. Set WORK_COMPLETION_LARK_RECEIVE_ID_TYPE to user_id and WORK_COMPLETION_LARK_RECEIVE_ID to your Lark User ID, or use open_id if you have your Lark open_id.`
-      );
-    }
-  } else if (!firstAttempt.ok) {
-    throw new Error(firstAttempt.message);
-  }
-
-  return {
-    sent: true,
-    receiveId: resolvedOpenId || receiveId,
-    receiveIdType: resolvedOpenId ? "open_id" : receiveIdType,
-    messageId: result.data?.message_id || result.data?.messageId || ""
-  };
+  return sendBossWorkLarkMessage(token, text);
 }
 
 async function sendWorkCompletionEmail(assignment, workState, completedBy) {
