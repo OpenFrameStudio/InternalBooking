@@ -1188,6 +1188,30 @@ function visibleWorkStateForUser(workState, user) {
   };
 }
 
+function wantsMinimalWorkResponse(req) {
+  return String(req.headers.prefer || "").toLowerCase().includes("return=minimal");
+}
+
+function workActionResponse(req, workState, extra = {}) {
+  const user = currentUser(req);
+  if (!wantsMinimalWorkResponse(req)) {
+    return {
+      ...extra,
+      ...visibleWorkStateForUser(workState, user),
+      user
+    };
+  }
+
+  const visibleState = visibleWorkStateForUser(workState, user);
+  return {
+    ...extra,
+    employee: visibleState.employee,
+    employees: visibleState.employees,
+    messages: visibleState.messages,
+    user
+  };
+}
+
 function timeZoneDateParts(date, timeZone = bookingTimeZone) {
   const parts = Object.fromEntries(new Intl.DateTimeFormat("en-AU", {
     timeZone,
@@ -4637,6 +4661,7 @@ async function createWorkAssignmentFromQuickCommand(commandText) {
 
   return {
     assignment,
+    workState,
     workInvite,
     workLarkNotification
   };
@@ -4678,6 +4703,7 @@ async function createWorkAssignmentFromLarkCommand(command) {
 
   return {
     assignment,
+    workState,
     workInvite,
     workLarkNotification,
     replyText: larkWorkCommandReplyText(assignment, workLarkNotification, workInvite)
@@ -7165,17 +7191,15 @@ async function handleApi(req, res, url) {
       return;
     }
 
-    const workState = await loadWorkState();
+    const workState = result.workState || await loadWorkState();
     const workNotificationMessage = workAssignmentNotificationMessage(result.workLarkNotification, result.workInvite);
-    sendJson(res, 201, {
+    sendJson(res, 201, workActionResponse(req, workState, {
       assignment: result.assignment,
-      ...visibleWorkStateForUser(workState, currentUser(req)),
       workInvite: result.workInvite,
       workLarkNotification: result.workLarkNotification,
       workLarkNotificationMessage: workLarkNotificationMessage(result.workLarkNotification),
       workInviteMessage: workNotificationMessage,
-      user: currentUser(req)
-    });
+    }));
     return;
   }
 
@@ -7196,15 +7220,13 @@ async function handleApi(req, res, url) {
     await saveWorkState(workState);
     const { workInvite, workLarkNotification } = queueWorkInviteNotifications([assignment.id]);
     const workNotificationMessage = workAssignmentNotificationMessage(workLarkNotification, workInvite);
-    sendJson(res, 201, {
+    sendJson(res, 201, workActionResponse(req, workState, {
       assignment,
-      ...visibleWorkStateForUser(workState, currentUser(req)),
       workInvite,
       workLarkNotification,
       workLarkNotificationMessage: workLarkNotificationMessage(workLarkNotification),
       workInviteMessage: workNotificationMessage,
-      user: currentUser(req)
-    });
+    }));
     return;
   }
 
@@ -7257,11 +7279,11 @@ async function handleApi(req, res, url) {
     }
 
     if (assignment.startedAt) {
-      sendJson(res, 200, {
-        ...visibleWorkStateForUser(workState, user),
+      sendJson(res, 200, workActionResponse(req, workState, {
+        assignment,
         workStartNotificationMessage: "Work already started.",
         user
-      });
+      }));
       return;
     }
 
@@ -7279,13 +7301,13 @@ async function handleApi(req, res, url) {
     );
     await saveWorkState(workState);
     const { workStartNotification, workStartEmailNotification } = queueWorkStartNotifications(assignmentId, user);
-    sendJson(res, 200, {
-      ...visibleWorkStateForUser(workState, user),
+    sendJson(res, 200, workActionResponse(req, workState, {
+      assignment: startedAssignment,
       workStartNotification,
       workStartEmailNotification,
       workStartNotificationMessage: workStartNotificationMessage(workStartNotification, workStartEmailNotification),
       user
-    });
+    }));
     return;
   }
 
@@ -7317,13 +7339,12 @@ async function handleApi(req, res, url) {
     );
     await saveWorkState(workState);
     const { workCompletionNotification, workCompletionEmailNotification } = queueWorkCompletionNotifications(completedAssignment, currentUser(req));
-    sendJson(res, 200, {
-      ...visibleWorkStateForUser(workState, currentUser(req)),
+    sendJson(res, 200, workActionResponse(req, workState, {
+      assignment: completedAssignment,
       workCompletionNotification,
       workCompletionEmailNotification,
       workCompletionNotificationMessage: workCompletionNotificationMessage(workCompletionNotification, workCompletionEmailNotification),
-      user: currentUser(req)
-    });
+    }));
     return;
   }
 

@@ -203,11 +203,22 @@ function setUiState(patch = {}) {
   render();
 }
 
+function mergeAssignment(assignments, assignment) {
+  if (!assignment?.id) return assignments;
+  const exists = assignments.some((item) => item.id === assignment.id);
+  if (!exists) return [assignment, ...assignments];
+  return assignments.map((item) => item.id === assignment.id ? assignment : item);
+}
+
 function setWorkData(data, uiPatch = {}) {
+  const assignments = Array.isArray(data.assignments)
+    ? data.assignments
+    : mergeAssignment(state.assignments, data.assignment);
+
   setState({
     employee: data.employee || state.employee,
     employees: Array.isArray(data.employees) && data.employees.length ? data.employees : state.employees,
-    assignments: Array.isArray(data.assignments) ? data.assignments : state.assignments,
+    assignments,
     messages: Array.isArray(data.messages) ? data.messages : state.messages,
     user: data.user || state.user,
     ui: {
@@ -286,15 +297,16 @@ function uncachedApiUrl(url, options = {}) {
 }
 
 async function apiFetch(url, options = {}) {
+  const { headers: optionHeaders = {}, ...fetchOptions } = options;
   const response = await fetch(uncachedApiUrl(url, options), {
+    ...fetchOptions,
     credentials: "include",
     cache: "no-store",
     headers: {
       Accept: "application/json",
       ...(options.body ? { "Content-Type": "application/json" } : {}),
-      ...(options.headers || {}),
+      ...optionHeaders,
     },
-    ...options,
   });
 
   const data = await response.json().catch(() => ({}));
@@ -311,11 +323,16 @@ async function apiFetch(url, options = {}) {
   return data;
 }
 
-function jsonRequest(method, body = null) {
+function jsonRequest(method, body = null, headers = {}) {
   return {
     method,
+    headers,
     ...(body ? { body: JSON.stringify(body) } : {}),
   };
+}
+
+function minimalJsonRequest(method, body = null) {
+  return jsonRequest(method, body, { Prefer: "return=minimal" });
 }
 
 function assignmentEndpoint(id, action = "") {
@@ -326,11 +343,11 @@ function assignmentEndpoint(id, action = "") {
 const workApi = {
   load: () => apiFetch("/api/work"),
   syncBookings: () => apiFetch("/api/work/sync-bookings", jsonRequest("POST")),
-  quickAssign: (command) => apiFetch("/api/work/assignments/quick", jsonRequest("POST", { command })),
-  createAssignment: (payload) => apiFetch("/api/work/assignments", jsonRequest("POST", payload)),
+  quickAssign: (command) => apiFetch("/api/work/assignments/quick", minimalJsonRequest("POST", { command })),
+  createAssignment: (payload) => apiFetch("/api/work/assignments", minimalJsonRequest("POST", payload)),
   updateAssignment: (id, payload) => apiFetch(assignmentEndpoint(id), jsonRequest("PUT", payload)),
-  beginAssignment: (id) => apiFetch(assignmentEndpoint(id, "begin"), jsonRequest("POST")),
-  completeAssignment: (id) => apiFetch(assignmentEndpoint(id, "complete"), jsonRequest("POST")),
+  beginAssignment: (id) => apiFetch(assignmentEndpoint(id, "begin"), minimalJsonRequest("POST")),
+  completeAssignment: (id) => apiFetch(assignmentEndpoint(id, "complete"), minimalJsonRequest("POST")),
   notifyAssignment: (id) => apiFetch(assignmentEndpoint(id, "notify"), jsonRequest("POST")),
   reopenAssignment: (id) => apiFetch(assignmentEndpoint(id, "reopen"), jsonRequest("POST")),
   deleteAssignment: (id) => apiFetch(assignmentEndpoint(id), jsonRequest("DELETE")),
@@ -1331,7 +1348,7 @@ async function completeAssignment(id) {
   try {
     const data = await workApi.completeAssignment(id);
     setWorkData(data);
-    const assignment = data.assignments?.find((item) => item.id === id);
+    const assignment = data.assignment || data.assignments?.find((item) => item.id === id);
     if (assignment) notifyCompletion(assignment);
     if (data.workCompletionNotificationMessage) showToast(data.workCompletionNotificationMessage);
   } catch (error) {
